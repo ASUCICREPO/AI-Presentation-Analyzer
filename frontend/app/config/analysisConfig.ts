@@ -20,9 +20,6 @@ export const ANALYSIS_CONFIG = {
     
     // How long the user must hold gaze at center to reset the alert state
     LOOK_BACK_THRESHOLD_MS: 500,
-    
-    // Cooldown between alerts (legacy/fallback)
-    ALERT_COOLDOWN_MS: 2000,
   },
 
   // Audio Feedback Configuration
