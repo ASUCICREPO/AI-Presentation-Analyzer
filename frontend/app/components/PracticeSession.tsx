@@ -18,8 +18,10 @@ import {
   Eye,
   Mic,
   Volume2,
+  VolumeX,
   X,
-  LogOut
+  LogOut,
+  Info
 } from 'lucide-react';
 
 interface PracticeSessionProps {
@@ -33,18 +35,10 @@ interface FeedbackEvent {
   type: 'warning' | 'info' | 'success';
 }
 
-// Blendshape thresholds for gaze detection
-const GAZE_THRESHOLDS = {
-  LOOK_LEFT: 0.5,
-  LOOK_RIGHT: 0.5,
-  LOOK_UP: 0.3, 
-  LOOK_DOWN: 0.5,
-};
+import { ANALYSIS_CONFIG } from '../config/analysisConfig';
 
-const ALERT_COOLDOWN_MS = 2000;
-const GRACE_PERIOD_MS = 3000; // 3 seconds grace period
-const FPS_LIMIT = 30;
-const FRAME_INTERVAL = 1000 / FPS_LIMIT;
+// Removed hardcoded constants - using ANALYSIS_CONFIG instead
+
 
 export default function PracticeSession({ onBack, onComplete }: PracticeSessionProps) {
   const [isRecording, setIsRecording] = useState(false);
@@ -59,15 +53,16 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
   const animationFrameRef = useRef<number | null>(null);
   const lastProcessTimeRef = useRef<number>(0);
   
-  // Eye Contact Tracking Refs
-  const eyeContactScoreRef = useRef(100);
-  const totalSessionTimeRef = useRef(0);
-  const focusedTimeRef = useRef(0);
+  // Audio Feedback State
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  
+  // Eye Contact Logic Refs
   const lookAwayStartTimeRef = useRef<number | null>(null);
-  const lastFrameTimeRef = useRef<number>(0);
+  const lookBackStartTimeRef = useRef<number | null>(null);
+  const alertPlayedRef = useRef(false);
   
   // Metrics State
-  const [realTimeEyeContact, setRealTimeEyeContact] = useState(100);
   const [faceCount, setFaceCount] = useState(0);
   
   // New Calibration Mode State
@@ -95,6 +90,42 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
     minFaceDetectionConfidence: 0.5,
     minTrackingConfidence: 0.5,
   });
+
+  // Initialize Audio Context
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    return () => {
+      audioContextRef.current?.close();
+    };
+  }, []);
+
+  const playAlertSound = useCallback(() => {
+    if (!audioContextRef.current || !soundEnabled) return;
+    
+    // Resume context if suspended (browser policy)
+    if (audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume();
+    }
+
+    const ctx = audioContextRef.current;
+    
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    
+    oscillator.frequency.setValueAtTime(ANALYSIS_CONFIG.AUDIO.FREQUENCY_START, ctx.currentTime);
+    oscillator.type = 'sine';
+    
+    gainNode.gain.setValueAtTime(ANALYSIS_CONFIG.AUDIO.GAIN_START, ctx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(ANALYSIS_CONFIG.AUDIO.GAIN_END, ctx.currentTime + ANALYSIS_CONFIG.AUDIO.DURATION);
+    
+    oscillator.start(ctx.currentTime);
+    oscillator.stop(ctx.currentTime + ANALYSIS_CONFIG.AUDIO.DURATION);
+  }, [soundEnabled]);
 
   // Timer logic
   useEffect(() => {
@@ -129,8 +160,9 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
     const eyesWide = (scores.eyeWideLeft + scores.eyeWideRight) / 2;
     const isSurprised = eyesWide > 0.4;
     
-    const currentThreshold = isSurprised ? 0.7 : 0.5;
-    const lookUpThreshold = isSurprised ? 0.6 : 0.3;
+    const { SURPRISE_MULTIPLIER } = ANALYSIS_CONFIG.GAZE_THRESHOLDS;
+    const currentThreshold = isSurprised ? SURPRISE_MULTIPLIER.GENERAL : 0.5;
+    const lookUpThreshold = isSurprised ? SURPRISE_MULTIPLIER.LOOK_UP : 0.3;
 
     const lookLeft = (scores.eyeLookInRight + scores.eyeLookOutLeft) / 2;
     const lookRight = (scores.eyeLookInLeft + scores.eyeLookOutRight) / 2;
@@ -142,24 +174,26 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
     let color = 'text-green-600';
     let direction = 'Center';
 
-    if (lookLeft > currentThreshold) {
+    const { GAZE_THRESHOLDS } = ANALYSIS_CONFIG;
+
+    if (lookLeft > GAZE_THRESHOLDS.LOOK_LEFT) {
       isLookingAtScreen = false;
-      message = 'Looking Left';
+      message = 'Please maintain eye contact (Looking Left)';
       color = 'text-red-600';
       direction = 'Left';
-    } else if (lookRight > currentThreshold) {
+    } else if (lookRight > GAZE_THRESHOLDS.LOOK_RIGHT) {
       isLookingAtScreen = false;
-      message = 'Looking Right';
+      message = 'Please maintain eye contact (Looking Right)';
       color = 'text-red-600';
       direction = 'Right';
     } else if (lookUp > lookUpThreshold) {
       isLookingAtScreen = false;
-      message = 'Looking Up';
+      message = 'Please maintain eye contact (Looking Up)';
       color = 'text-orange-600';
       direction = 'Up';
-    } else if (lookDown > currentThreshold) {
+    } else if (lookDown > GAZE_THRESHOLDS.LOOK_DOWN) {
       isLookingAtScreen = false;
-      message = 'Looking Down';
+      message = 'Please maintain eye contact (Looking Down)';
       color = 'text-orange-600';
       direction = 'Down';
     }
@@ -175,13 +209,13 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
       return;
     }
 
-    // Limit FPS to 30
+    // Limit FPS
     const delta = time - lastProcessTimeRef.current;
-    if (delta < FRAME_INTERVAL) {
+    if (delta < ANALYSIS_CONFIG.PERFORMANCE.FRAME_INTERVAL) {
       animationFrameRef.current = requestAnimationFrame(loop);
       return;
     }
-    lastProcessTimeRef.current = time - (delta % FRAME_INTERVAL);
+    lastProcessTimeRef.current = time - (delta % ANALYSIS_CONFIG.PERFORMANCE.FRAME_INTERVAL);
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -214,56 +248,49 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
         setBlendShapes(result.faceBlendshapes);
         const { isLookingAtScreen } = analyzeGaze(result.faceBlendshapes);
 
-        // --- Eye Contact Logic with Grace Period ---
+        // --- Audio Alert Logic ---
         if (isRecording && !isPaused) {
           const now = Date.now();
-          // Initialize lastFrameTime if needed
-          if (lastFrameTimeRef.current === 0) lastFrameTimeRef.current = now;
-          
-          const frameDuration = now - lastFrameTimeRef.current;
-          totalSessionTimeRef.current += frameDuration;
 
-          if (isLookingAtScreen) {
-            // User is focused: Reset look away timer
-            lookAwayStartTimeRef.current = null;
-            focusedTimeRef.current += frameDuration;
-          } else {
+          if (!isLookingAtScreen) {
             // User is looking away
+            lookBackStartTimeRef.current = null; // Reset look-back timer
+
             if (lookAwayStartTimeRef.current === null) {
-              lookAwayStartTimeRef.current = now;
+              lookAwayStartTimeRef.current = now; // Start look-away timer
             }
 
-            const timeSinceLookAway = now - lookAwayStartTimeRef.current;
+            const durationLookingAway = now - lookAwayStartTimeRef.current;
 
-            // Grace period check
-            if (timeSinceLookAway < GRACE_PERIOD_MS) {
-              // Still within grace period, count as focused
-              focusedTimeRef.current += frameDuration;
-            } else {
-              // Grace period exceeded, do NOT increment focusedTimeRef
-              // This implicitly lowers the average score over time
+            // Trigger alert if threshold exceeded and not already played
+            if (durationLookingAway > ANALYSIS_CONFIG.TIMING.LOOK_AWAY_THRESHOLD_MS && !alertPlayedRef.current) {
+              playAlertSound();
+              alertPlayedRef.current = true; // Mark as played so it only happens once per "distraction"
+            }
+          } else {
+            // User is looking at screen (Center)
+            lookAwayStartTimeRef.current = null; // Reset look-away timer
+
+            if (lookBackStartTimeRef.current === null) {
+              lookBackStartTimeRef.current = now;
+            }
+
+            // Check if they have held gaze for the recovery threshold
+            if (now - lookBackStartTimeRef.current > ANALYSIS_CONFIG.TIMING.LOOK_BACK_THRESHOLD_MS) {
+              alertPlayedRef.current = false; // Reset alert state, ready for next distraction
             }
           }
-
-          // Update Score (avoid division by zero)
-          if (totalSessionTimeRef.current > 0) {
-            const score = Math.round((focusedTimeRef.current / totalSessionTimeRef.current) * 100);
-            eyeContactScoreRef.current = score;
-            
-            // Update UI periodically (e.g., every 500ms or just stick to frame updates since 30fps isn't too heavy for one number)
-            setRealTimeEyeContact(score);
-          }
-          
-          lastFrameTimeRef.current = now;
         } else {
-          // Reset timing references when not recording
-          lastFrameTimeRef.current = 0;
+          // Reset all logic when paused/stopped
+          lookAwayStartTimeRef.current = null;
+          lookBackStartTimeRef.current = null;
+          alertPlayedRef.current = false;
         }
       }
     }
 
     animationFrameRef.current = requestAnimationFrame(loop);
-  }, [cameraActive, mpStatus, detectForVideo, drawResults, analyzeGaze, isCalibrating, showMesh, isRecording, isPaused]);
+  }, [cameraActive, mpStatus, detectForVideo, drawResults, analyzeGaze, isCalibrating, showMesh, isRecording, isPaused, playAlertSound]);
 
   // Camera handling
   const startCamera = async () => {
@@ -320,20 +347,15 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
       setIsCalibrating(false); // Ensure mesh is off when recording starts
       setIsRecording(true);
       setIsPaused(false);
-      // Reset metrics on new recording
-      totalSessionTimeRef.current = 0;
-      focusedTimeRef.current = 0;
-      eyeContactScoreRef.current = 100;
+      // Reset logic states
       lookAwayStartTimeRef.current = null;
-      lastFrameTimeRef.current = 0;
-      setRealTimeEyeContact(100);
+      lookBackStartTimeRef.current = null;
+      alertPlayedRef.current = false;
     }
   };
   
   const handlePauseRecording = () => {
     setIsPaused(true);
-    // Reset last frame time so we don't count the paused duration as a massive "frame"
-    lastFrameTimeRef.current = 0;
   };
   
   const handleResumeRecording = () => {
@@ -350,7 +372,6 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
   // Mock feedback for demonstration (mixed with real gaze)
   const feedbackMetrics = {
     speakingPace: 131,
-    eyeContact: realTimeEyeContact, // Use calculated average
     volumeLevel: 71,
     fillerWords: 5,
     pauses: 10,
@@ -617,7 +638,9 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
               </div>
             ) : (
               <div className="animate-fade-in">
-                <h3 className="mb-6 font-serif text-lg font-bold text-gray-900 2xl:text-2xl">Real-time Feedback</h3>
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="font-serif text-lg font-bold text-gray-900 2xl:text-2xl">Real-time Feedback</h3>
+                </div>
 
                 <div className={`space-y-6 2xl:space-y-8 ${!isRecording ? 'opacity-60 grayscale-[0.5]' : ''}`}>
                   {/* Metric: Speaking Pace */}
@@ -635,28 +658,6 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
                     <div className="mt-1 text-xs text-gray-400">Target: 130-160 wpm</div>
                   </div>
 
-                  {/* Metric: Eye Contact */}
-                  <div>
-                    <div className="flex justify-between text-sm 2xl:text-base">
-                      <span className="flex items-center gap-2 text-gray-600">
-                        <Eye className="w-4 h-4" />
-                        Eye Contact
-                      </span>
-                      <span className={`font-semibold ${!isRecording ? 'text-gray-900' : gazeStatus.isLookingAtScreen ? 'text-green-600' : 'text-red-500'}`}>
-                        {isRecording ? `${feedbackMetrics.eyeContact}%` : '--%'}
-                      </span>
-                    </div>
-                    <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-gray-100">
-                      <div 
-                        className={`h-full transition-all duration-500 ${!isRecording ? 'bg-gray-300' : gazeStatus.isLookingAtScreen ? 'bg-green-500' : 'bg-red-500'}`} 
-                        style={{ width: isRecording ? `${feedbackMetrics.eyeContact}%` : '0%' }} 
-                      />
-                    </div>
-                    <div className="mt-1 text-xs text-gray-400">
-                      {isRecording ? gazeStatus.message : 'Target: 70%+ camera engagement'}
-                    </div>
-                  </div>
-
                   {/* Metric: Volume Level */}
                   <div>
                     <div className="flex justify-between text-sm 2xl:text-base">
@@ -670,6 +671,54 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
                       <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: isRecording ? `${feedbackMetrics.volumeLevel}%` : '0%' }} />
                     </div>
                     <div className="mt-1 text-xs text-gray-400">Maintain consistent volume</div>
+                  </div>
+
+                  {/* Metric: Eye Contact */}
+                  <div>
+                    <div className="flex justify-between text-sm 2xl:text-base">
+                      <div className="flex items-center gap-2 text-gray-600">
+                        <Eye className="w-4 h-4" />
+                        <span>Eye Contact Status</span>
+                        
+                        {/* Audio Toggle & Tooltip */}
+                        <div className="group relative flex items-center">
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSoundEnabled(!soundEnabled);
+                            }}
+                            className={`ml-1 p-1.5 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 ${
+                              soundEnabled 
+                                ? 'bg-blue-100 text-blue-600 hover:bg-blue-200' 
+                                : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                            }`}
+                          >
+                            {soundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+                          </button>
+                          
+                          {/* Tooltip */}
+                          <div className="absolute bottom-full left-1/2 mb-2 w-56 -translate-x-1/2 translate-y-2 opacity-0 invisible transform rounded-lg bg-gray-900 px-3 py-2 text-center text-xs text-white shadow-xl transition-all duration-200 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100 z-50">
+                            <p className="font-semibold mb-1">{soundEnabled ? "Audio Cues On" : "Audio Cues Off"}</p>
+                            <p className="text-gray-300 font-normal leading-relaxed">
+                              Plays a gentle alert if you look away for more than 3 seconds.
+                            </p>
+                            {/* Arrow */}
+                            <div className="absolute -bottom-1 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 bg-gray-900"></div>
+                          </div>
+                        </div>
+                      </div>
+                      <span className={`font-semibold ${!isRecording ? 'text-gray-900' : gazeStatus.isLookingAtScreen ? 'text-green-600' : 'text-red-500'}`}>
+                        {isRecording ? (gazeStatus.isLookingAtScreen ? 'Focused' : 'Distracted') : '--'}
+                      </span>
+                    </div>
+                    
+                    {/* Visual Status Indicator instead of Bar */}
+                    <div className="mt-2 flex items-center gap-2">
+                      <div className={`h-3 w-3 rounded-full transition-colors duration-300 ${isRecording ? (gazeStatus.isLookingAtScreen ? 'bg-green-500' : 'bg-red-500 animate-pulse') : 'bg-gray-300'}`} />
+                      <span className="text-xs text-gray-500">
+                        {isRecording ? (gazeStatus.isLookingAtScreen ? "Great! Maintaining eye contact." : "Check camera!") : "Waiting to start..."}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Counter Metrics */}
