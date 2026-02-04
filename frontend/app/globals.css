@@ -1,26 +1,114 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Brand Colors - Maroon Scale */
+  --maroon-50: #fdf2f2;
+  --maroon-100: #fce4e4;
+  --maroon-200: #facbcb;
+  --maroon-300: #f7a3a3;
+  --maroon-400: #f27272;
+  --maroon-500: #e84545;
+  --maroon-600: #800001; /* Primary Brand Color */
+  --maroon-700: #6b0001;
+  --maroon-800: #590001;
+  --maroon-900: #4a0001;
+  
+  /* Accent Colors */
+  --accent-gray: #404040;
+  
+  /* UI Semantic Mapping */
+  --color-brand-primary: var(--maroon-600);
+  --color-brand-primary-dark: var(--maroon-700);
+  --color-brand-primary-light: var(--maroon-500);
+  
+  --color-background: #f9fafb;
+  --color-surface: #ffffff;
+  --color-foreground: #171717;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+@theme {
+  /* Maroon Color Palette */
+  --color-maroon-50: var(--maroon-50);
+  --color-maroon-100: var(--maroon-100);
+  --color-maroon-200: var(--maroon-200);
+  --color-maroon-300: var(--maroon-300);
+  --color-maroon-400: var(--maroon-400);
+  --color-maroon-500: var(--maroon-500);
+  --color-maroon-600: var(--maroon-600);
+  --color-maroon-700: var(--maroon-700);
+  --color-maroon-800: var(--maroon-800);
+  --color-maroon-900: var(--maroon-900);
+  
+  /* Accent */
+  --color-accent: var(--accent-gray);
+  
+  /* Semantic Aliases used in components */
+  --color-maroon: var(--maroon-600);
+  --color-maroon-dark: var(--maroon-700);
+  --color-maroon-light: var(--maroon-500);
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* Fonts */
+  --font-heading: var(--font-heading), 'EB Garamond', serif;
+  --font-body: var(--font-body), 'Montserrat', sans-serif;
+  
+  /* Font aliases for Tailwind utility classes */
+  --font-serif: var(--font-heading), 'EB Garamond', serif;
+  --font-sans: var(--font-body), 'Montserrat', sans-serif;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-body), 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: var(--color-background);
+  color: var(--color-foreground);
 }
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading), 'EB Garamond', serif;
+  font-weight: 500;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a1a1a1;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes checkmark {
+  0% { transform: scale(0); opacity: 0; }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* Utility classes for animations */
+.animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
+.animate-slide-up { animation: slideUp 0.5s ease-out forwards; }
+.animate-checkmark { animation: checkmark 0.3s ease-out forwards; }
+.stagger-1 { animation-delay: 100ms; }
+.stagger-2 { animation-delay: 200ms; }
