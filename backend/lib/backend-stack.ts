@@ -1,7 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import { Construct } from 'constructs';
-import { PythonFunction } from '@aws-cdk/aws-lambda-python-alpha';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as path from 'path';
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
@@ -12,7 +11,7 @@ export class BackendStack extends cdk.Stack {
 
     // The code that defines your stack goes here
 
-    const userPool = new cognito.UserPool(this, 'MyUserPool', {
+    const userPool = new cognito.UserPool(this, 'AI-Presentation-Coach-UserPool', {
       userPoolName: 'AI-Presentation-Coach-UserPool',
       // Configure sign-in options, e.g., using email as username
       signInAliases: {
@@ -39,11 +38,11 @@ export class BackendStack extends cdk.Stack {
       autoDeleteObjects: true,
     });
 
-    const s3UrlIssuerLambda = new PythonFunction(this, 's3UrlIssuerLambda', {
-      entry: path.join(__dirname, '../lambdas/python'),
-      index: 'get_presigned_url.py',
-      handler: 'lambda_handler',
-      runtime: lambda.Runtime.PYTHON_3_12,
+    const s3UrlIssuerLambda = new lambda.Function(this, 'MyLambdaFunction', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      handler: 'get_presigned_url.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, 'lambdas', 'python')),
+      timeout: cdk.Duration.seconds(20),
       environment: {
         'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
         'PDF_UPLOAD_TIMEOUT': '120', //PDF upload timeout in 2 minutes
