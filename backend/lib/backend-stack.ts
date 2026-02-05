@@ -44,7 +44,7 @@ export class BackendStack extends cdk.Stack {
       index: 'get_presigned_url.py',
       handler: 'lambda_handler',
       runtime: lambda.Runtime.PYTHON_3_12,
-      this.environment = {
+      environment: {
         'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
         'PDF_UPLOAD_TIMEOUT': '120', //PDF upload timeout in 2 minutes
         'PRESENTATION_TIMEOUT': '1200' //Max Presentation video duration timeout 20 minutes
