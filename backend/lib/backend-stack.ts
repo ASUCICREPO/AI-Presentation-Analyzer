@@ -33,7 +33,6 @@ export class BackendStack extends cdk.Stack {
     });
 
     const presentationAndSessionUploadsBucket = new cdk.aws_s3.Bucket(this, 'AIPresentationCoach-Presentations-Videos', {
-      bucketName: 'ai-presentation-coach-presentation-videos',
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
     });
