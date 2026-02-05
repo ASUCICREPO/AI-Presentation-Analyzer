@@ -5,8 +5,6 @@ from typing import Literal
 import json
 import uuid
 
-dotenv.load_dotenv()
-
 PRESENTATION_TIMEOUT = os.environ.get("PRESENTATION_TIMEOUT", 1200) # 20 minutes defualt
 PDF_UPLOAD_TIMEOUT = os.environ.get("PDF_UPLOAD_TIMEOUT", 120) # 120 seconds default
 UPLOADS_BUCKET = os.environ.get("UPLOADS_BUCKET")
