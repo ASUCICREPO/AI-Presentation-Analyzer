@@ -1,9 +1,10 @@
 import logging
 import boto3
 from botocore.exceptions import ClientError
-from typing import Literal
+from typing import Literal, Dict
 import json
 import uuid
+import os
 
 PRESENTATION_TIMEOUT = os.environ.get("PRESENTATION_TIMEOUT", 1200) # 20 minutes defualt
 PDF_UPLOAD_TIMEOUT = os.environ.get("PDF_UPLOAD_TIMEOUT", 120) # 120 seconds default
@@ -64,7 +65,7 @@ def get_upload_url(object_name: str, request_type: Literal['ppt', 'session']) ->
     # The response contains the presigned URL
     return response
 
-def lambda_handler(event, context) -> Dict[str, str, Dict[str, str]] | None:
+def lambda_handler(event, context) -> Dict[str, Dict[str, str]] | None:
     """AWS Lambda handler to generate presigned S3 upload URLs
     :param event: Event data passed to the Lambda function. Expects a dictionary with key 'request_type'
     :param context: Runtime information provided by AWS Lambda
