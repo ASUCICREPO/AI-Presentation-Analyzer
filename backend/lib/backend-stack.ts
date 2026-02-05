@@ -1,6 +1,9 @@
 import * as cdk from 'aws-cdk-lib';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import { Construct } from 'constructs';
+import { PythonFunction } from '@aws-cdk/aws-lambda-python-alpha';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as path from 'path';
 // import * as sqs from 'aws-cdk-lib/aws-sqs';
 
 export class BackendStack extends cdk.Stack {
@@ -28,6 +31,24 @@ export class BackendStack extends cdk.Stack {
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
       // Make usernames/emails case insensitive (cannot be changed after creation)
       signInCaseSensitive: false,
+    });
+
+    const presentationAndSessionUploadsBucket = new cdk.aws_s3.Bucket(this, 'AIPresentationCoach-Presentations-Videos', {
+      bucketName: 'ai-presentation-coach-presentation-videos',
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+    });
+
+    const s3UrlIssuerLambda = new PythonFunction(this, 's3UrlIssuerLambda', {
+      entry: path.join(__dirname, '../lambdas/python'),
+      index: 'get_presigned_url.py',
+      handler: 'lambda_handler',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      this.environment = {
+        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
+        'PDF_UPLOAD_TIMEOUT': '120', //PDF upload timeout in 2 minutes
+        'PRESENTATION_TIMEOUT': '1200' //Max Presentation video duration timeout 20 minutes
+      },
     });
   }
 }
