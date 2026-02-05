@@ -2,15 +2,14 @@ import logging
 import boto3
 from botocore.exceptions import ClientError
 from typing import Literal
-import dotenv
 import json
 import uuid
 
 dotenv.load_dotenv()
 
-PRESENTATION_TIMEOUT = os.getenv("PRESENTATION_TIMEOUT", 1200) # 20 minutes defualt
-PDF_UPLOAD_TIMEOUT = os.getenv("PDF_UPLOAD_TIMEOUT", 120) # 120 seconds default
-UPLOADS_BUCKET = os.getenv("UPLOADS_BUCKET")
+PRESENTATION_TIMEOUT = os.environ.get("PRESENTATION_TIMEOUT", 1200) # 20 minutes defualt
+PDF_UPLOAD_TIMEOUT = os.environ.get("PDF_UPLOAD_TIMEOUT", 120) # 120 seconds default
+UPLOADS_BUCKET = os.environ.get("UPLOADS_BUCKET")
 
 if not UPLOADS_BUCKET:
     logging.error("[!]Error: UPLOADS_BUCKET environment variable is not set.")
