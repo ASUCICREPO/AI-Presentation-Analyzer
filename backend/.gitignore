@@ -1,1 +1,14 @@
 node_modules
+
+# Environment files
+.env
+.env.*
+
+# Python Cache & env
+*.venv/
+__pycache__/
+*.py[cod]
+backend/*/.python-version
+backend/*/pyproject.toml
+backend/*/requirements.txt
+*uv.lock
