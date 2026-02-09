@@ -1,9 +1,12 @@
+import * as path from 'path';
+import { Construct } from 'constructs';
 import * as cdk from 'aws-cdk-lib';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as path from 'path';
+import * as apigateway from 'aws-cdk-lib/aws-apigateway';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 
 export class AIPresentationCoachStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -113,6 +116,61 @@ export class AIPresentationCoachStack extends cdk.Stack {
       },
     });
 
+    // API Gateway definitions
+    const apiGateway = new apigateway.LambdaRestApi(this, 'AIPresentationCoachApi', {
+      handler: s3UrlIssuerLambda,
+      proxy: false,
+    });
+
+    // S3 URLs resource
+    let s3_urls_resource = apiGateway.root.addResource('s3_urls');
+    s3_urls_resource.addMethod('GET', new apigateway.LambdaIntegration(s3UrlIssuerLambda));
+
+    
+    //Personas Dynamo DB Table Config
+    const personasTable = new dynamodb.TableV2(this, 'AIPresentationAudiencePersonaTable', {
+      // Required: Define the partition key
+      partitionKey: {
+        name: 'personaID', // The name of the partition key attribute
+        type: dynamodb.AttributeType.STRING, // The data type (STRING, NUMBER, BINARY)
+      },
+      billing: dynamodb.Billing.onDemand(),
+      removalPolicy: cdk.RemovalPolicy.DESTROY
+      // pointInTimeRecovery: true, // Commenting for now to avoid additional costs, can be enabled in production for data protection.
+    });
+
+    // Persona CRUD Lambda
+    const personaCrudLambda = new lambda.Function(this, 'PersonaCrudLambda', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      handler: 'persona_crud.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, 'lambdas', 'dynamo_persona_lambdas')),
+      timeout: cdk.Duration.seconds(20),
+      environment: {
+        'DYNAMODB_TABLE_NAME': personasTable.tableName,
+        'MAX_ITEMS_PER_PAGE': '20',
+      },
+    });
+
+    // Grant Lambda access to the DynamoDB table
+    personasTable.grantReadWriteData(personaCrudLambda);
+
+    // Personas resource
+    let personas_resource = apiGateway.root.addResource('personas');
+    // GET /personas - list all personas (with optional pagination)
+    personas_resource.addMethod('GET', new apigateway.LambdaIntegration(personaCrudLambda));
+    // POST /personas - create a new persona
+    personas_resource.addMethod('POST', new apigateway.LambdaIntegration(personaCrudLambda));
+
+    // /personas/{id} resource for GET, PUT, DELETE by ID
+    let persona_id_resource = personas_resource.addResource('{personaID}');
+    // GET /personas/{id} - get persona by ID
+    persona_id_resource.addMethod('GET', new apigateway.LambdaIntegration(personaCrudLambda));
+    // PUT /personas/{id} - update persona by ID
+    persona_id_resource.addMethod('PUT', new apigateway.LambdaIntegration(personaCrudLambda));
+    // DELETE /personas/{id} - delete persona by ID
+    persona_id_resource.addMethod('DELETE', new apigateway.LambdaIntegration(personaCrudLambda));
+
+
     // ──────────────────────────────────────────────
     // Stack Outputs (useful for frontend configuration)
     // ──────────────────────────────────────────────
@@ -135,5 +193,5 @@ export class AIPresentationCoachStack extends cdk.Stack {
       value: this.region,
       description: 'AWS Region',
     });
-  }
+  } 
 }
