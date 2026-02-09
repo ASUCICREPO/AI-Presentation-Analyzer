@@ -36,9 +36,13 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // Cognito User Pool
     // ──────────────────────────────────────────────
     const userPool = new cognito.UserPool(this, 'UserPool', {
+      selfSignUpEnabled: true,
       signInAliases: {
         email: true,
         username: false,
+      },
+      autoVerify: {
+        email: true,
       },
       passwordPolicy: {
         minLength: 8,

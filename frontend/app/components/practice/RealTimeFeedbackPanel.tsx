@@ -25,6 +25,14 @@ export default function RealTimeFeedbackPanel({
   gazeStatus,
   metrics
 }: RealTimeFeedbackPanelProps) {
+  // Compute pace bar width (target ~130-160wpm)
+  const pacePercent = isRecording ? Math.min(100, Math.round((metrics.speakingPace / 180) * 100)) : 0;
+  const paceColor = metrics.speakingPace > 0 && metrics.speakingPace < 110
+    ? 'bg-yellow-500'
+    : metrics.speakingPace > 170
+      ? 'bg-red-500'
+      : 'bg-green-500';
+
   return (
     <div className="animate-fade-in">
       <div className="flex items-center justify-between mb-6">
@@ -42,7 +50,7 @@ export default function RealTimeFeedbackPanel({
             <span className="font-semibold text-gray-900">{isRecording ? metrics.speakingPace : '--'} wpm</span>
           </div>
           <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-gray-100">
-            <div className="h-full bg-green-500 transition-all duration-500" style={{ width: isRecording ? '65%' : '0%' }} />
+            <div className={`h-full ${paceColor} transition-all duration-500`} style={{ width: `${pacePercent}%` }} />
           </div>
           <div className="mt-1 text-xs text-gray-400">Target: 130-160 wpm</div>
         </div>
@@ -101,7 +109,7 @@ export default function RealTimeFeedbackPanel({
             </span>
           </div>
           
-          {/* Visual Status Indicator instead of Bar */}
+          {/* Visual Status Indicator */}
           <div className="mt-2 flex items-center gap-2">
             <div className={`h-3 w-3 rounded-full transition-colors duration-300 ${isRecording ? (gazeStatus.isLookingAtScreen ? 'bg-green-500' : 'bg-red-500 animate-pulse') : 'bg-gray-300'}`} />
             <span className="text-xs text-gray-500">
@@ -114,13 +122,13 @@ export default function RealTimeFeedbackPanel({
         <div className="grid grid-cols-2 gap-4">
           <div className="rounded-lg border border-gray-100 p-3">
             <div className="text-xs text-gray-500 2xl:text-sm">Filler Words</div>
-            <div className="mt-1 text-xl font-bold text-green-600 2xl:text-2xl">{isRecording ? metrics.fillerWords : '--'}</div>
+            <div className="mt-1 text-xl font-bold text-orange-600 2xl:text-2xl">{isRecording ? metrics.fillerWords : '--'}</div>
             <div className="text-[10px] text-gray-400">um, uh, like, you know</div>
           </div>
           <div className="rounded-lg border border-gray-100 p-3">
             <div className="text-xs text-gray-500 2xl:text-sm">Pauses</div>
             <div className="mt-1 text-xl font-bold text-gray-900 2xl:text-2xl">{isRecording ? metrics.pauses : '--'}</div>
-            <div className="text-[10px] text-gray-400">Strategic pauses detected</div>
+            <div className="text-[10px] text-gray-400">Long pauses (&gt;3s)</div>
           </div>
         </div>
 
@@ -131,7 +139,11 @@ export default function RealTimeFeedbackPanel({
           </div>
           <p className="text-xs text-blue-800 2xl:text-sm">
             {isRecording 
-              ? (gazeStatus.isLookingAtScreen ? "Great job! Maintain this pace." : "Try to look at the camera.")
+              ? metrics.fillerWords > 3
+                ? "Try to reduce filler words — pause instead of saying 'um'."
+                : gazeStatus.isLookingAtScreen
+                  ? "Great job! Maintain this pace."
+                  : "Try to look at the camera."
               : "Feedback will appear here once you start recording."}
           </p>
         </div>

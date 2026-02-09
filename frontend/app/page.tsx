@@ -1,14 +1,27 @@
 'use client';
 
 import { useState } from 'react';
+import { useAuth } from './context/AuthContext';
 import Header from './components/Header';
 import PersonaSelection from './components/PersonaSelection';
 import UploadContent from './components/UploadContent';
 import PracticeSession from './components/PracticeSession';
 import ConfirmationModal from './components/ConfirmationModal';
-import { ACADEMIC_PERSONA } from './config/personas';
+import LoginPage from './components/LoginPage';
+import SignUpPage from './components/SignUpPage';
+import ConfirmSignUpPage from './components/ConfirmSignUpPage';
+import { Loader2 } from 'lucide-react';
+
+type AuthView = 'login' | 'signup' | 'confirm';
 
 export default function Home() {
+  const { isAuthenticated, isLoading } = useAuth();
+
+  // Auth page state
+  const [authView, setAuthView] = useState<AuthView>('login');
+  const [confirmEmail, setConfirmEmail] = useState('');
+
+  // App state
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedPersona, setSelectedPersona] = useState<string | null>(null);
   const [customNotes, setCustomNotes] = useState('');
@@ -17,12 +30,20 @@ export default function Home() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [pendingStep, setPendingStep] = useState<number | null>(null);
 
-  // Handler for persona selection
+  // --- Auth navigation ---
+  const handleSwitchToSignUp = () => setAuthView('signup');
+  const handleSwitchToLogin = () => setAuthView('login');
+  const handleNeedConfirmation = (email: string) => {
+    setConfirmEmail(email);
+    setAuthView('confirm');
+  };
+  const handleConfirmed = () => setAuthView('login');
+
+  // --- App handlers (unchanged) ---
   const handlePersonaSelect = (id: string | null) => {
     setSelectedPersona(id);
   };
 
-  // Step 1 -> Step 2
   const handleContinueToUpload = () => {
     if (selectedPersona) {
       setCurrentStep(2);
@@ -30,21 +51,17 @@ export default function Home() {
     }
   };
 
-  // Step 2 -> Step 1
   const handleBackToPersona = () => {
     setCurrentStep(1);
     window.scrollTo(0, 0);
   };
 
-  // Step 2 -> Step 3
   const handleContinueFromUpload = () => {
     setCurrentStep(3);
     window.scrollTo(0, 0);
   };
 
-  // Step 3 -> Step 2 (Exit Session)
   const handleBackToUpload = () => {
-    // If we're in practice mode (step 3), confirm before leaving
     if (currentStep === 3) {
       setPendingStep(2);
       setIsModalOpen(true);
@@ -54,23 +71,17 @@ export default function Home() {
     window.scrollTo(0, 0);
   };
 
-  // Step 3 -> Step 4
   const handlePracticeComplete = () => {
     setCurrentStep(4);
     window.scrollTo(0, 0);
-    // TODO: Navigate to Review Analytics
   };
 
-  // Handle direct step navigation from Header
   const handleStepClick = (step: number) => {
-    // Prevent navigating forward beyond what's logical (though the header usually disables this)
     if (step > currentStep) {
-      // Allow moving to next step only if criteria met (e.g. persona selected)
       if (step === 2 && !selectedPersona) return;
-      if (step === 3 && currentStep < 2) return; // Can't skip upload entirely without logic
+      if (step === 3 && currentStep < 2) return;
     }
 
-    // Confirmation when leaving Practice Session (Step 3)
     if (currentStep === 3 && step !== 3) {
       setPendingStep(step);
       setIsModalOpen(true);
@@ -81,7 +92,6 @@ export default function Home() {
     window.scrollTo(0, 0);
   };
 
-  // Handle Modal Actions
   const handleConfirmNavigation = () => {
     if (pendingStep !== null) {
       setCurrentStep(pendingStep);
@@ -96,6 +106,38 @@ export default function Home() {
     setPendingStep(null);
   };
 
+  // --- Loading screen ---
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <Loader2 size={32} className="animate-spin text-maroon" />
+      </div>
+    );
+  }
+
+  // --- Auth screens ---
+  if (!isAuthenticated) {
+    if (authView === 'signup') {
+      return (
+        <SignUpPage
+          onSwitchToLogin={handleSwitchToLogin}
+          onNeedConfirmation={handleNeedConfirmation}
+        />
+      );
+    }
+    if (authView === 'confirm') {
+      return (
+        <ConfirmSignUpPage
+          email={confirmEmail}
+          onConfirmed={handleConfirmed}
+          onBack={handleSwitchToLogin}
+        />
+      );
+    }
+    return <LoginPage onSwitchToSignUp={handleSwitchToSignUp} />;
+  }
+
+  // --- Authenticated app ---
   return (
     <div className="min-h-screen bg-gray-50">
       <Header currentStep={currentStep} onStepClick={handleStepClick} />
@@ -119,7 +161,7 @@ export default function Home() {
 
       {currentStep === 3 && (
         <PracticeSession
-          onBack={handleBackToUpload} // Reuse the back handler which now triggers modal
+          onBack={handleBackToUpload}
           onComplete={handlePracticeComplete}
         />
       )}

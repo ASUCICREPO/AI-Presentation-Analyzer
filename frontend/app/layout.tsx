@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { serifFont, sansFont } from "./config/fonts";
+import { AuthProvider } from "./context/AuthContext";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -17,7 +18,7 @@ export default function RootLayout({
       <body
         className={`${serifFont.variable} ${sansFont.variable} antialiased`}
       >
-        {children}
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );

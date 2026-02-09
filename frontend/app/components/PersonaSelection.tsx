@@ -4,7 +4,7 @@ import React from 'react';
 import PersonaCard from './PersonaCard';
 import ComingSoonBox from './ComingSoonBox';
 import CustomizePersona from './CustomizePersona';
-import { ACADEMIC_PERSONA, COMING_SOON_PERSONAS } from '../config/personas';
+import { ACADEMIC_PERSONA, COMING_SOON_PERSONAS } from '../config/config';
 
 interface PersonaSelectionProps {
   selectedPersona: string | null;

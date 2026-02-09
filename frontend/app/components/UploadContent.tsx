@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef } from 'react';
-import { ACADEMIC_PERSONA } from '../config/personas';
+import { ACADEMIC_PERSONA } from '../config/config';
 
 interface UploadContentProps {
   onBack: () => void;
@@ -49,7 +49,7 @@ export default function UploadContent({ onBack, onContinue }: UploadContentProps
           </div>
           
           <h3 className="mb-2 text-base font-medium text-gray-900 font-sans 2xl:text-xl">
-            Drop your presentation files here
+            Drop your presentation file here
           </h3>
           <p className="mb-6 text-sm text-gray-500 font-sans 2xl:text-lg 2xl:mb-8">
             or click to browse
@@ -59,7 +59,7 @@ export default function UploadContent({ onBack, onContinue }: UploadContentProps
             type="file" 
             ref={fileInputRef}
             className="hidden" 
-            accept=".pdf,.ppt,.pptx,.doc,.docx"
+            accept=".pdf"
             // TODO: Implement file selection handler and API upload with presigned URL
           />
           
@@ -67,11 +67,11 @@ export default function UploadContent({ onBack, onContinue }: UploadContentProps
             onClick={handleBrowseClick}
             className="rounded-lg bg-maroon-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-maroon-700 hover:shadow-md active:scale-[0.98] font-sans 2xl:px-8 2xl:py-3.5 2xl:text-lg"
           >
-            Select Files
+            Select File
           </button>
           
           <p className="mt-4 text-xs text-gray-400 font-sans 2xl:text-base 2xl:mt-6">
-            Supported formats: PDF, PPT, PPTX, DOC, DOCX
+            Supported format: PDF
           </p>
         </div>
       </div>

@@ -1,26 +1,21 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ACADEMIC_PERSONA } from '../config/personas';
+import { ACADEMIC_PERSONA } from '../config/config';
 import { useFaceLandmarker } from '../hooks/useFaceLandmarker';
-import { ANALYSIS_CONFIG } from '../config/analysisConfig';
+import { useAudioAnalysis } from '../hooks/useAudioAnalysis';
+import { ANALYSIS_CONFIG } from '../config/config';
 
 // Import modular components
 import PracticeSessionHeader from './practice/PracticeSessionHeader';
 import CameraView from './practice/CameraView';
 import CalibrationPanel from './practice/CalibrationPanel';
 import RealTimeFeedbackPanel from './practice/RealTimeFeedbackPanel';
-import FeedbackLog from './practice/FeedbackLog';
+import TranscriptionPanel from './practice/TranscriptionPanel';
 
 interface PracticeSessionProps {
   onBack: () => void;
   onComplete: () => void;
-}
-
-interface FeedbackEvent {
-  time: string;
-  message: string;
-  type: 'warning' | 'info' | 'success';
 }
 
 export default function PracticeSession({ onBack, onComplete }: PracticeSessionProps) {
@@ -35,6 +30,7 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number | null>(null);
   const lastProcessTimeRef = useRef<number>(0);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   
   // Audio Feedback State
   const [soundEnabled, setSoundEnabled] = useState(true);
@@ -47,7 +43,7 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
 
   // New Calibration Mode State
   const [isCalibrating, setIsCalibrating] = useState(false);
-  const [showMesh, setShowMesh] = useState(true); // Toggle for mesh visibility
+  const [showMesh, setShowMesh] = useState(true);
   
   // Feedback State
   const [gazeStatus, setGazeStatus] = useState({
@@ -56,6 +52,18 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
     color: 'text-green-600',
     direction: 'Center'
   });
+
+  // Audio Analysis Hook
+  const {
+    metrics: audioMetrics,
+    transcripts,
+    partialTranscript,
+    isTranscribing,
+    startAnalysis,
+    pauseAnalysis,
+    resumeAnalysis,
+    stopAnalysis,
+  } = useAudioAnalysis();
   
   // Hook initialization
   const {
@@ -69,10 +77,10 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
     minTrackingConfidence: 0.5,
   });
 
-  // Initialize Audio Context
+  // Initialize Audio Context (for alert sounds)
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioContextRef.current = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
     }
     return () => {
       audioContextRef.current?.close();
@@ -82,13 +90,11 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
   const playAlertSound = useCallback(() => {
     if (!audioContextRef.current || !soundEnabled) return;
     
-    // Resume context if suspended (browser policy)
     if (audioContextRef.current.state === 'suspended') {
       audioContextRef.current.resume();
     }
 
     const ctx = audioContextRef.current;
-    
     const oscillator = ctx.createOscillator();
     const gainNode = ctx.createGain();
     
@@ -117,17 +123,16 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
   }, [isRecording, isPaused]);
 
   // Analyze gaze from blendshapes
-  const analyzeGaze = useCallback((shapes: any[]) => {
+  const analyzeGaze = useCallback((shapes: { categories: { categoryName: string; score: number }[] }[]) => {
     if (!shapes || shapes.length === 0) return { isLookingAtScreen: false, direction: 'Unknown' };
 
     const categories = shapes[0].categories;
     const scores: Record<string, number> = {};
     
-    categories.forEach((cat: any) => {
+    categories.forEach((cat) => {
       scores[cat.categoryName] = cat.score;
     });
 
-    // Check gaze directions
     const eyesWide = (scores.eyeWideLeft + scores.eyeWideRight) / 2;
     const isSurprised = eyesWide > 0.4;
     
@@ -179,7 +184,6 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
       return;
     }
 
-    // Limit FPS
     const delta = time - lastProcessTimeRef.current;
     if (delta < ANALYSIS_CONFIG.PERFORMANCE.FRAME_INTERVAL) {
       animationFrameRef.current = requestAnimationFrame(loop);
@@ -195,7 +199,6 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
       return;
     }
 
-    // Match canvas to video dimensions
     if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
@@ -205,7 +208,6 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
 
     if (result) {
       const ctx = canvas.getContext('2d');
-      // Only draw mesh if in calibration mode AND mesh is enabled
       if (isCalibrating && showMesh) {
         drawResults(canvas, result);
       } else {
@@ -215,40 +217,35 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
       if (result.faceBlendshapes && result.faceBlendshapes.length > 0) {
         const { isLookingAtScreen } = analyzeGaze(result.faceBlendshapes);
 
-        // --- Audio Alert Logic ---
+        // Audio Alert Logic
         if (isRecording && !isPaused) {
           const now = Date.now();
 
           if (!isLookingAtScreen) {
-            // User is looking away
-            lookBackStartTimeRef.current = null; // Reset look-back timer
+            lookBackStartTimeRef.current = null;
 
             if (lookAwayStartTimeRef.current === null) {
-              lookAwayStartTimeRef.current = now; // Start look-away timer
+              lookAwayStartTimeRef.current = now;
             }
 
             const durationLookingAway = now - lookAwayStartTimeRef.current;
 
-            // Trigger alert if threshold exceeded and not already played
             if (durationLookingAway > ANALYSIS_CONFIG.TIMING.LOOK_AWAY_THRESHOLD_MS && !alertPlayedRef.current) {
               playAlertSound();
-              alertPlayedRef.current = true; // Mark as played so it only happens once per "distraction"
+              alertPlayedRef.current = true;
             }
           } else {
-            // User is looking at screen (Center)
-            lookAwayStartTimeRef.current = null; // Reset look-away timer
+            lookAwayStartTimeRef.current = null;
 
             if (lookBackStartTimeRef.current === null) {
               lookBackStartTimeRef.current = now;
             }
 
-            // Check if they have held gaze for the recovery threshold
             if (now - lookBackStartTimeRef.current > ANALYSIS_CONFIG.TIMING.LOOK_BACK_THRESHOLD_MS) {
-              alertPlayedRef.current = false; // Reset alert state, ready for next distraction
+              alertPlayedRef.current = false;
             }
           }
         } else {
-          // Reset all logic when paused/stopped
           lookAwayStartTimeRef.current = null;
           lookBackStartTimeRef.current = null;
           alertPlayedRef.current = false;
@@ -267,14 +264,15 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
         audio: true 
       });
       
+      mediaStreamRef.current = stream;
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        // Wait for video to be ready before setting active
         videoRef.current.onloadeddata = () => {
           setCameraActive(true);
           setPermissionDenied(false);
-          setIsCalibrating(true); // Automatically enter calibration mode on start
-          setShowMesh(true); // Reset mesh to visible on start
+          setIsCalibrating(true);
+          setShowMesh(true);
         };
       }
     } catch (err) {
@@ -289,11 +287,11 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
       stream.getTracks().forEach(track => track.stop());
       videoRef.current.srcObject = null;
     }
+    mediaStreamRef.current = null;
     setCameraActive(false);
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
   }, []);
 
-  // Removed auto-start useEffect. Only cleanup on unmount.
   useEffect(() => {
     return () => stopCamera();
   }, [stopCamera]);
@@ -309,48 +307,46 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
   }, [cameraActive, mpStatus, processFrame]);
 
   // Recording Handlers
-  const handleStartRecording = () => {
-    if (cameraActive) {
-      setIsCalibrating(false); // Ensure mesh is off when recording starts
+  const handleStartRecording = async () => {
+    if (cameraActive && mediaStreamRef.current) {
+      setIsCalibrating(false);
       setIsRecording(true);
       setIsPaused(false);
-      // Reset logic states
       lookAwayStartTimeRef.current = null;
       lookBackStartTimeRef.current = null;
       alertPlayedRef.current = false;
+
+      // Start audio analysis (Transcribe + volume/filler/pause detection)
+      await startAnalysis(mediaStreamRef.current);
     }
   };
   
   const handlePauseRecording = () => {
     setIsPaused(true);
+    pauseAnalysis();
   };
   
   const handleResumeRecording = () => {
     setIsPaused(false);
+    resumeAnalysis();
   };
 
   const handleStopRecording = () => {
     setIsRecording(false);
     setIsPaused(false);
+    stopAnalysis();
     stopCamera();
     onComplete();
   };
 
-  // Mock feedback for demonstration
+  // Map audio metrics to the shape RealTimeFeedbackPanel expects
   const feedbackMetrics = {
-    speakingPace: 131,
-    volumeLevel: 71,
-    fillerWords: 5,
-    pauses: 10,
+    speakingPace: audioMetrics.wpm,
+    volumeLevel: audioMetrics.volume,
+    fillerWords: audioMetrics.fillerWords,
+    pauses: audioMetrics.pauses,
   };
 
-  const feedbackEvents: FeedbackEvent[] = [
-    { time: '00:23', message: 'Looking away from camera for extended period', type: 'warning' },
-    { time: '00:19', message: 'Volume too low - speak up for clarity', type: 'info' },
-    { time: '00:18', message: 'Filler word detected: "like"', type: 'warning' },
-    { time: '00:17', message: 'Good eye contact - keep it up!', type: 'success' },
-  ];
-  
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 py-6 sm:px-6 sm:py-8 2xl:max-w-[1600px] 2xl:py-12">
       {/* 1. Header Section */}
@@ -393,7 +389,7 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
               />
             ) : (
               <RealTimeFeedbackPanel 
-                isRecording={isRecording}
+                isRecording={isRecording && !isPaused}
                 soundEnabled={soundEnabled}
                 onToggleSound={() => setSoundEnabled(!soundEnabled)}
                 gazeStatus={gazeStatus}
@@ -404,9 +400,14 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
         </div>
       </div>
 
-      {/* 4. Timestamped Feedback Scroll */}
-      {isRecording && (
-        <FeedbackLog events={feedbackEvents} />
+      {/* 4. Live Transcription (replaces Timestamped Feedback) */}
+      {(isRecording || transcripts.length > 0) && (
+        <TranscriptionPanel
+          transcripts={transcripts}
+          partialTranscript={partialTranscript}
+          isRecording={isRecording && !isPaused}
+          isTranscribing={isTranscribing}
+        />
       )}
 
       {/* 5. Footer Navigation */}
