@@ -1,5 +1,6 @@
 import React from 'react';
 import { ArrowLeft } from 'lucide-react';
+import { PRESENTATION_LIMITS } from '../../config/config';
 
 interface PracticeSessionHeaderProps {
   onBack: () => void;
@@ -12,12 +13,15 @@ export default function PracticeSessionHeader({
   timer, 
   personaTitle 
 }: PracticeSessionHeaderProps) {
-  // Format time as MM:SS
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
+
+  const remaining = PRESENTATION_LIMITS.MAX_DURATION_SEC - timer;
+  const isNearEnd = remaining <= PRESENTATION_LIMITS.FINAL_WARNING_REMAINING_SEC;
+  const isWarning = remaining <= PRESENTATION_LIMITS.WARNING_REMAINING_SEC;
 
   return (
     <div className="mb-6 flex items-center justify-between 2xl:mb-10">
@@ -40,10 +44,19 @@ export default function PracticeSessionHeader({
       </div>
       
       <div className="text-right">
-        <div className="text-2xl font-bold text-gray-900 font-mono 2xl:text-4xl">
+        <div
+          className={`
+            text-2xl font-bold font-mono 2xl:text-4xl transition-colors duration-300
+            ${isNearEnd ? 'text-red-600' : isWarning ? 'text-amber-600' : 'text-gray-900'}
+          `}
+        >
           {formatTime(timer)}
         </div>
-        <div className="text-xs text-gray-500 font-sans 2xl:text-base">Recording Time</div>
+        <div className="text-xs text-gray-500 font-sans 2xl:text-base">
+          {isWarning
+            ? `${formatTime(remaining)} remaining`
+            : 'Recording Time'}
+        </div>
       </div>
     </div>
   );

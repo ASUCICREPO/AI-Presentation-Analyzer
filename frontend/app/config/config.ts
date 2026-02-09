@@ -33,6 +33,22 @@ export interface Persona {
 
 
 // ---------------------------------------------------------------------------
+// Presentation Time Limits (seconds)
+// ---------------------------------------------------------------------------
+export const PRESENTATION_LIMITS = {
+  MAX_DURATION_SEC: 15 * 60,                                // DEMO: 20s cap (real: 15 * 60)
+  WARNING_REMAINING_SEC: 5 * 60,                           // DEMO: alert at 5s in (real: 5 * 60)
+  FINAL_WARNING_REMAINING_SEC: 1 * 60,                     // DEMO: alert at 10s in (real: 1 * 60)
+  get WARNING_AT_SEC() {
+    return this.MAX_DURATION_SEC - this.WARNING_REMAINING_SEC;
+  },
+  get FINAL_WARNING_SEC() {
+    return this.MAX_DURATION_SEC - this.FINAL_WARNING_REMAINING_SEC;
+  },
+  ALERT_DISPLAY_MS: 6000,                              // How long each toast stays visible
+};
+
+// ---------------------------------------------------------------------------
 // Presentation Analysis
 // ---------------------------------------------------------------------------
 export const ANALYSIS_CONFIG = {

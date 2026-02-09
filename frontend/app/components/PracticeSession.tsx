@@ -3,7 +3,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useFaceLandmarker } from '../hooks/useFaceLandmarker';
 import { useAudioAnalysis } from '../hooks/useAudioAnalysis';
-import { ANALYSIS_CONFIG } from '../config/config';
+import { ANALYSIS_CONFIG, PRESENTATION_LIMITS } from '../config/config';
+
+import { toast } from 'sonner';
 
 // Import modular components
 import PracticeSessionHeader from './practice/PracticeSessionHeader';
@@ -45,6 +47,9 @@ export default function PracticeSession({ personaTitle, onBack, onComplete }: Pr
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [showMesh, setShowMesh] = useState(true);
   
+  // Time-limit alert tracking (each fires once)
+  const shownAlertsRef = useRef<Set<string>>(new Set());
+
   // Feedback State
   const [gazeStatus, setGazeStatus] = useState({
     isLookingAtScreen: true,
@@ -111,15 +116,53 @@ export default function PracticeSession({ personaTitle, onBack, onComplete }: Pr
     oscillator.stop(ctx.currentTime + ANALYSIS_CONFIG.AUDIO.DURATION);
   }, [soundEnabled]);
 
-  // Timer logic
+  // Timer logic + time-limit enforcement
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isRecording && !isPaused) {
       interval = setInterval(() => {
-        setTimer((prev) => prev + 1);
+        setTimer((prev) => {
+          // Cap timer at MAX so it never goes past / negative in the header
+          if (prev >= PRESENTATION_LIMITS.MAX_DURATION_SEC) return prev;
+
+          const next = prev + 1;
+
+          const remaining = PRESENTATION_LIMITS.MAX_DURATION_SEC - next;
+          const remMin = Math.floor(remaining / 60);
+          const remSec = remaining % 60;
+          const remLabel = remMin > 0 ? `${remMin} min${remSec > 0 ? ` ${remSec}s` : ''}` : `${remSec}s`;
+
+          // First warning (e.g. 5 min remaining)
+          if (next === PRESENTATION_LIMITS.WARNING_AT_SEC && !shownAlertsRef.current.has('warning')) {
+            shownAlertsRef.current.add('warning');
+            toast.info(`${remLabel} remaining`, {
+              duration: PRESENTATION_LIMITS.ALERT_DISPLAY_MS,
+            });
+          }
+
+          // Final warning (e.g. 1 min remaining)
+          if (next === PRESENTATION_LIMITS.FINAL_WARNING_SEC && !shownAlertsRef.current.has('final')) {
+            shownAlertsRef.current.add('final');
+            toast.warning(`${remLabel} remaining — please wrap up`, {
+              duration: PRESENTATION_LIMITS.ALERT_DISPLAY_MS,
+            });
+          }
+
+          // Hard stop at max duration — fires once because the guard above caps the timer
+          if (next >= PRESENTATION_LIMITS.MAX_DURATION_SEC && !shownAlertsRef.current.has('stop')) {
+            shownAlertsRef.current.add('stop');
+            toast.error('Time limit reached — session ending', { duration: 3000 });
+            setTimeout(() => {
+              handleStopRecording();
+            }, 2000);
+          }
+
+          return next;
+        });
       }, 1000);
     }
     return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRecording, isPaused]);
 
   // Analyze gaze from blendshapes
@@ -410,15 +453,6 @@ export default function PracticeSession({ personaTitle, onBack, onComplete }: Pr
         />
       )}
 
-      {/* 5. Footer Navigation */}
-      <div className="mt-8 flex justify-between border-t border-gray-100 pt-6 2xl:mt-12 2xl:pt-8">
-        <button
-          onClick={onBack}
-          className="rounded-lg border border-gray-300 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors 2xl:px-8 2xl:py-3.5 2xl:text-lg"
-        >
-          Exit Session
-        </button>
-      </div>
     </div>
   );
 }
