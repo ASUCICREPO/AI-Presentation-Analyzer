@@ -11,6 +11,9 @@ if not PERSONA_TABLE_NAME:
     logging.error("[!]Error: PERSONA_TABLE_NAME environment variable is not set.")
     raise ValueError("PERSONA_TABLE_NAME environment variable is not set")
 
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table(PERSONA_TABLE_NAME)
+
 def get_persona_from_id(id: str) -> Dict[str, str] | None:
     """Fetch a persona from DynamoDB using the provided ID
 
@@ -22,20 +25,11 @@ def get_persona_from_id(id: str) -> Dict[str, str] | None:
             - name: Name of the persona
             - description: Description of the persona
     """
-    # Create a DynamoDB client
-    dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(PERSONA_TABLE_NAME)
-
     try:
         response = table.get_item(Key={'personaID': id})
         item = response.get('Item')
         if item:
-            return {
-                'personaID': item['personaID'],
-                'name': item['name'],
-                'description': item['description'],
-                'personaPrompt': item['personaPrompt']
-            }
+            return item
         else:
             logging.warning(f"Persona with ID {id} not found.")
             return None
@@ -54,10 +48,6 @@ def save_persona(persona: Dict[str, str]) -> dict[str, str]:
         dictionary containing the following keys:
             - message: Success or error message indicating the result of the save operation
     """
-    # Create a DynamoDB client
-    dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(PERSONA_TABLE_NAME)
-
     try:
         if not all(key in persona for key in ['name', 'description', 'personaPrompt']):
             logging.error("Persona dictionary is missing required keys: name, description, personaPrompt.")
@@ -69,7 +59,7 @@ def save_persona(persona: Dict[str, str]) -> dict[str, str]:
             'message': 'Persona saved successfully'
         }
     except ClientError as e:
-        logging.error(f"Error saving persona with ID {persona['personaID']}: {e.response['Error']['Message']}")
+        logging.error(f"Error saving persona: {e.response['Error']['Message']}")
         return {
             'message': 'Error saving persona'
         }
@@ -84,12 +74,9 @@ def list_all_personas(last_evaled_key: Optional[str]) -> Dict[str, str]:
             - name: Name of the persona
             - description: Description of the persona
     """
-    dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(PERSONA_TABLE_NAME)
     try:
         scan_kwargs = {
             'Limit': MAX_ITEMS_PER_PAGE,
-            'Select': 'name' | 'personaID' | 'description'
         }
         if last_evaled_key:
             scan_kwargs['ExclusiveStartKey'] = {'personaID': last_evaled_key}
@@ -117,17 +104,15 @@ def update_persona(persona_id: str, updated_fields: Dict[str, str]) -> dict[str,
         dictionary containing the following keys:
             - message: Success or error message indicating the result of the update operation
     """
-    # Create a DynamoDB client
-    dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(PERSONA_TABLE_NAME)
-
     try:
-        update_expression = "SET " + ", ".join(f"{key} = :{key}" for key in updated_fields.keys())
+        update_expression = "SET " + ", ".join(f"#{key} = :{key}" for key in updated_fields.keys())
+        expression_attribute_names = {f"#{key}": key for key in updated_fields.keys()}
         expression_attribute_values = {f":{key}": value for key, value in updated_fields.items()}
 
         table.update_item(
             Key={'personaID': persona_id},
             UpdateExpression=update_expression,
+            ExpressionAttributeNames=expression_attribute_names,
             ExpressionAttributeValues=expression_attribute_values
         )
         return {
@@ -146,10 +131,6 @@ def delete_persona(persona_id: str) -> dict[str, str]:
         dictionary containing the following keys:
             - message: Success or error message indicating the result of the delete operation
     """
-    # Create a DynamoDB client
-    dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(PERSONA_TABLE_NAME)
-
     try:
         table.delete_item(Key={'personaID': persona_id})
         return {
