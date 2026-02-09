@@ -4,12 +4,12 @@ from botocore.exceptions import ClientError
 from typing import Dict, Optional
 import os
 
-DYNAMODB_TABLE_NAME: str = os.environ.get("DYNAMODB_TABLE_NAME")
+PERSONA_TABLE_NAME: str = os.environ.get("PERSONA_TABLE_NAME")
 MAX_ITEMS_PER_PAGE: int = int(os.environ.get("MAX_ITEMS_PER_PAGE", 20)) # Default to 20 items per page for pagination
 
-if not DYNAMODB_TABLE_NAME:
-    logging.error("[!]Error: DYNAMODB_TABLE_NAME environment variable is not set.")
-    raise ValueError("DYNAMODB_TABLE_NAME environment variable is not set")
+if not PERSONA_TABLE_NAME:
+    logging.error("[!]Error: PERSONA_TABLE_NAME environment variable is not set.")
+    raise ValueError("PERSONA_TABLE_NAME environment variable is not set")
 
 def get_persona_from_id(id: str) -> Dict[str, str] | None:
     """Fetch a persona from DynamoDB using the provided ID
@@ -24,7 +24,7 @@ def get_persona_from_id(id: str) -> Dict[str, str] | None:
     """
     # Create a DynamoDB client
     dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(DYNAMODB_TABLE_NAME)
+    table = dynamodb.Table(PERSONA_TABLE_NAME)
 
     try:
         response = table.get_item(Key={'personaID': id})
@@ -56,7 +56,7 @@ def save_persona(persona: Dict[str, str]) -> dict[str, str]:
     """
     # Create a DynamoDB client
     dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(DYNAMODB_TABLE_NAME)
+    table = dynamodb.Table(PERSONA_TABLE_NAME)
 
     try:
         if not all(key in persona for key in ['name', 'description', 'personaPrompt']):
@@ -85,7 +85,7 @@ def list_all_personas(last_evaled_key: Optional[str]) -> Dict[str, str]:
             - description: Description of the persona
     """
     dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(DYNAMODB_TABLE_NAME)
+    table = dynamodb.Table(PERSONA_TABLE_NAME)
     try:
         scan_kwargs = {
             'Limit': MAX_ITEMS_PER_PAGE,
@@ -119,7 +119,7 @@ def update_persona(persona_id: str, updated_fields: Dict[str, str]) -> dict[str,
     """
     # Create a DynamoDB client
     dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(DYNAMODB_TABLE_NAME)
+    table = dynamodb.Table(PERSONA_TABLE_NAME)
 
     try:
         update_expression = "SET " + ", ".join(f"{key} = :{key}" for key in updated_fields.keys())
@@ -148,7 +148,7 @@ def delete_persona(persona_id: str) -> dict[str, str]:
     """
     # Create a DynamoDB client
     dynamodb = boto3.resource('dynamodb')
-    table = dynamodb.Table(DYNAMODB_TABLE_NAME)
+    table = dynamodb.Table(PERSONA_TABLE_NAME)
 
     try:
         table.delete_item(Key={'personaID': persona_id})
