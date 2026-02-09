@@ -2,24 +2,47 @@ import * as path from 'path';
 import { Construct } from 'constructs';
 import * as cdk from 'aws-cdk-lib';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import { Construct } from 'constructs';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 
-export class BackendStack extends cdk.Stack {
+export class AIPresentationCoachStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // The code that defines your stack goes here
+    // ──────────────────────────────────────────────
+    // S3 bucket for uploads
+    // ──────────────────────────────────────────────
+    const presentationAndSessionUploadsBucket = new cdk.aws_s3.Bucket(this, 'AIPresentationCoach-Presentations-Videos', {
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+    });
 
-    const userPool = new cognito.UserPool(this, 'AI-Presentation-Coach-UserPool', {
-      userPoolName: 'AI-Presentation-Coach-UserPool',
-      // Configure sign-in options, e.g., using email as username
+    // ──────────────────────────────────────────────
+    // Lambda for presigned URL generation
+    // ──────────────────────────────────────────────
+    const s3UrlIssuerLambda = new lambda.Function(this, 'MyLambdaFunction', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      handler: 'get_presigned_url.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 's3_presigned_url_gen')),
+      timeout: cdk.Duration.seconds(20),
+      environment: {
+        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
+        'PDF_UPLOAD_TIMEOUT': '120', //PDF upload timeout in 2 minutes
+        'PRESENTATION_TIMEOUT': '1200' //Max Presentation video duration timeout 20 minutes
+      },
+    });
+
+    // ──────────────────────────────────────────────
+    // Cognito User Pool
+    // ──────────────────────────────────────────────
+    const userPool = new cognito.UserPool(this, 'UserPool', {
       signInAliases: {
         email: true,
         username: false,
       },
-      // Configure password policy
       passwordPolicy: {
         minLength: 8,
         requireLowercase: true,
@@ -27,26 +50,69 @@ export class BackendStack extends cdk.Stack {
         requireDigits: true,
         requireSymbols: true,
       },
-      // Configure account recovery options
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
-      // Make usernames/emails case insensitive (cannot be changed after creation)
       signInCaseSensitive: false,
     });
 
-    const presentationAndSessionUploadsBucket = new cdk.aws_s3.Bucket(this, 'AIPresentationCoach-Presentations-Videos', {
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-      autoDeleteObjects: true,
+    // User Pool Client (needed by the Identity Pool to authenticate users)
+    const userPoolClient = new cognito.UserPoolClient(this, 'UserPoolClient', {
+      userPool,
+      authFlows: {
+        userSrp: true,
+        userPassword: true,
+      },
+      generateSecret: false, // false for browser-based / public clients
     });
 
-    const s3UrlIssuerLambda = new lambda.Function(this, 'MyLambdaFunction', {
-      runtime: lambda.Runtime.PYTHON_3_11,
-      handler: 'get_presigned_url.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, 'lambdas', 'python')),
-      timeout: cdk.Duration.seconds(20),
-      environment: {
-        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
-        'PDF_UPLOAD_TIMEOUT': '120', //PDF upload timeout in 2 minutes
-        'PRESENTATION_TIMEOUT': '1200' //Max Presentation video duration timeout 20 minutes
+    // ──────────────────────────────────────────────
+    // Cognito Identity Pool
+    // ──────────────────────────────────────────────
+    const identityPool = new cognito.CfnIdentityPool(this, 'IdentityPool', {
+      allowUnauthenticatedIdentities: false,
+      cognitoIdentityProviders: [
+        {
+          clientId: userPoolClient.userPoolClientId,
+          providerName: userPool.userPoolProviderName,
+        },
+      ],
+    });
+
+    // ──────────────────────────────────────────────
+    // IAM Role for authenticated users
+    // ──────────────────────────────────────────────
+    const authenticatedRole = new iam.Role(this, 'CognitoAuthenticatedRole', {
+      assumedBy: new iam.FederatedPrincipal(
+        'cognito-identity.amazonaws.com',
+        {
+          StringEquals: {
+            'cognito-identity.amazonaws.com:aud': identityPool.ref,
+          },
+          'ForAnyValue:StringLike': {
+            'cognito-identity.amazonaws.com:amr': 'authenticated',
+          },
+        },
+        'sts:AssumeRoleWithWebIdentity',
+      ),
+      description: 'Role assumed by authenticated Cognito Identity Pool users',
+    });
+
+    // Grant Amazon Transcribe real-time streaming permissions
+    authenticatedRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'transcribe:StartStreamTranscriptionWebSocket',
+          'transcribe:StartStreamTranscription',
+        ],
+        resources: ['*'],
+      }),
+    );
+
+    // Attach role to the Identity Pool
+    new cognito.CfnIdentityPoolRoleAttachment(this, 'IdentityPoolRoleAttachment', {
+      identityPoolId: identityPool.ref,
+      roles: {
+        authenticated: authenticatedRole.roleArn,
       },
     });
 
@@ -104,5 +170,28 @@ export class BackendStack extends cdk.Stack {
     // DELETE /personas/{id} - delete persona by ID
     persona_id_resource.addMethod('DELETE', new apigateway.LambdaIntegration(personaCrudLambda));
 
+
+    // ──────────────────────────────────────────────
+    // Stack Outputs (useful for frontend configuration)
+    // ──────────────────────────────────────────────
+    new cdk.CfnOutput(this, 'UserPoolId', {
+      value: userPool.userPoolId,
+      description: 'Cognito User Pool ID',
+    });
+
+    new cdk.CfnOutput(this, 'UserPoolClientId', {
+      value: userPoolClient.userPoolClientId,
+      description: 'Cognito User Pool Client ID',
+    });
+
+    new cdk.CfnOutput(this, 'IdentityPoolId', {
+      value: identityPool.ref,
+      description: 'Cognito Identity Pool ID',
+    });
+
+    new cdk.CfnOutput(this, 'Region', {
+      value: this.region,
+      description: 'AWS Region',
+    });
   } 
 }
