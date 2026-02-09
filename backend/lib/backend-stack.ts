@@ -1,9 +1,10 @@
+import * as path from 'path';
+import { Construct } from 'constructs';
 import * as cdk from 'aws-cdk-lib';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
-import { Construct } from 'constructs';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as path from 'path';
-// import * as sqs from 'aws-cdk-lib/aws-sqs';
+import * as apigateway from 'aws-cdk-lib/aws-apigateway';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 
 export class BackendStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -48,5 +49,28 @@ export class BackendStack extends cdk.Stack {
         'PRESENTATION_TIMEOUT': '1200' //Max Presentation video duration timeout 20 minutes
       },
     });
-  }
+
+    // API Gateway definitions
+    const apiGateway = new apigateway.LambdaRestApi(this, 'AIPresentationCoachApi', {
+      handler: s3UrlIssuerLambda,
+      proxy: false,
+    });
+
+    let s3_urls_resource = apiGateway.root.addResource('s3_urls'); //Add /s3_urls resource to the API Gateway
+    s3_urls_resource.addMethod('GET', new   apigateway.LambdaIntegration(s3UrlIssuerLambda)); //Add GET method to the /s3_urls resource
+    
+
+    //Dynamo DB Table Config
+    const myTable = new dynamodb.TableV2(this, 'AIPresentationAudiencePersonaTable', {
+      // Required: Define the partition key
+      partitionKey: {
+        name: 'personaID', // The name of the partition key attribute
+        type: dynamodb.AttributeType.STRING, // The data type (STRING, NUMBER, BINARY)
+      },
+      billing: dynamodb.Billing.onDemand(),
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      // pointInTimeRecovery: true, // Commenting for now to avoid additional costs, can be enabled in production for data protection.
+    });
+
+  } 
 }

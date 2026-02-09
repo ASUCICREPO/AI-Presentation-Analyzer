@@ -6,9 +6,9 @@ import json
 import uuid
 import os
 
-PRESENTATION_TIMEOUT = os.environ.get("PRESENTATION_TIMEOUT", 1200) # 20 minutes defualt
-PDF_UPLOAD_TIMEOUT = os.environ.get("PDF_UPLOAD_TIMEOUT", 120) # 120 seconds default
-UPLOADS_BUCKET = os.environ.get("UPLOADS_BUCKET")
+PRESENTATION_TIMEOUT: int = int(os.environ.get("PRESENTATION_TIMEOUT", 1200)) # 20 minutes defualt
+PDF_UPLOAD_TIMEOUT: int = int(os.environ.get("PDF_UPLOAD_TIMEOUT", 120)) # 120 seconds default
+UPLOADS_BUCKET:str = os.environ.get("UPLOADS_BUCKET")
 
 if not UPLOADS_BUCKET:
     logging.error("[!]Error: UPLOADS_BUCKET environment variable is not set.")
