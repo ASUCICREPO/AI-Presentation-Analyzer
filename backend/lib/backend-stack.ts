@@ -56,21 +56,53 @@ export class BackendStack extends cdk.Stack {
       proxy: false,
     });
 
-    let s3_urls_resource = apiGateway.root.addResource('s3_urls'); //Add /s3_urls resource to the API Gateway
-    s3_urls_resource.addMethod('GET', new   apigateway.LambdaIntegration(s3UrlIssuerLambda)); //Add GET method to the /s3_urls resource
-    
+    // S3 URLs resource
+    let s3_urls_resource = apiGateway.root.addResource('s3_urls');
+    s3_urls_resource.addMethod('GET', new apigateway.LambdaIntegration(s3UrlIssuerLambda));
 
-    //Dynamo DB Table Config
-    const myTable = new dynamodb.TableV2(this, 'AIPresentationAudiencePersonaTable', {
+    
+    //Personas Dynamo DB Table Config
+    const personasTable = new dynamodb.TableV2(this, 'AIPresentationAudiencePersonaTable', {
       // Required: Define the partition key
       partitionKey: {
         name: 'personaID', // The name of the partition key attribute
         type: dynamodb.AttributeType.STRING, // The data type (STRING, NUMBER, BINARY)
       },
       billing: dynamodb.Billing.onDemand(),
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      removalPolicy: cdk.RemovalPolicy.DESTROY
       // pointInTimeRecovery: true, // Commenting for now to avoid additional costs, can be enabled in production for data protection.
     });
+
+    // Persona CRUD Lambda
+    const personaCrudLambda = new lambda.Function(this, 'PersonaCrudLambda', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      handler: 'persona_crud.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, 'lambdas', 'dynamo_persona_lambdas')),
+      timeout: cdk.Duration.seconds(20),
+      environment: {
+        'DYNAMODB_TABLE_NAME': personasTable.tableName,
+        'MAX_ITEMS_PER_PAGE': '20',
+      },
+    });
+
+    // Grant Lambda access to the DynamoDB table
+    personasTable.grantReadWriteData(personaCrudLambda);
+
+    // Personas resource
+    let personas_resource = apiGateway.root.addResource('personas');
+    // GET /personas - list all personas (with optional pagination)
+    personas_resource.addMethod('GET', new apigateway.LambdaIntegration(personaCrudLambda));
+    // POST /personas - create a new persona
+    personas_resource.addMethod('POST', new apigateway.LambdaIntegration(personaCrudLambda));
+
+    // /personas/{id} resource for GET, PUT, DELETE by ID
+    let persona_id_resource = personas_resource.addResource('{personaID}');
+    // GET /personas/{id} - get persona by ID
+    persona_id_resource.addMethod('GET', new apigateway.LambdaIntegration(personaCrudLambda));
+    // PUT /personas/{id} - update persona by ID
+    persona_id_resource.addMethod('PUT', new apigateway.LambdaIntegration(personaCrudLambda));
+    // DELETE /personas/{id} - delete persona by ID
+    persona_id_resource.addMethod('DELETE', new apigateway.LambdaIntegration(personaCrudLambda));
 
   } 
 }
