@@ -3,7 +3,7 @@
 import React from 'react';
 
 interface PersonaCardProps {
-  title: string;
+  name: string;
   expertise: string;
   keyPriorities: string[];
   attentionSpan: string;
@@ -13,7 +13,7 @@ interface PersonaCardProps {
 }
 
 export default function PersonaCard({
-  title,
+  name,
   expertise,
   keyPriorities,
   attentionSpan,
@@ -81,7 +81,7 @@ export default function PersonaCard({
           </svg>
         </div>
         <div>
-          <h3 className="text-base font-semibold text-gray-900 2xl:text-2xl font-serif">{title}</h3>
+          <h3 className="text-base font-semibold text-gray-900 2xl:text-2xl font-serif">{name}</h3>
           <p className="text-sm text-gray-500 2xl:text-lg font-sans">Expertise: {expertise}</p>
         </div>
       </div>

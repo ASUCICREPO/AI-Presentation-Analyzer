@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ACADEMIC_PERSONA } from '../config/config';
 import { useFaceLandmarker } from '../hooks/useFaceLandmarker';
 import { useAudioAnalysis } from '../hooks/useAudioAnalysis';
 import { ANALYSIS_CONFIG } from '../config/config';
@@ -14,11 +13,12 @@ import RealTimeFeedbackPanel from './practice/RealTimeFeedbackPanel';
 import TranscriptionPanel from './practice/TranscriptionPanel';
 
 interface PracticeSessionProps {
+  personaTitle: string;
   onBack: () => void;
   onComplete: () => void;
 }
 
-export default function PracticeSession({ onBack, onComplete }: PracticeSessionProps) {
+export default function PracticeSession({ personaTitle, onBack, onComplete }: PracticeSessionProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [timer, setTimer] = useState(0);
@@ -353,7 +353,7 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
       <PracticeSessionHeader 
         onBack={onBack}
         timer={timer}
-        personaTitle={ACADEMIC_PERSONA.title}
+        personaTitle={personaTitle}
       />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 2xl:gap-10">

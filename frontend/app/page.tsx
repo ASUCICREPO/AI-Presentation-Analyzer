@@ -24,6 +24,7 @@ export default function Home() {
   // App state
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedPersona, setSelectedPersona] = useState<string | null>(null);
+  const [selectedPersonaName, setSelectedPersonaName] = useState<string>('');
   const [customNotes, setCustomNotes] = useState('');
   
   // Modal State
@@ -146,6 +147,7 @@ export default function Home() {
         <PersonaSelection
           selectedPersona={selectedPersona}
           onSelectPersona={handlePersonaSelect}
+          onPersonaNameChange={setSelectedPersonaName}
           customNotes={customNotes}
           onCustomNotesChange={setCustomNotes}
           onContinue={handleContinueToUpload}
@@ -154,6 +156,7 @@ export default function Home() {
 
       {currentStep === 2 && (
         <UploadContent 
+          personaName={selectedPersonaName}
           onBack={handleBackToPersona}
           onContinue={handleContinueFromUpload}
         />
@@ -161,6 +164,7 @@ export default function Home() {
 
       {currentStep === 3 && (
         <PracticeSession
+          personaTitle={selectedPersonaName}
           onBack={handleBackToUpload}
           onComplete={handlePracticeComplete}
         />

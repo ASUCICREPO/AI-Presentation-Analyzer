@@ -17,12 +17,20 @@ export class AIPresentationCoachStack extends cdk.Stack {
     const presentationAndSessionUploadsBucket = new cdk.aws_s3.Bucket(this, 'AIPresentationCoach-Presentations-Videos', {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
+      cors: [
+        {
+          allowedOrigins: ['*'],
+          allowedMethods: [cdk.aws_s3.HttpMethods.GET, cdk.aws_s3.HttpMethods.PUT, cdk.aws_s3.HttpMethods.POST],
+          allowedHeaders: ['*'],
+          exposedHeaders: ['ETag'],
+        },
+      ],
     });
 
     // ──────────────────────────────────────────────
     // Lambda for presigned URL generation
     // ──────────────────────────────────────────────
-    const s3UrlIssuerLambda = new lambda.Function(this, 'MyLambdaFunction', {
+    const s3UrlIssuerLambda = new lambda.Function(this, 's3UrlIssuerLambda', {
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'get_presigned_url.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 's3_presigned_url_gen')),

@@ -3,6 +3,8 @@ import boto3
 from botocore.exceptions import ClientError
 from typing import Dict, Optional
 import os
+import json
+import uuid
 
 PERSONA_TABLE_NAME: str = os.environ.get("PERSONA_TABLE_NAME")
 MAX_ITEMS_PER_PAGE: int = int(os.environ.get("MAX_ITEMS_PER_PAGE", 20)) # Default to 20 items per page for pagination
@@ -13,6 +15,19 @@ if not PERSONA_TABLE_NAME:
 
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(PERSONA_TABLE_NAME)
+
+def _response(status_code: int, body: dict) -> dict:
+    """Return a properly formatted API Gateway proxy response with CORS headers."""
+    return {
+        "statusCode": status_code,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+        },
+        "body": json.dumps(body),
+    }
 
 def get_persona_from_id(id: str) -> Dict[str, str] | None:
     """Fetch a persona from DynamoDB using the provided ID
@@ -51,18 +66,14 @@ def save_persona(persona: Dict[str, str]) -> dict[str, str]:
     try:
         if not all(key in persona for key in ['name', 'description', 'personaPrompt']):
             logging.error("Persona dictionary is missing required keys: name, description, personaPrompt.")
-            return {
+            return _response(400, {
                 'message': 'Error saving persona: Missing required field(s): name, description, and personaPrompt are required.'
-            }
+            })
         table.put_item(Item=persona)
-        return {
-            'message': 'Persona saved successfully'
-        }
+        return _response(201, {'message': 'Persona saved successfully', 'persona': persona})
     except ClientError as e:
         logging.error(f"Error saving persona: {e.response['Error']['Message']}")
-        return {
-            'message': 'Error saving persona'
-        }
+        return _response(500, {'message': 'Error saving persona'})
 
 def list_all_personas(last_evaled_key: Optional[str]) -> Dict[str, str]:
     """Fetch personas from DynamoDB with mandatory pagination
@@ -82,19 +93,14 @@ def list_all_personas(last_evaled_key: Optional[str]) -> Dict[str, str]:
             scan_kwargs['ExclusiveStartKey'] = {'personaID': last_evaled_key}
         response = table.scan(**scan_kwargs)
         items = response.get('Items', [])
-        if items:
-            return {
-                'personas': items,
-                'lastEvaluatedKey': response.get('LastEvaluatedKey', {}).get('personaID')
-            }
-        else:
-            logging.warning("No personas found.")
-            return None
+        result = {'personas': items}
+        lk = response.get('LastEvaluatedKey')
+        if lk:
+            result['lastEvaluatedKey'] = lk.get('personaID')
+        return _response(200, result)
     except ClientError as e:
         logging.error(f"Error fetching personas: {e.response['Error']['Message']}")
-        return {
-            'message': 'Error fetching personas'
-        }
+        return _response(500, {'message': 'Error fetching personas'})
 
 def update_persona(persona_id: str, updated_fields: Dict[str, str]) -> dict[str, str]:
     """Update an existing persona in DynamoDB
@@ -115,14 +121,10 @@ def update_persona(persona_id: str, updated_fields: Dict[str, str]) -> dict[str,
             ExpressionAttributeNames=expression_attribute_names,
             ExpressionAttributeValues=expression_attribute_values
         )
-        return {
-            'message': 'Persona updated successfully'
-        }
+        return _response(200, {'message': 'Persona updated successfully'})
     except ClientError as e:
         logging.error(f"Error updating persona with ID {persona_id}: {e.response['Error']['Message']}")
-        return {
-            'message': 'Error updating persona'
-        }
+        return _response(500, {'message': 'Error updating persona'})
 
 def delete_persona(persona_id: str) -> dict[str, str]:
     """Delete a persona from DynamoDB using the provided ID
@@ -133,67 +135,56 @@ def delete_persona(persona_id: str) -> dict[str, str]:
     """
     try:
         table.delete_item(Key={'personaID': persona_id})
-        return {
-            'message': 'Persona deleted successfully'
-        }
+        return _response(200, {'message': 'Persona deleted successfully'})
     except ClientError as e:
         logging.error(f"Error deleting persona with ID {persona_id}: {e.response['Error']['Message']}")
-        return {
-            'message': 'Error deleting persona'
-        }
+        return _response(500, {'message': 'Error deleting persona'})
 
-def lambda_handler(event, context) -> Dict[str, str]:
-    """AWS Lambda handler to manage CRUD operations for personas in DynamoDB
-    :param event: Event data passed to the Lambda function. Expects a dictionary with keys 'operation' and 'data'
-    :param context: Runtime information provided by AWS Lambda
+def lambda_handler(event, context):
+    """AWS Lambda handler — routes API Gateway requests to CRUD operations.
 
-    :return: 
-        Dictionary containing the following keys:
-            - message: Success or error message indicating the result of the operation
+    Routes:
+        GET    /personas              → list all personas
+        GET    /personas/{personaID}  → get one persona
+        POST   /personas              → create persona
+        PUT    /personas/{personaID}  → update persona
+        DELETE /personas/{personaID}  → delete persona
     """
-    operation = event.get('operation')
-    data = event.get('data', {})
-    if not operation:
-        return {'message': 'Missing operation in event'}
+    logging.info(f"Event: {json.dumps(event)}")
 
-    if operation == 'get':
-        persona_id = data.get('personaID')
-        if not persona_id:
-            return {'message': 'Missing personaID for get operation'}
-        result = get_persona_from_id(persona_id)
-        if result:
-            return {'message': 'Success', 'persona': result}
+    method = event.get('httpMethod', '')
+    path_params = event.get('pathParameters') or {}
+    qs = event.get('queryStringParameters') or {}
+    persona_id = path_params.get('personaID')
+
+    if method == 'OPTIONS':
+        return _response(200, {'message': 'OK'})
+
+    if method == 'GET':
+        if persona_id:
+            item = get_persona_from_id(persona_id)
+            if item:
+                return _response(200, {'persona': item})
+            return _response(404, {'message': f'Persona {persona_id} not found'})
         else:
-            return {'message': f'Persona with ID {persona_id} not found'}
+            return list_all_personas(qs.get('lastEvaluatedKey'))
 
-    elif operation == 'list':
-        last_evaled_key = data.get('lastEvaluatedKey')
-        result = list_all_personas(last_evaled_key)
-        if result and 'personas' in result:
-            return {'message': 'Success', **result}
-        else:
-            return result if result else {'message': 'No personas found'}
+    if method == 'POST':
+        body = json.loads(event.get('body') or '{}')
+        if 'personaID' not in body:
+            body['personaID'] = str(uuid.uuid4())
+        return save_persona(body)
 
-    elif operation == 'create':
-        persona = data.get('persona')
-        if not persona:
-            return {'message': 'Missing persona data for create operation'}
-        return save_persona(persona)
-
-    elif operation == 'update':
-        persona_id = data.get('personaID')
-        updated_fields = data.get('updatedFields')
-        if not persona_id or not updated_fields:
-            return {'message': 'Missing personaID or updatedFields for update operation'}
-        return update_persona(persona_id, updated_fields)
-
-    elif operation == 'delete':
-        persona_id = data.get('personaID')
+    if method == 'PUT':
         if not persona_id:
-            return {'message': 'Missing personaID for delete operation'}
+            return _response(400, {'message': 'Missing personaID in path'})
+        body = json.loads(event.get('body') or '{}')
+        return update_persona(persona_id, body)
+
+    if method == 'DELETE':
+        if not persona_id:
+            return _response(400, {'message': 'Missing personaID in path'})
         return delete_persona(persona_id)
 
-    else:
-        return {'message': f'Unknown operation: {operation}'}
+    return _response(400, {'message': f'Unsupported method: {method}'})
 
-    
