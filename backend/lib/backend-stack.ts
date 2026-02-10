@@ -1,5 +1,4 @@
 import * as path from 'path';
-import { Construct } from 'constructs';
 import * as cdk from 'aws-cdk-lib';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as iam from 'aws-cdk-lib/aws-iam';
@@ -26,7 +25,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     const s3UrlIssuerLambda = new lambda.Function(this, 'MyLambdaFunction', {
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'get_presigned_url.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 's3_presigned_url_gen')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambdas', 's3_presigned_url_gen')),
       timeout: cdk.Duration.seconds(20),
       environment: {
         'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
