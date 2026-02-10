@@ -1,29 +1,29 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ACADEMIC_PERSONA } from '../config/personas';
 import { useFaceLandmarker } from '../hooks/useFaceLandmarker';
-import { ANALYSIS_CONFIG } from '../config/analysisConfig';
+import { useAudioAnalysis } from '../hooks/useAudioAnalysis';
+import { ANALYSIS_CONFIG, PRESENTATION_LIMITS, DEFAULT_TIME_LIMIT_SEC } from '../config/config';
+
+import { toast } from 'sonner';
 
 // Import modular components
 import PracticeSessionHeader from './practice/PracticeSessionHeader';
 import CameraView from './practice/CameraView';
 import CalibrationPanel from './practice/CalibrationPanel';
 import RealTimeFeedbackPanel from './practice/RealTimeFeedbackPanel';
-import FeedbackLog from './practice/FeedbackLog';
+import TranscriptionPanel from './practice/TranscriptionPanel';
 
 interface PracticeSessionProps {
+  personaTitle: string;
+  timeLimitSec?: number;
   onBack: () => void;
   onComplete: () => void;
 }
 
-interface FeedbackEvent {
-  time: string;
-  message: string;
-  type: 'warning' | 'info' | 'success';
-}
-
-export default function PracticeSession({ onBack, onComplete }: PracticeSessionProps) {
+export default function PracticeSession({ personaTitle, timeLimitSec, onBack, onComplete }: PracticeSessionProps) {
+  // Resolve the effective time cap for this session
+  const maxDuration = timeLimitSec ?? DEFAULT_TIME_LIMIT_SEC;
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [timer, setTimer] = useState(0);
@@ -35,6 +35,7 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number | null>(null);
   const lastProcessTimeRef = useRef<number>(0);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   
   // Audio Feedback State
   const [soundEnabled, setSoundEnabled] = useState(true);
@@ -47,8 +48,11 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
 
   // New Calibration Mode State
   const [isCalibrating, setIsCalibrating] = useState(false);
-  const [showMesh, setShowMesh] = useState(true); // Toggle for mesh visibility
+  const [showMesh, setShowMesh] = useState(false);
   
+  // Time-limit alert tracking (each fires once)
+  const shownAlertsRef = useRef<Set<string>>(new Set());
+
   // Feedback State
   const [gazeStatus, setGazeStatus] = useState({
     isLookingAtScreen: true,
@@ -56,6 +60,18 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
     color: 'text-green-600',
     direction: 'Center'
   });
+
+  // Audio Analysis Hook
+  const {
+    metrics: audioMetrics,
+    transcripts,
+    partialTranscript,
+    isTranscribing,
+    startAnalysis,
+    pauseAnalysis,
+    resumeAnalysis,
+    stopAnalysis,
+  } = useAudioAnalysis();
   
   // Hook initialization
   const {
@@ -69,10 +85,10 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
     minTrackingConfidence: 0.5,
   });
 
-  // Initialize Audio Context
+  // Initialize Audio Context (for alert sounds)
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioContextRef.current = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
     }
     return () => {
       audioContextRef.current?.close();
@@ -82,13 +98,11 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
   const playAlertSound = useCallback(() => {
     if (!audioContextRef.current || !soundEnabled) return;
     
-    // Resume context if suspended (browser policy)
     if (audioContextRef.current.state === 'suspended') {
       audioContextRef.current.resume();
     }
 
     const ctx = audioContextRef.current;
-    
     const oscillator = ctx.createOscillator();
     const gainNode = ctx.createGain();
     
@@ -105,29 +119,70 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
     oscillator.stop(ctx.currentTime + ANALYSIS_CONFIG.AUDIO.DURATION);
   }, [soundEnabled]);
 
-  // Timer logic
+  // Timer logic + time-limit enforcement
   useEffect(() => {
     let interval: NodeJS.Timeout;
+    // Compute warning thresholds relative to the persona's time limit
+    const warningAt = maxDuration - PRESENTATION_LIMITS.WARNING_REMAINING_SEC;
+    const finalWarningAt = maxDuration - PRESENTATION_LIMITS.FINAL_WARNING_REMAINING_SEC;
+
     if (isRecording && !isPaused) {
       interval = setInterval(() => {
-        setTimer((prev) => prev + 1);
+        setTimer((prev) => {
+          // Cap timer at MAX so it never goes past / negative in the header
+          if (prev >= maxDuration) return prev;
+
+          const next = prev + 1;
+
+          const remaining = maxDuration - next;
+          const remMin = Math.floor(remaining / 60);
+          const remSec = remaining % 60;
+          const remLabel = remMin > 0 ? `${remMin} min${remSec > 0 ? ` ${remSec}s` : ''}` : `${remSec}s`;
+
+          // First warning (e.g. 5 min remaining)
+          if (warningAt > 0 && next === warningAt && !shownAlertsRef.current.has('warning')) {
+            shownAlertsRef.current.add('warning');
+            toast.info(`${remLabel} remaining`, {
+              duration: PRESENTATION_LIMITS.ALERT_DISPLAY_MS,
+            });
+          }
+
+          // Final warning (e.g. 1 min remaining)
+          if (finalWarningAt > 0 && next === finalWarningAt && !shownAlertsRef.current.has('final')) {
+            shownAlertsRef.current.add('final');
+            toast.warning(`${remLabel} remaining — please wrap up`, {
+              duration: PRESENTATION_LIMITS.ALERT_DISPLAY_MS,
+            });
+          }
+
+          // Hard stop at max duration — fires once because the guard above caps the timer
+          if (next >= maxDuration && !shownAlertsRef.current.has('stop')) {
+            shownAlertsRef.current.add('stop');
+            toast.error('Time limit reached — session ending', { duration: 3000 });
+            setTimeout(() => {
+              handleStopRecording();
+            }, 2000);
+          }
+
+          return next;
+        });
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [isRecording, isPaused]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRecording, isPaused, maxDuration]);
 
   // Analyze gaze from blendshapes
-  const analyzeGaze = useCallback((shapes: any[]) => {
+  const analyzeGaze = useCallback((shapes: { categories: { categoryName: string; score: number }[] }[]) => {
     if (!shapes || shapes.length === 0) return { isLookingAtScreen: false, direction: 'Unknown' };
 
     const categories = shapes[0].categories;
     const scores: Record<string, number> = {};
     
-    categories.forEach((cat: any) => {
+    categories.forEach((cat) => {
       scores[cat.categoryName] = cat.score;
     });
 
-    // Check gaze directions
     const eyesWide = (scores.eyeWideLeft + scores.eyeWideRight) / 2;
     const isSurprised = eyesWide > 0.4;
     
@@ -179,7 +234,6 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
       return;
     }
 
-    // Limit FPS
     const delta = time - lastProcessTimeRef.current;
     if (delta < ANALYSIS_CONFIG.PERFORMANCE.FRAME_INTERVAL) {
       animationFrameRef.current = requestAnimationFrame(loop);
@@ -195,7 +249,6 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
       return;
     }
 
-    // Match canvas to video dimensions
     if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
@@ -205,7 +258,6 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
 
     if (result) {
       const ctx = canvas.getContext('2d');
-      // Only draw mesh if in calibration mode AND mesh is enabled
       if (isCalibrating && showMesh) {
         drawResults(canvas, result);
       } else {
@@ -215,40 +267,35 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
       if (result.faceBlendshapes && result.faceBlendshapes.length > 0) {
         const { isLookingAtScreen } = analyzeGaze(result.faceBlendshapes);
 
-        // --- Audio Alert Logic ---
+        // Audio Alert Logic
         if (isRecording && !isPaused) {
           const now = Date.now();
 
           if (!isLookingAtScreen) {
-            // User is looking away
-            lookBackStartTimeRef.current = null; // Reset look-back timer
+            lookBackStartTimeRef.current = null;
 
             if (lookAwayStartTimeRef.current === null) {
-              lookAwayStartTimeRef.current = now; // Start look-away timer
+              lookAwayStartTimeRef.current = now;
             }
 
             const durationLookingAway = now - lookAwayStartTimeRef.current;
 
-            // Trigger alert if threshold exceeded and not already played
             if (durationLookingAway > ANALYSIS_CONFIG.TIMING.LOOK_AWAY_THRESHOLD_MS && !alertPlayedRef.current) {
               playAlertSound();
-              alertPlayedRef.current = true; // Mark as played so it only happens once per "distraction"
+              alertPlayedRef.current = true;
             }
           } else {
-            // User is looking at screen (Center)
-            lookAwayStartTimeRef.current = null; // Reset look-away timer
+            lookAwayStartTimeRef.current = null;
 
             if (lookBackStartTimeRef.current === null) {
               lookBackStartTimeRef.current = now;
             }
 
-            // Check if they have held gaze for the recovery threshold
             if (now - lookBackStartTimeRef.current > ANALYSIS_CONFIG.TIMING.LOOK_BACK_THRESHOLD_MS) {
-              alertPlayedRef.current = false; // Reset alert state, ready for next distraction
+              alertPlayedRef.current = false;
             }
           }
         } else {
-          // Reset all logic when paused/stopped
           lookAwayStartTimeRef.current = null;
           lookBackStartTimeRef.current = null;
           alertPlayedRef.current = false;
@@ -267,14 +314,14 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
         audio: true 
       });
       
+      mediaStreamRef.current = stream;
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        // Wait for video to be ready before setting active
         videoRef.current.onloadeddata = () => {
           setCameraActive(true);
           setPermissionDenied(false);
-          setIsCalibrating(true); // Automatically enter calibration mode on start
-          setShowMesh(true); // Reset mesh to visible on start
+          setIsCalibrating(true);
         };
       }
     } catch (err) {
@@ -289,11 +336,11 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
       stream.getTracks().forEach(track => track.stop());
       videoRef.current.srcObject = null;
     }
+    mediaStreamRef.current = null;
     setCameraActive(false);
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
   }, []);
 
-  // Removed auto-start useEffect. Only cleanup on unmount.
   useEffect(() => {
     return () => stopCamera();
   }, [stopCamera]);
@@ -309,60 +356,59 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
   }, [cameraActive, mpStatus, processFrame]);
 
   // Recording Handlers
-  const handleStartRecording = () => {
-    if (cameraActive) {
-      setIsCalibrating(false); // Ensure mesh is off when recording starts
+  const handleStartRecording = async () => {
+    if (cameraActive && mediaStreamRef.current) {
+      setIsCalibrating(false);
       setIsRecording(true);
       setIsPaused(false);
-      // Reset logic states
       lookAwayStartTimeRef.current = null;
       lookBackStartTimeRef.current = null;
       alertPlayedRef.current = false;
+
+      // Start audio analysis (Transcribe + volume/filler/pause detection)
+      await startAnalysis(mediaStreamRef.current);
     }
   };
   
   const handlePauseRecording = () => {
     setIsPaused(true);
+    pauseAnalysis();
   };
   
   const handleResumeRecording = () => {
     setIsPaused(false);
+    resumeAnalysis();
   };
 
   const handleStopRecording = () => {
     setIsRecording(false);
     setIsPaused(false);
+    stopAnalysis();
     stopCamera();
     onComplete();
   };
 
-  // Mock feedback for demonstration
+  // Map audio metrics to the shape RealTimeFeedbackPanel expects
   const feedbackMetrics = {
-    speakingPace: 131,
-    volumeLevel: 71,
-    fillerWords: 5,
-    pauses: 10,
+    speakingPace: audioMetrics.wpm,
+    volumeLevel: audioMetrics.volume,
+    fillerWords: audioMetrics.fillerWords,
+    pauses: audioMetrics.pauses,
   };
 
-  const feedbackEvents: FeedbackEvent[] = [
-    { time: '00:23', message: 'Looking away from camera for extended period', type: 'warning' },
-    { time: '00:19', message: 'Volume too low - speak up for clarity', type: 'info' },
-    { time: '00:18', message: 'Filler word detected: "like"', type: 'warning' },
-    { time: '00:17', message: 'Good eye contact - keep it up!', type: 'success' },
-  ];
-  
   return (
-    <div className="mx-auto w-full max-w-[1200px] px-4 py-6 sm:px-6 sm:py-8 2xl:max-w-[1600px] 2xl:py-12">
+    <div className="mx-auto w-full max-w-[1200px] px-4 py-3 sm:px-6 sm:py-4 2xl:max-w-[1600px] 2xl:py-8">
       {/* 1. Header Section */}
       <PracticeSessionHeader 
         onBack={onBack}
         timer={timer}
-        personaTitle={ACADEMIC_PERSONA.title}
+        maxDurationSec={maxDuration}
+        personaTitle={personaTitle}
       />
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 2xl:gap-10">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 2xl:gap-6">
         {/* 2. Left Column: Camera View & Controls */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="lg:col-span-2 space-y-3">
           <CameraView 
             videoRef={videoRef}
             canvasRef={canvasRef}
@@ -382,7 +428,7 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
 
         {/* 3. Right Column: Dynamic Panel (Feedback OR Calibration) */}
         <div className="lg:col-span-1">
-          <div className="h-full rounded-xl border border-gray-200 bg-white p-6 shadow-sm 2xl:p-8 relative overflow-hidden">
+          <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm 2xl:p-6 relative overflow-hidden">
             
             {isCalibrating ? (
               <CalibrationPanel 
@@ -393,7 +439,7 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
               />
             ) : (
               <RealTimeFeedbackPanel 
-                isRecording={isRecording}
+                isRecording={isRecording && !isPaused}
                 soundEnabled={soundEnabled}
                 onToggleSound={() => setSoundEnabled(!soundEnabled)}
                 gazeStatus={gazeStatus}
@@ -404,20 +450,16 @@ export default function PracticeSession({ onBack, onComplete }: PracticeSessionP
         </div>
       </div>
 
-      {/* 4. Timestamped Feedback Scroll */}
-      {isRecording && (
-        <FeedbackLog events={feedbackEvents} />
+      {/* 4. Live Transcription — hidden during calibration */}
+      {!isCalibrating && (
+        <TranscriptionPanel
+          transcripts={transcripts}
+          partialTranscript={partialTranscript}
+          isRecording={isRecording && !isPaused}
+          isTranscribing={isTranscribing && isRecording && !isPaused}
+        />
       )}
 
-      {/* 5. Footer Navigation */}
-      <div className="mt-8 flex justify-between border-t border-gray-100 pt-6 2xl:mt-12 2xl:pt-8">
-        <button
-          onClick={onBack}
-          className="rounded-lg border border-gray-300 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors 2xl:px-8 2xl:py-3.5 2xl:text-lg"
-        >
-          Exit Session
-        </button>
-      </div>
     </div>
   );
 }

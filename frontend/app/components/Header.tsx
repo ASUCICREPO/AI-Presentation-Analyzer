@@ -1,7 +1,9 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Image from 'next/image';
+import { LogOut, User } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 interface Step {
   number: number;
@@ -21,11 +23,27 @@ const steps: Step[] = [
 ];
 
 export default function Header({ currentStep, onStepClick }: HeaderProps) {
+  const { signOut, userEmail } = useAuth();
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const initials = userEmail ? userEmail.charAt(0).toUpperCase() : 'U';
+
   return (
     <header className="w-full border-b border-gray-100 bg-white">
-      <div className="mx-auto flex w-full items-center justify-between px-4 py-3 sm:px-6 lg:px-8 xl:px-12">
+      <div className="mx-auto flex w-full items-center px-4 py-3 sm:px-6 lg:px-8 xl:px-12">
         {/* Logo Section */}
-        <div className="flex items-center gap-3 sm:gap-4">
+        <div className="flex shrink-0 items-center gap-3 sm:gap-4">
           <Image
             src="/logo.png"
             alt="The University of Chicago"
@@ -34,15 +52,14 @@ export default function Header({ currentStep, onStepClick }: HeaderProps) {
             className="h-7 w-auto sm:h-8 lg:h-9 xl:h-10"
             priority
           />
-          {/* Divider */}
           <div className="hidden h-6 w-px bg-gray-200 sm:block lg:h-7 xl:h-8" />
-          {/* App Name */}
-          <div className="hidden sm:block">
-            <span className="text-sm font-semibold text-gray-800 lg:text-base xl:text-lg font-sans">
-              AI Presentation Coach
-            </span>
-          </div>
+          <span className="hidden text-sm font-semibold text-gray-800 sm:block lg:text-base xl:text-lg font-sans">
+            AI Presentation Coach
+          </span>
         </div>
+
+        {/* Spacer pushes stepper + avatar to the right */}
+        <div className="flex-1" />
 
         {/* Stepper */}
         <nav className="flex items-center">
@@ -50,7 +67,7 @@ export default function Header({ currentStep, onStepClick }: HeaderProps) {
             const isActive = step.number === currentStep;
             const isCompleted = step.number < currentStep;
             const isClickable = step.number < currentStep || step.number === currentStep;
-            
+
             return (
               <React.Fragment key={step.number}>
                 <div className="relative group">
@@ -107,7 +124,7 @@ export default function Header({ currentStep, onStepClick }: HeaderProps) {
                     </div>
                   )}
                 </div>
-                
+
                 {index < steps.length - 1 && (
                   <div
                     className={`
@@ -120,6 +137,50 @@ export default function Header({ currentStep, onStepClick }: HeaderProps) {
             );
           })}
         </nav>
+
+        {/* Divider between stepper and avatar */}
+        <div className="mx-3 h-6 w-px bg-gray-200 sm:mx-4" />
+
+        {/* Avatar dropdown */}
+        <div className="relative shrink-0" ref={dropdownRef}>
+          <button
+            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-maroon text-sm font-semibold text-white transition hover:bg-maroon-dark focus:outline-none focus:ring-2 focus:ring-maroon/30 focus:ring-offset-2 font-sans"
+            title={userEmail ?? 'Account'}
+          >
+            {initials}
+          </button>
+
+          {isDropdownOpen && (
+            <div className="absolute right-0 top-full mt-2 w-60 rounded-xl border border-gray-100 bg-white py-1 shadow-lg z-50 animate-fade-in">
+              <div className="border-b border-gray-100 px-4 py-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-maroon-50 text-maroon">
+                    <User size={16} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-gray-900 font-sans">
+                      {userEmail}
+                    </p>
+                    <p className="text-xs text-gray-400 font-sans">Signed in</p>
+                  </div>
+                </div>
+              </div>
+              <div className="py-1">
+                <button
+                  onClick={() => {
+                    setIsDropdownOpen(false);
+                    signOut();
+                  }}
+                  className="flex w-full items-center gap-2.5 px-4 py-2 text-sm text-gray-600 transition hover:bg-gray-50 hover:text-maroon font-sans"
+                >
+                  <LogOut size={15} />
+                  Sign Out
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

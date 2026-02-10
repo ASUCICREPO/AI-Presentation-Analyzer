@@ -33,24 +33,24 @@ export default function CameraView({
   onReEnterCalibration
 }: CameraViewProps) {
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-gray-900 shadow-lg group">
         {/* Status Badges */}
         <div className="absolute left-4 top-4 z-10 flex gap-2">
           {isRecording && !isPaused && (
-            <div className="flex items-center gap-2 rounded-full bg-red-600 px-3 py-1 text-xs font-medium text-white animate-pulse">
+            <div className="flex items-center gap-2 rounded-full bg-red-600 px-3 py-1 text-xs font-medium text-white animate-pulse font-sans">
               <div className="h-2 w-2 rounded-full bg-white" />
               Recording
             </div>
           )}
           {isPaused && (
-            <div className="flex items-center gap-2 rounded-full bg-yellow-500 px-3 py-1 text-xs font-medium text-white">
+            <div className="flex items-center gap-2 rounded-full bg-yellow-500 px-3 py-1 text-xs font-medium text-white font-sans">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
               Paused
             </div>
           )}
           {isCalibrating && !isRecording && (
-            <div className="flex items-center gap-2 rounded-full bg-blue-600 px-3 py-1 text-xs font-medium text-white">
+            <div className="flex items-center gap-2 rounded-full bg-maroon px-3 py-1 text-xs font-medium text-white font-sans">
               <ScanFace className="w-3 h-3" />
               Calibration Mode
             </div>
@@ -81,18 +81,18 @@ export default function CameraView({
                 <path d="M23 7l-7 5 7 5V7z" />
                 <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
             </svg>
-            <h3 className="text-xl font-semibold text-white mb-2">Ready to Practice?</h3>
-            <p className="text-sm text-gray-400 mb-6 max-w-md text-center">
-              Enable your camera to start the calibration process. We'll check your lighting and positioning before recording.
+            <h3 className="text-xl font-semibold text-white mb-2 font-serif">Ready to Practice?</h3>
+            <p className="text-sm text-gray-400 mb-6 max-w-md text-center font-sans">
+              Enable your camera to start the calibration process. We&apos;ll check your lighting and positioning before recording.
             </p>
             <button 
               onClick={onStartCamera}
-              className="rounded-full bg-maroon-600 px-8 py-3 text-base font-medium text-white shadow-lg hover:bg-maroon-700 active:scale-95 transition-all"
+              className="rounded-full bg-maroon px-8 py-3 text-base font-medium text-white shadow-lg hover:bg-maroon-dark active:scale-95 transition-all font-sans"
             >
               Turn On Camera & Calibrate
             </button>
             {permissionDenied && (
-              <p className="mt-4 text-sm text-red-400">
+              <p className="mt-4 text-sm text-red-400 font-sans">
                 Camera access denied. Please check your browser permissions.
               </p>
             )}
@@ -106,7 +106,7 @@ export default function CameraView({
           {!isRecording ? (
             <button
               onClick={onStartRecording}
-              className="flex items-center gap-2 rounded-lg bg-maroon-600 px-8 py-3 text-base font-medium text-white shadow-md transition-all hover:bg-maroon-700 hover:shadow-lg active:scale-[0.98] 2xl:px-10 2xl:py-4 2xl:text-xl"
+              className="flex items-center gap-2 rounded-lg bg-maroon px-8 py-3 text-base font-medium text-white shadow-md transition-all hover:bg-maroon-dark hover:shadow-lg active:scale-[0.98] 2xl:px-10 2xl:py-4 2xl:text-xl font-sans"
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M23 7l-7 5 7 5V7z" />
@@ -119,7 +119,7 @@ export default function CameraView({
               {!isPaused ? (
                 <button
                   onClick={onPauseRecording}
-                  className="flex items-center gap-2 rounded-lg bg-yellow-500 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-yellow-600 active:scale-[0.98] 2xl:px-8 2xl:py-3.5 2xl:text-lg"
+                  className="flex items-center gap-2 rounded-lg bg-yellow-500 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-yellow-600 active:scale-[0.98] 2xl:px-8 2xl:py-3.5 2xl:text-lg font-sans"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
                   Pause
@@ -127,7 +127,7 @@ export default function CameraView({
               ) : (
                 <button
                   onClick={onResumeRecording}
-                  className="flex items-center gap-2 rounded-lg bg-green-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-green-700 active:scale-[0.98] 2xl:px-8 2xl:py-3.5 2xl:text-lg"
+                  className="flex items-center gap-2 rounded-lg bg-green-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-green-700 active:scale-[0.98] 2xl:px-8 2xl:py-3.5 2xl:text-lg font-sans"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
                   Resume
@@ -136,7 +136,7 @@ export default function CameraView({
               
               <button
                 onClick={onStopRecording}
-                className="flex items-center gap-2 rounded-lg bg-red-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-red-700 active:scale-[0.98] 2xl:px-8 2xl:py-3.5 2xl:text-lg"
+                className="flex items-center gap-2 rounded-lg bg-red-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-red-700 active:scale-[0.98] 2xl:px-8 2xl:py-3.5 2xl:text-lg font-sans"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h12v12H6z"/></svg>
                 Stop & Review
@@ -146,12 +146,12 @@ export default function CameraView({
         </div>
       )}
       
-      {/* Recalibrate Button - small text button when ready/recording */}
+      {/* Recalibrate Button */}
       {cameraActive && !isCalibrating && !isRecording && (
          <div className="flex justify-center mt-2">
            <button 
              onClick={onReEnterCalibration}
-             className="text-sm text-gray-500 hover:text-maroon-600 underline"
+             className="text-sm text-gray-500 hover:text-maroon underline font-sans"
            >
              Re-enter Calibration Mode
            </button>
