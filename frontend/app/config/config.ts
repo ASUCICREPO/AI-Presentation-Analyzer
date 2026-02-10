@@ -104,26 +104,33 @@ export const AUDIO_ANALYSIS_CONFIG = {
   // Words that count as fillers (used by both detection and UI highlighting)
   FILLER_WORDS: ['um', 'uh', 'like', 'actually', 'you know', 'basically', 'so', 'right', 'well'],
 
-  // Transcribe streaming settings
-  TRANSCRIBE: {
-    SAMPLE_RATE: 16000,              // Hz — required by Amazon Transcribe
-    LANGUAGE_CODE: 'en-US' as const,
-    MEDIA_ENCODING: 'pcm' as const,
-  },
+  // ─── Transcription provider ──────────────────────────────────────────
+  // Change PROVIDER to switch engines.  All provider-specific settings
+  // live under their own key so both can coexist in the config file.
+  TRANSCRIPTION: {
+    /** 'web-speech' — browser-native, zero cost, no AWS credentials needed.
+     *                  NOTE: May not capture filler words (um, uh, err) — Google's
+     *                  backend speech engine tends to filter out disfluencies, which
+     *                  means filler word detection may not work with this provider.
+     *  'aws-transcribe' — Amazon Transcribe Streaming via Cognito credentials.
+     *                     Reliably captures filler words / disfluencies. */
+    PROVIDER: 'aws-transcribe' as 'web-speech' | 'aws-transcribe',
 
-  // PCM chunking — aggregate small worklet frames into larger chunks
-  // before sending to Transcribe for lower overhead & latency.
-  CHUNKING: {
-    CHUNK_DURATION_MS: 100,          // ~100ms per chunk (Transcribe recommended)
-    get TARGET_CHUNK_SAMPLES() {
-      return Math.floor(
-        (AUDIO_ANALYSIS_CONFIG.TRANSCRIBE.SAMPLE_RATE * this.CHUNK_DURATION_MS) / 1000,
-      );
+    // Settings for the Web Speech API provider
+    WEB_SPEECH: {
+      LANGUAGE_CODE: 'en-US',
+      /** AudioContext sample rate for the volume/pause worklet (not used by SpeechRecognition itself) */
+      SAMPLE_RATE: 16000,
     },
-    get TARGET_CHUNK_BYTES() {
-      return this.TARGET_CHUNK_SAMPLES * 2; // Int16 PCM = 2 bytes/sample
+
+    // Settings for the AWS Transcribe Streaming provider
+    AWS_TRANSCRIBE: {
+      SAMPLE_RATE: 16000,                // Hz — required by Amazon Transcribe
+      LANGUAGE_CODE: 'en-US' as const,
+      MEDIA_ENCODING: 'pcm' as const,
+      CHUNK_DURATION_MS: 100,            // ~100 ms per chunk (Transcribe recommended)
+      MAX_AUDIO_QUEUE_CHUNKS: 20,        // ~2 s max buffered before dropping stale chunks
     },
-    MAX_AUDIO_QUEUE_CHUNKS: 20,      // ~2s max buffered before dropping stale chunks
   },
 
   // Silence / pause detection

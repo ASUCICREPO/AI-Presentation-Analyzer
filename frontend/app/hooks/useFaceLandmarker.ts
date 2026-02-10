@@ -20,7 +20,6 @@ export interface UseFaceLandmarkerOptions {
 export interface UseFaceLandmarkerReturn {
   status: 'idle' | 'loading' | 'ready' | 'running' | 'error';
   error: string | null;
-  faceLandmarker: FaceLandmarker | null;
   lastResult: FaceLandmarkerResult | null;
   detectForVideo: (video: HTMLVideoElement, timestamp: number) => FaceLandmarkerResult | null;
   drawResults: (canvas: HTMLCanvasElement, result: FaceLandmarkerResult) => void;
@@ -162,7 +161,7 @@ export function useFaceLandmarker(options: UseFaceLandmarkerOptions = {}): UseFa
         drawingUtils.drawConnectors(
           landmarks,
           FaceLandmarker.FACE_LANDMARKS_LIPS,
-          { color: '#FF3030', lineWidth: 2 }
+          { color: '#800001', lineWidth: 2 }
         );
 
         // Draw left eye
@@ -213,7 +212,6 @@ export function useFaceLandmarker(options: UseFaceLandmarkerOptions = {}): UseFa
   return {
     status,
     error,
-    faceLandmarker: faceLandmarkerRef.current,
     lastResult,
     detectForVideo,
     drawResults,

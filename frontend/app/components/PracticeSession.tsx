@@ -48,7 +48,7 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
 
   // New Calibration Mode State
   const [isCalibrating, setIsCalibrating] = useState(false);
-  const [showMesh, setShowMesh] = useState(true);
+  const [showMesh, setShowMesh] = useState(false);
   
   // Time-limit alert tracking (each fires once)
   const shownAlertsRef = useRef<Set<string>>(new Set());
@@ -322,7 +322,6 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
           setCameraActive(true);
           setPermissionDenied(false);
           setIsCalibrating(true);
-          setShowMesh(true);
         };
       }
     } catch (err) {
