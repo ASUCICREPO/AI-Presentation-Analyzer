@@ -1,10 +1,19 @@
 import logging
 import boto3
 from botocore.exceptions import ClientError
+from decimal import Decimal
 from typing import Dict, Optional
 import os
 import json
 import uuid
+
+
+class _DecimalEncoder(json.JSONEncoder):
+    """Handle Decimal types returned by DynamoDB."""
+    def default(self, o):
+        if isinstance(o, Decimal):
+            return int(o) if o == int(o) else float(o)
+        return super().default(o)
 
 PERSONA_TABLE_NAME: str = os.environ.get("PERSONA_TABLE_NAME")
 MAX_ITEMS_PER_PAGE: int = int(os.environ.get("MAX_ITEMS_PER_PAGE", 20)) # Default to 20 items per page for pagination
@@ -26,7 +35,7 @@ def _response(status_code: int, body: dict) -> dict:
             "Access-Control-Allow-Headers": "Content-Type",
             "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
         },
-        "body": json.dumps(body),
+        "body": json.dumps(body, cls=_DecimalEncoder),
     }
 
 def get_persona_from_id(id: str) -> Dict[str, str] | None:

@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useFaceLandmarker } from '../hooks/useFaceLandmarker';
 import { useAudioAnalysis } from '../hooks/useAudioAnalysis';
-import { ANALYSIS_CONFIG, PRESENTATION_LIMITS } from '../config/config';
+import { ANALYSIS_CONFIG, PRESENTATION_LIMITS, DEFAULT_TIME_LIMIT_SEC } from '../config/config';
 
 import { toast } from 'sonner';
 
@@ -16,11 +16,14 @@ import TranscriptionPanel from './practice/TranscriptionPanel';
 
 interface PracticeSessionProps {
   personaTitle: string;
+  timeLimitSec?: number;
   onBack: () => void;
   onComplete: () => void;
 }
 
-export default function PracticeSession({ personaTitle, onBack, onComplete }: PracticeSessionProps) {
+export default function PracticeSession({ personaTitle, timeLimitSec, onBack, onComplete }: PracticeSessionProps) {
+  // Resolve the effective time cap for this session
+  const maxDuration = timeLimitSec ?? DEFAULT_TIME_LIMIT_SEC;
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [timer, setTimer] = useState(0);
@@ -119,21 +122,25 @@ export default function PracticeSession({ personaTitle, onBack, onComplete }: Pr
   // Timer logic + time-limit enforcement
   useEffect(() => {
     let interval: NodeJS.Timeout;
+    // Compute warning thresholds relative to the persona's time limit
+    const warningAt = maxDuration - PRESENTATION_LIMITS.WARNING_REMAINING_SEC;
+    const finalWarningAt = maxDuration - PRESENTATION_LIMITS.FINAL_WARNING_REMAINING_SEC;
+
     if (isRecording && !isPaused) {
       interval = setInterval(() => {
         setTimer((prev) => {
           // Cap timer at MAX so it never goes past / negative in the header
-          if (prev >= PRESENTATION_LIMITS.MAX_DURATION_SEC) return prev;
+          if (prev >= maxDuration) return prev;
 
           const next = prev + 1;
 
-          const remaining = PRESENTATION_LIMITS.MAX_DURATION_SEC - next;
+          const remaining = maxDuration - next;
           const remMin = Math.floor(remaining / 60);
           const remSec = remaining % 60;
           const remLabel = remMin > 0 ? `${remMin} min${remSec > 0 ? ` ${remSec}s` : ''}` : `${remSec}s`;
 
           // First warning (e.g. 5 min remaining)
-          if (next === PRESENTATION_LIMITS.WARNING_AT_SEC && !shownAlertsRef.current.has('warning')) {
+          if (warningAt > 0 && next === warningAt && !shownAlertsRef.current.has('warning')) {
             shownAlertsRef.current.add('warning');
             toast.info(`${remLabel} remaining`, {
               duration: PRESENTATION_LIMITS.ALERT_DISPLAY_MS,
@@ -141,7 +148,7 @@ export default function PracticeSession({ personaTitle, onBack, onComplete }: Pr
           }
 
           // Final warning (e.g. 1 min remaining)
-          if (next === PRESENTATION_LIMITS.FINAL_WARNING_SEC && !shownAlertsRef.current.has('final')) {
+          if (finalWarningAt > 0 && next === finalWarningAt && !shownAlertsRef.current.has('final')) {
             shownAlertsRef.current.add('final');
             toast.warning(`${remLabel} remaining — please wrap up`, {
               duration: PRESENTATION_LIMITS.ALERT_DISPLAY_MS,
@@ -149,7 +156,7 @@ export default function PracticeSession({ personaTitle, onBack, onComplete }: Pr
           }
 
           // Hard stop at max duration — fires once because the guard above caps the timer
-          if (next >= PRESENTATION_LIMITS.MAX_DURATION_SEC && !shownAlertsRef.current.has('stop')) {
+          if (next >= maxDuration && !shownAlertsRef.current.has('stop')) {
             shownAlertsRef.current.add('stop');
             toast.error('Time limit reached — session ending', { duration: 3000 });
             setTimeout(() => {
@@ -163,7 +170,7 @@ export default function PracticeSession({ personaTitle, onBack, onComplete }: Pr
     }
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isRecording, isPaused]);
+  }, [isRecording, isPaused, maxDuration]);
 
   // Analyze gaze from blendshapes
   const analyzeGaze = useCallback((shapes: { categories: { categoryName: string; score: number }[] }[]) => {
@@ -396,6 +403,7 @@ export default function PracticeSession({ personaTitle, onBack, onComplete }: Pr
       <PracticeSessionHeader 
         onBack={onBack}
         timer={timer}
+        maxDurationSec={maxDuration}
         personaTitle={personaTitle}
       />
 

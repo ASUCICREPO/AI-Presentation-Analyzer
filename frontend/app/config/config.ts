@@ -29,14 +29,18 @@ export interface Persona {
   keyPriorities: string[];
   attentionSpan: string;
   communicationStyle: string;
+  timeLimitSec?: number; // Per-persona presentation time limit (seconds)
 }
+
+/** Fallback when a persona has no timeLimitSec set */
+export const DEFAULT_TIME_LIMIT_SEC = 15 * 60; // 15 minutes
 
 
 // ---------------------------------------------------------------------------
 // Presentation Time Limits (seconds)
 // ---------------------------------------------------------------------------
 export const PRESENTATION_LIMITS = {
-  MAX_DURATION_SEC: 15 * 60,                                // DEMO: 20s cap (real: 15 * 60)
+  MAX_DURATION_SEC: DEFAULT_TIME_LIMIT_SEC,                 // Default cap (overridden per-persona)
   WARNING_REMAINING_SEC: 5 * 60,                           // DEMO: alert at 5s in (real: 5 * 60)
   FINAL_WARNING_REMAINING_SEC: 1 * 60,                     // DEMO: alert at 10s in (real: 1 * 60)
   get WARNING_AT_SEC() {

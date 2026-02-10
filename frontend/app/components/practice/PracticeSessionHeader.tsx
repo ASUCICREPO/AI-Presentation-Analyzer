@@ -5,12 +5,14 @@ import { PRESENTATION_LIMITS } from '../../config/config';
 interface PracticeSessionHeaderProps {
   onBack: () => void;
   timer: number;
+  maxDurationSec: number;
   personaTitle: string;
 }
 
 export default function PracticeSessionHeader({ 
   onBack, 
   timer, 
+  maxDurationSec,
   personaTitle 
 }: PracticeSessionHeaderProps) {
   const formatTime = (seconds: number) => {
@@ -19,7 +21,7 @@ export default function PracticeSessionHeader({
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const remaining = PRESENTATION_LIMITS.MAX_DURATION_SEC - timer;
+  const remaining = maxDurationSec - timer;
   const isNearEnd = remaining <= PRESENTATION_LIMITS.FINAL_WARNING_REMAINING_SEC;
   const isWarning = remaining <= PRESENTATION_LIMITS.WARNING_REMAINING_SEC;
 

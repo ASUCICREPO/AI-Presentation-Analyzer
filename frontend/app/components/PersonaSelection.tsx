@@ -10,6 +10,7 @@ interface PersonaSelectionProps {
   selectedPersona: string | null;
   onSelectPersona: (id: string | null) => void;
   onPersonaNameChange: (name: string) => void;
+  onTimeLimitChange: (sec: number | undefined) => void;
   customNotes: string;
   onCustomNotesChange: (notes: string) => void;
   onContinue: () => void;
@@ -55,6 +56,7 @@ export default function PersonaSelection({
   selectedPersona,
   onSelectPersona,
   onPersonaNameChange,
+  onTimeLimitChange,
   customNotes,
   onCustomNotesChange,
   onContinue,
@@ -108,6 +110,7 @@ export default function PersonaSelection({
                 const isDeselecting = selectedPersona === persona.personaID;
                 onSelectPersona(isDeselecting ? null : persona.personaID);
                 onPersonaNameChange(isDeselecting ? '' : persona.name);
+                onTimeLimitChange(isDeselecting ? undefined : persona.timeLimitSec);
               }}
             />
           ))

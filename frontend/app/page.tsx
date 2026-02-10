@@ -25,6 +25,7 @@ export default function Home() {
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedPersona, setSelectedPersona] = useState<string | null>(null);
   const [selectedPersonaName, setSelectedPersonaName] = useState<string>('');
+  const [selectedPersonaTimeLimit, setSelectedPersonaTimeLimit] = useState<number | undefined>(undefined);
   const [customNotes, setCustomNotes] = useState('');
   
   // Modal State
@@ -148,6 +149,7 @@ export default function Home() {
           selectedPersona={selectedPersona}
           onSelectPersona={handlePersonaSelect}
           onPersonaNameChange={setSelectedPersonaName}
+          onTimeLimitChange={setSelectedPersonaTimeLimit}
           customNotes={customNotes}
           onCustomNotesChange={setCustomNotes}
           onContinue={handleContinueToUpload}
@@ -165,6 +167,7 @@ export default function Home() {
       {currentStep === 3 && (
         <PracticeSession
           personaTitle={selectedPersonaName}
+          timeLimitSec={selectedPersonaTimeLimit}
           onBack={handleBackToUpload}
           onComplete={handlePracticeComplete}
         />
