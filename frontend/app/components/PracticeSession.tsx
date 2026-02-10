@@ -397,7 +397,7 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
   };
 
   return (
-    <div className="mx-auto w-full max-w-[1200px] px-4 py-6 sm:px-6 sm:py-8 2xl:max-w-[1600px] 2xl:py-12">
+    <div className="mx-auto w-full max-w-[1200px] px-4 py-3 sm:px-6 sm:py-4 2xl:max-w-[1600px] 2xl:py-8">
       {/* 1. Header Section */}
       <PracticeSessionHeader 
         onBack={onBack}
@@ -406,9 +406,9 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
         personaTitle={personaTitle}
       />
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 2xl:gap-10">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 2xl:gap-6">
         {/* 2. Left Column: Camera View & Controls */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="lg:col-span-2 space-y-3">
           <CameraView 
             videoRef={videoRef}
             canvasRef={canvasRef}
@@ -428,7 +428,7 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
 
         {/* 3. Right Column: Dynamic Panel (Feedback OR Calibration) */}
         <div className="lg:col-span-1">
-          <div className="h-full rounded-xl border border-gray-200 bg-white p-6 shadow-sm 2xl:p-8 relative overflow-hidden">
+          <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm 2xl:p-6 relative overflow-hidden">
             
             {isCalibrating ? (
               <CalibrationPanel 
@@ -450,13 +450,13 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
         </div>
       </div>
 
-      {/* 4. Live Transcription (replaces Timestamped Feedback) */}
-      {(isRecording || transcripts.length > 0) && (
+      {/* 4. Live Transcription — hidden during calibration */}
+      {!isCalibrating && (
         <TranscriptionPanel
           transcripts={transcripts}
           partialTranscript={partialTranscript}
           isRecording={isRecording && !isPaused}
-          isTranscribing={isTranscribing}
+          isTranscribing={isTranscribing && isRecording && !isPaused}
         />
       )}
 

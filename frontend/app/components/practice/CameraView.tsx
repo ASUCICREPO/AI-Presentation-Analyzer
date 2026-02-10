@@ -33,7 +33,7 @@ export default function CameraView({
   onReEnterCalibration
 }: CameraViewProps) {
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-gray-900 shadow-lg group">
         {/* Status Badges */}
         <div className="absolute left-4 top-4 z-10 flex gap-2">

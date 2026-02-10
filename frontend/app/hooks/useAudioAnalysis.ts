@@ -99,7 +99,11 @@ export function useAudioAnalysis(): AudioAnalysisReturn {
     const sessionAge = now - startTimeRef.current - pausedDurationRef.current
       - (pausedAtRef.current ? now - pausedAtRef.current : 0);
     const windowMs = Math.min(WINDOWS.PACE_SECONDS * 1000, Math.max(sessionAge, 1));
-    const wpm = windowMs / 60000 > 0.05 ? Math.round(windowWords / (windowMs / 60000)) : 0;
+    // Require at least 5 seconds of data (0.083 min) before showing WPM to
+    // avoid wild spikes when Transcribe delivers a batch of words early on.
+    const rawWpm = windowMs / 60000 > 0.083 ? Math.round(windowWords / (windowMs / 60000)) : 0;
+    // Hard cap: human speech rarely exceeds 200 wpm in presentations
+    const wpm = Math.min(rawWpm, 250);
 
     // 2. Volume from EMA
     const volume = Math.round(Math.min(100, (emaVolumeRef.current / VOLUME_MAX_RMS) * 100));
@@ -131,7 +135,16 @@ export function useAudioAnalysis(): AudioAnalysisReturn {
     if (!text.trim()) return;
     const words = text.toLowerCase().trim().split(/\s+/);
 
-    wordEntriesRef.current.push({ time: Date.now(), count: words.length });
+    // Spread word timestamps across an estimated speaking duration instead of
+    // lumping every word at Date.now().  Assume ~150 wpm natural speech rate
+    // (~400ms per word) so a 10-word phrase is spread across ~4 seconds.
+    const now = Date.now();
+    const estimatedDurationMs = words.length * 400; // ~150 wpm baseline
+    const spreadStart = Math.max(startTimeRef.current, now - estimatedDurationMs);
+    const step = words.length > 1 ? (now - spreadStart) / (words.length - 1) : 0;
+    for (let i = 0; i < words.length; i++) {
+      wordEntriesRef.current.push({ time: Math.round(spreadStart + step * i), count: 1 });
+    }
 
     const ts = Date.now();
     words.forEach((w) => {

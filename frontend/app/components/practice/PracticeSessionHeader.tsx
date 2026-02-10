@@ -26,7 +26,7 @@ export default function PracticeSessionHeader({
   const isWarning = remaining <= PRESENTATION_LIMITS.WARNING_REMAINING_SEC;
 
   return (
-    <div className="mb-6 flex items-center justify-between 2xl:mb-10">
+    <div className="mb-3 flex items-center justify-between 2xl:mb-6">
       <div className="flex items-start gap-4">
         <button 
           onClick={onBack}

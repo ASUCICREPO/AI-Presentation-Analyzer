@@ -35,11 +35,11 @@ export default function RealTimeFeedbackPanel({
 
   return (
     <div className="animate-fade-in">
-      <div className="flex items-center justify-between mb-6">
-        <h3 className="font-serif text-lg font-bold text-gray-900 2xl:text-2xl">Real-time Feedback</h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-serif text-base font-bold text-gray-900 2xl:text-xl">Real-time Feedback</h3>
       </div>
 
-      <div className={`space-y-6 2xl:space-y-8 ${!isRecording ? 'opacity-60 grayscale-[0.5]' : ''}`}>
+      <div className={`space-y-4 2xl:space-y-5 ${!isRecording ? 'opacity-60 grayscale-[0.5]' : ''}`}>
         {/* Metric: Speaking Pace */}
         <div>
           <div className="flex justify-between text-sm 2xl:text-base">
@@ -49,10 +49,10 @@ export default function RealTimeFeedbackPanel({
             </span>
             <span className="font-semibold text-gray-900">{isRecording ? metrics.speakingPace : '--'} wpm</span>
           </div>
-          <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-gray-100">
-            <div className={`h-full ${paceColor} transition-all duration-500`} style={{ width: `${pacePercent}%` }} />
+          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+            <div className="h-full bg-green-500 transition-all duration-500" style={{ width: isRecording ? '65%' : '0%' }} />
           </div>
-          <div className="mt-1 text-xs text-gray-400">Target: 130-160 wpm</div>
+          <div className="mt-0.5 text-[10px] text-gray-400">Target: 130-160 wpm</div>
         </div>
 
         {/* Metric: Volume Level */}
@@ -64,10 +64,10 @@ export default function RealTimeFeedbackPanel({
             </span>
             <span className="font-semibold text-gray-900">{isRecording ? `${metrics.volumeLevel}%` : '--%'}</span>
           </div>
-          <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-gray-100">
+          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
             <div className="h-full bg-blue-500 transition-all duration-300" style={{ width: isRecording ? `${metrics.volumeLevel}%` : '0%' }} />
           </div>
-          <div className="mt-1 text-xs text-gray-400">Maintain consistent volume</div>
+          <div className="mt-0.5 text-[10px] text-gray-400">Maintain consistent volume</div>
         </div>
 
         {/* Metric: Eye Contact */}
@@ -119,33 +119,17 @@ export default function RealTimeFeedbackPanel({
         </div>
 
         {/* Counter Metrics */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="rounded-lg border border-gray-100 p-3">
-            <div className="text-xs text-gray-500 2xl:text-sm">Filler Words</div>
-            <div className="mt-1 text-xl font-bold text-orange-600 2xl:text-2xl">{isRecording ? metrics.fillerWords : '--'}</div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-lg border border-gray-100 p-2.5">
+            <div className="text-[11px] text-gray-500 2xl:text-xs">Filler Words</div>
+            <div className="mt-0.5 text-lg font-bold text-green-600 2xl:text-xl">{isRecording ? metrics.fillerWords : '--'}</div>
             <div className="text-[10px] text-gray-400">um, uh, like, you know</div>
           </div>
-          <div className="rounded-lg border border-gray-100 p-3">
-            <div className="text-xs text-gray-500 2xl:text-sm">Pauses</div>
-            <div className="mt-1 text-xl font-bold text-gray-900 2xl:text-2xl">{isRecording ? metrics.pauses : '--'}</div>
-            <div className="text-[10px] text-gray-400">Long pauses (&gt;3s)</div>
+          <div className="rounded-lg border border-gray-100 p-2.5">
+            <div className="text-[11px] text-gray-500 2xl:text-xs">Pauses</div>
+            <div className="mt-0.5 text-lg font-bold text-gray-900 2xl:text-xl">{isRecording ? metrics.pauses : '--'}</div>
+            <div className="text-[10px] text-gray-400">Strategic pauses detected</div>
           </div>
-        </div>
-
-        {/* Live Tip */}
-        <div className="rounded-lg bg-blue-50 p-4 border border-blue-100">
-          <div className="mb-1 flex items-center gap-2 text-xs font-semibold text-blue-700 2xl:text-sm">
-            <span className="text-lg">💡</span> {isRecording ? "Live Tip" : "Coach Tip"}
-          </div>
-          <p className="text-xs text-blue-800 2xl:text-sm">
-            {isRecording 
-              ? metrics.fillerWords > 3
-                ? "Try to reduce filler words — pause instead of saying 'um'."
-                : gazeStatus.isLookingAtScreen
-                  ? "Great job! Maintain this pace."
-                  : "Try to look at the camera."
-              : "Feedback will appear here once you start recording."}
-          </p>
         </div>
       </div>
     </div>

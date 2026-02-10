@@ -36,16 +36,20 @@ export default function TranscriptionPanel({
 }: TranscriptionPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom on new transcripts
+  // Auto-scroll to top only while actively recording;
+  // when paused, let the user scroll freely to review.
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (isRecording && scrollRef.current) {
+      scrollRef.current.scrollTop = 0;
     }
-  }, [transcripts, partialTranscript]);
+  }, [transcripts, partialTranscript, isRecording]);
+
+  // Reverse transcripts so newest appears first
+  const reversedTranscripts = [...transcripts].reverse();
 
   return (
-    <div className="mt-6 animate-slide-up 2xl:mt-10">
-      <div className="flex items-center justify-between mb-4">
+    <div className="mt-4 animate-slide-up 2xl:mt-6">
+      <div className="flex items-center justify-between mb-2">
         <h4 className="font-serif text-base font-semibold text-gray-900 2xl:text-xl flex items-center gap-2">
           <MessageSquareText className="w-5 h-5 text-maroon" />
           Live Transcription
@@ -60,10 +64,10 @@ export default function TranscriptionPanel({
 
       <div
         ref={scrollRef}
-        className="max-h-[240px] overflow-y-auto rounded-xl border border-gray-200 bg-white p-4 shadow-sm space-y-3 2xl:p-6 2xl:max-h-[320px]"
+        className="max-h-[200px] overflow-y-auto rounded-xl border border-gray-200 bg-white p-3 shadow-sm space-y-2.5 2xl:p-5 2xl:max-h-[280px]"
       >
-        {!isRecording && transcripts.length === 0 && (
-          <div className="py-8 text-center">
+        {!isRecording && !isTranscribing && transcripts.length === 0 && (
+          <div className="py-6 text-center">
             <MessageSquareText className="mx-auto mb-3 h-8 w-8 text-gray-300" />
             <p className="text-sm text-gray-400 font-sans">
               Your speech will appear here in real time once you start recording.
@@ -71,18 +75,7 @@ export default function TranscriptionPanel({
           </div>
         )}
 
-        {transcripts.map((entry, index) => (
-          <div key={index} className="flex gap-3 items-start">
-            <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-gray-500 mt-0.5">
-              {entry.timestamp}
-            </span>
-            <p className="text-sm text-gray-800 leading-relaxed font-sans">
-              {highlightFillers(entry.text)}
-            </p>
-          </div>
-        ))}
-
-        {/* Partial (in-progress) transcript */}
+        {/* Partial (in-progress) transcript — shown at the top as the latest */}
         {partialTranscript && (
           <div className="flex gap-3 items-start opacity-60">
             <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-gray-400 mt-0.5">
@@ -93,11 +86,18 @@ export default function TranscriptionPanel({
             </p>
           </div>
         )}
-      </div>
 
-      <p className="mt-2 text-[11px] text-gray-400 font-sans">
-        <span className="inline-block rounded bg-yellow-100 px-1 text-yellow-800">Highlighted words</span> are detected filler words.
-      </p>
+        {reversedTranscripts.map((entry, index) => (
+          <div key={index} className="flex gap-3 items-start">
+            <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-gray-500 mt-0.5">
+              {entry.timestamp}
+            </span>
+            <p className="text-sm text-gray-800 leading-relaxed font-sans">
+              {highlightFillers(entry.text)}
+            </p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
