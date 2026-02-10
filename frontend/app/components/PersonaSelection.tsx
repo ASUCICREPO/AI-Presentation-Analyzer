@@ -1,27 +1,78 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import PersonaCard from './PersonaCard';
-import ComingSoonBox from './ComingSoonBox';
 import CustomizePersona from './CustomizePersona';
-import { ACADEMIC_PERSONA, COMING_SOON_PERSONAS } from '../config/personas';
+import { Persona } from '../config/config';
+import { fetchPersonas } from '../services/api';
 
 interface PersonaSelectionProps {
   selectedPersona: string | null;
   onSelectPersona: (id: string | null) => void;
+  onPersonaNameChange: (name: string) => void;
+  onTimeLimitChange: (sec: number | undefined) => void;
   customNotes: string;
   onCustomNotesChange: (notes: string) => void;
   onContinue: () => void;
 }
 
+// ─── Skeleton loader that mirrors PersonaCard layout ─────────────────
+function PersonaCardSkeleton() {
+  return (
+    <div className="w-full animate-pulse rounded-xl border-2 border-gray-200 bg-white p-5 sm:p-6 2xl:p-10">
+      {/* Header */}
+      <div className="mb-4 flex items-center gap-4 2xl:mb-8 2xl:gap-6">
+        <div className="h-10 w-10 rounded-lg bg-gray-200 2xl:h-14 2xl:w-14" />
+        <div className="flex-1">
+          <div className="h-5 w-40 rounded bg-gray-200 2xl:h-7 2xl:w-56" />
+          <div className="mt-2 h-4 w-28 rounded bg-gray-100 2xl:h-5 2xl:w-36" />
+        </div>
+      </div>
+      {/* Content grid */}
+      <div className="grid grid-cols-2 gap-x-8 gap-y-4 2xl:gap-x-12 2xl:gap-y-8">
+        <div>
+          <div className="mb-2 h-4 w-24 rounded bg-gray-200 2xl:h-5" />
+          <div className="space-y-2 pl-6">
+            <div className="h-3 w-32 rounded bg-gray-100 2xl:h-4" />
+            <div className="h-3 w-28 rounded bg-gray-100 2xl:h-4" />
+            <div className="h-3 w-36 rounded bg-gray-100 2xl:h-4" />
+          </div>
+        </div>
+        <div>
+          <div className="mb-2 h-4 w-24 rounded bg-gray-200 2xl:h-5" />
+          <div className="h-3 w-28 rounded bg-gray-100 pl-6 2xl:h-4" />
+        </div>
+      </div>
+      {/* Communication style */}
+      <div className="mt-4 2xl:mt-8">
+        <div className="mb-2 h-4 w-36 rounded bg-gray-200 2xl:h-5" />
+        <div className="h-3 w-full max-w-md rounded bg-gray-100 pl-6 2xl:h-4" />
+      </div>
+    </div>
+  );
+}
+
 export default function PersonaSelection({
   selectedPersona,
   onSelectPersona,
+  onPersonaNameChange,
+  onTimeLimitChange,
   customNotes,
   onCustomNotesChange,
   onContinue,
 }: PersonaSelectionProps) {
-  const isPersonaSelected = selectedPersona === ACADEMIC_PERSONA.id;
+  const [personas, setPersonas] = useState<Persona[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchPersonas()
+      .then(setPersonas)
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const isPersonaSelected = selectedPersona !== null;
 
   return (
     <div className="mx-auto w-full max-w-[800px] px-4 py-6 sm:px-6 sm:py-8 xl:max-w-[900px] 2xl:max-w-[1280px] 2xl:py-16">
@@ -35,18 +86,35 @@ export default function PersonaSelection({
         </p>
       </div>
 
-      {/* Persona Card */}
-      <div className="mb-6 2xl:mb-8">
-        <PersonaCard
-          {...ACADEMIC_PERSONA}
-          isSelected={isPersonaSelected}
-          onSelect={() => onSelectPersona(isPersonaSelected ? null : ACADEMIC_PERSONA.id)}
-        />
-      </div>
-
-      {/* Coming Soon Box */}
-      <div className="mb-6 2xl:mb-8">
-        <ComingSoonBox personas={COMING_SOON_PERSONAS} />
+      {/* Persona Cards */}
+      <div className="mb-6 2xl:mb-8 space-y-4">
+        {loading ? (
+          <>
+            <PersonaCardSkeleton />
+          </>
+        ) : error ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-600 font-sans">
+            Failed to load personas. Please try again.
+          </div>
+        ) : (
+          personas.map((persona) => (
+            <PersonaCard
+              key={persona.personaID}
+              name={persona.name}
+              expertise={persona.expertise}
+              keyPriorities={persona.keyPriorities}
+              attentionSpan={persona.attentionSpan}
+              communicationStyle={persona.communicationStyle}
+              isSelected={selectedPersona === persona.personaID}
+              onSelect={() => {
+                const isDeselecting = selectedPersona === persona.personaID;
+                onSelectPersona(isDeselecting ? null : persona.personaID);
+                onPersonaNameChange(isDeselecting ? '' : persona.name);
+                onTimeLimitChange(isDeselecting ? undefined : persona.timeLimitSec);
+              }}
+            />
+          ))
+        )}
       </div>
 
       {/* Customize Persona - Only visible when persona is selected */}

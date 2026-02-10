@@ -1,4 +1,3 @@
-import logging
 import boto3
 from botocore.exceptions import ClientError
 from typing import Literal, Dict
@@ -6,13 +5,28 @@ import json
 import uuid
 import os
 
-PRESENTATION_TIMEOUT: int = int(os.environ.get("PRESENTATION_TIMEOUT", 1200)) # 20 minutes defualt
+PRESENTATION_TIMEOUT: int = int(os.environ.get("PRESENTATION_TIMEOUT", 1200)) # 20 minutes default
 PDF_UPLOAD_TIMEOUT: int = int(os.environ.get("PDF_UPLOAD_TIMEOUT", 120)) # 120 seconds default
-UPLOADS_BUCKET:str = os.environ.get("UPLOADS_BUCKET")
+UPLOADS_BUCKET: str = os.environ.get("UPLOADS_BUCKET")
 
 if not UPLOADS_BUCKET:
-    logging.error("[!]Error: UPLOADS_BUCKET environment variable is not set.")
+    print("[ERROR] UPLOADS_BUCKET environment variable is not set.")
     raise ValueError("UPLOADS_BUCKET environment variable is not set")
+
+
+# ─── CORS response helper ────────────────────────────────────────────
+def _response(status_code: int, body: dict) -> dict:
+    """Return a properly formatted API Gateway proxy response with CORS headers."""
+    return {
+        "statusCode": status_code,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Allow-Methods": "GET,OPTIONS",
+        },
+        "body": json.dumps(body),
+    }
 
 
 def generate_object_name()-> str:
@@ -36,7 +50,7 @@ def get_upload_url(object_name: str, request_type: Literal['ppt', 'session']) ->
     s3_client = boto3.client('s3')
     try:
         if request_type == 'ppt':
-            logging.info("Generating presigned URL for PPT upload")
+            print("[INFO] Generating presigned URL for PPT upload")
             response = s3_client.generate_presigned_post(
                 Bucket=UPLOADS_BUCKET,
                 Key=object_name,
@@ -47,7 +61,7 @@ def get_upload_url(object_name: str, request_type: Literal['ppt', 'session']) ->
                 ExpiresIn=PDF_UPLOAD_TIMEOUT
             )
         elif request_type == 'session':
-            logging.info("Generating presigned URL for Session upload")
+            print("[INFO] Generating presigned URL for Session upload")
             response = s3_client.generate_presigned_post(
                 Bucket=UPLOADS_BUCKET,
                 Key=object_name,
@@ -60,45 +74,41 @@ def get_upload_url(object_name: str, request_type: Literal['ppt', 'session']) ->
         else:
             return None
     except ClientError as e:
-        logging.error(e)
+        print(f"[ERROR] {e}")
         return None
     # The response contains the presigned URL
     return response
 
-def lambda_handler(event, context) -> Dict[str, Dict[str, str]] | None:
-    """AWS Lambda handler to generate presigned S3 upload URLs
-    :param event: Event data passed to the Lambda function. Expects a dictionary with key 'request_type'
-    :param context: Runtime information provided by AWS Lambda
-    :return: 
-        If error, returns None.
-        Else, Dictionary containing the following keys:
-            - presigned_url: Presigned URL to upload the object
-            - object_name: The unique object name generated for the upload
-            - fields: Dictionary of form fields and values to submit with the POST
+def lambda_handler(event, context):
+    """AWS Lambda handler to generate presigned S3 upload URLs.
+
+    Called via API Gateway:  GET /s3_urls?request_type=ppt|session
     """
-    logging.info(f"Received event: {json.dumps(event)}")
-    
-    request_type = event.get('request_type')
-    if not request_type:
-        logging.error("Missing 'request_type' in the event")
-        return None
-    elif not request_type in ['ppt', 'session']:
-        logging.error("Invalid 'request_type' in the event")
-        return None
+    print(f"[INFO] Received event: {json.dumps(event)}")
+
+    method = event.get('httpMethod', '')
+
+    if method == 'OPTIONS':
+        return _response(200, {'message': 'OK'})
+
+    if method != 'GET':
+        return _response(400, {'message': f'Unsupported method: {method}'})
+
+    qs = event.get('queryStringParameters') or {}
+    request_type = qs.get('request_type')
+
+    if not request_type or request_type not in ['ppt', 'session']:
+        return _response(400, {'message': "Missing or invalid 'request_type'. Use 'ppt' or 'session'."})
+
     object_name = generate_object_name()
-
-    if not request_type or not object_name:
-        logging.error("Missing 'request_type' in the event")
-        return None
-
     presigned_url = get_upload_url(request_type=request_type, object_name=object_name)
-    
-    if presigned_url is None:
-        logging.error("Failed to generate presigned URL")
-        return None
 
-    return {
+    if presigned_url is None:
+        print("[ERROR] Failed to generate presigned URL")
+        return _response(500, {'message': 'Failed to generate presigned URL'})
+
+    return _response(200, {
         "presigned_url": presigned_url.get('url'),
         "object_name": object_name,
         "fields": presigned_url.get('fields', {}),
-    }
+    })

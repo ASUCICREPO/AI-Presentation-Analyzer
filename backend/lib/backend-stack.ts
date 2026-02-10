@@ -3,7 +3,6 @@ import { Construct } from 'constructs';
 import * as cdk from 'aws-cdk-lib';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as iam from 'aws-cdk-lib/aws-iam';
-import { Construct } from 'constructs';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
@@ -18,16 +17,30 @@ export class AIPresentationCoachStack extends cdk.Stack {
     const presentationAndSessionUploadsBucket = new cdk.aws_s3.Bucket(this, 'AIPresentationCoach-Presentations-Videos', {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
+      cors: [
+        {
+          allowedOrigins: ['*'],
+          allowedMethods: [cdk.aws_s3.HttpMethods.GET, cdk.aws_s3.HttpMethods.PUT, cdk.aws_s3.HttpMethods.POST],
+          allowedHeaders: ['*'],
+          exposedHeaders: ['ETag'],
+        },
+      ],
     });
 
     // ──────────────────────────────────────────────
     // Lambda for presigned URL generation
     // ──────────────────────────────────────────────
-    const s3UrlIssuerLambda = new lambda.Function(this, 'MyLambdaFunction', {
+    const s3UrlIssuerLambda = new lambda.Function(this, 's3UrlIssuerLambda', {
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'get_presigned_url.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 's3_presigned_url_gen')),
       timeout: cdk.Duration.seconds(20),
+      role: new iam.Role(this, 'S3UrlIssuerLambdaRole', {
+        assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+        managedPolicies: [
+          iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+        ],
+      }),
       environment: {
         'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
         'PDF_UPLOAD_TIMEOUT': '120', //PDF upload timeout in 2 minutes
@@ -39,9 +52,13 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // Cognito User Pool
     // ──────────────────────────────────────────────
     const userPool = new cognito.UserPool(this, 'UserPool', {
+      selfSignUpEnabled: true,
       signInAliases: {
         email: true,
         username: false,
+      },
+      autoVerify: {
+        email: true,
       },
       passwordPolicy: {
         minLength: 8,
@@ -116,10 +133,18 @@ export class AIPresentationCoachStack extends cdk.Stack {
       },
     });
 
+    // Grant Lambda permission to generate presigned URLs for the S3 bucket
+    presentationAndSessionUploadsBucket.grantReadWrite(s3UrlIssuerLambda);
+
     // API Gateway definitions
     const apiGateway = new apigateway.LambdaRestApi(this, 'AIPresentationCoachApi', {
       handler: s3UrlIssuerLambda,
       proxy: false,
+      defaultCorsPreflightOptions: {
+        allowOrigins: apigateway.Cors.ALL_ORIGINS,
+        allowMethods: apigateway.Cors.ALL_METHODS,
+        allowHeaders: ['Content-Type', 'Authorization'],
+      },
     });
 
     // S3 URLs resource
@@ -128,7 +153,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
 
     
     //Personas Dynamo DB Table Config
-    const personasTable = new dynamodb.TableV2(this, 'AIPresentationAudiencePersonaTable', {
+    const personasTable = new dynamodb.TableV2(this, 'UserPersonaTable', {
       // Required: Define the partition key
       partitionKey: {
         name: 'personaID', // The name of the partition key attribute
@@ -143,10 +168,16 @@ export class AIPresentationCoachStack extends cdk.Stack {
     const personaCrudLambda = new lambda.Function(this, 'PersonaCrudLambda', {
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'persona_crud.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, 'lambdas', 'dynamo_persona_lambdas')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'dynamo_persona_lambdas')),
       timeout: cdk.Duration.seconds(20),
+      role: new iam.Role(this, 'PersonaCrudLambdaRole', {
+        assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+        managedPolicies: [
+          iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+        ],
+      }),
       environment: {
-        'DYNAMODB_TABLE_NAME': personasTable.tableName,
+        'PERSONA_TABLE_NAME': personasTable.tableName,
         'MAX_ITEMS_PER_PAGE': '20',
       },
     });
