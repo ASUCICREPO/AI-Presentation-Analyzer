@@ -146,6 +146,114 @@ def list_and_read_chunks(s3_bucket: str, s3_key_prefix: str) -> List[Dict[str, A
         raise
 
 
+def aggregate_metrics(chunks: List[Dict[str, Any]], total_duration: int) -> Dict[str, Any]:
+    """
+    Aggregate metrics from all chunks.
+
+    Expected chunk structure:
+    {
+      chunkIndex: number,
+      timestamp: number,
+      wpmSamples: number[],
+      volumeSamples: number[],
+      fillerWords: [{word, timestamp}],
+      gazeEvents: [{type: 'lookAway'|'lookBack', timestamp, duration}],
+      transcriptSegments: [{text, timestamp, isFinal}]
+    }
+
+    :param chunks: List of chunk dictionaries
+    :param total_duration: Total session duration in seconds
+    :return: Aggregated metrics dictionary
+    """
+    print(f"[INFO] Aggregating metrics from {len(chunks)} chunks")
+
+    # Sort chunks by chunkIndex to ensure correct order
+    sorted_chunks = sorted(chunks, key=lambda c: c.get('chunkIndex', 0))
+
+    # Initialize accumulators
+    all_wpm_samples = []
+    all_volume_samples = []
+    all_filler_words = []
+    all_gaze_events = []
+    all_transcript_segments = []
+
+    # Aggregate data from all chunks
+    for chunk in sorted_chunks:
+        all_wpm_samples.extend(chunk.get('wpmSamples', []))
+        all_volume_samples.extend(chunk.get('volumeSamples', []))
+        all_filler_words.extend(chunk.get('fillerWords', []))
+        all_gaze_events.extend(chunk.get('gazeEvents', []))
+        all_transcript_segments.extend(chunk.get('transcriptSegments', []))
+
+    print(f"[INFO] Aggregated {len(all_wpm_samples)} WPM samples, {len(all_volume_samples)} volume samples")
+    print(f"[INFO] Total filler words: {len(all_filler_words)}, gaze events: {len(all_gaze_events)}")
+
+    # Calculate average WPM
+    avg_wpm = statistics.mean(all_wpm_samples) if all_wpm_samples else 0.0
+
+    # Calculate average volume and variance
+    avg_volume = statistics.mean(all_volume_samples) if all_volume_samples else 0.0
+    volume_variance = statistics.stdev(all_volume_samples) if len(all_volume_samples) > 1 else 0.0
+
+    # Count filler words
+    filler_words_count = len(all_filler_words)
+
+    # Calculate pauses (count from volume samples - silence threshold)
+    # A pause is defined as volume < 5% for sustained period
+    pauses_count = 0
+    silence_threshold = 5.0
+    in_pause = False
+    pause_start_idx = 0
+
+    for i, volume in enumerate(all_volume_samples):
+        if volume < silence_threshold:
+            if not in_pause:
+                in_pause = True
+                pause_start_idx = i
+        else:
+            if in_pause:
+                # Check if pause was >3 seconds (assuming ~100 samples per second)
+                pause_duration_samples = i - pause_start_idx
+                if pause_duration_samples > 300:  # >3 seconds
+                    pauses_count += 1
+                in_pause = False
+
+    # Calculate eye contact look-away time
+    # Only count sustained look-aways >3 seconds
+    eye_contact_look_away_seconds = 0.0
+    for gaze_event in all_gaze_events:
+        if gaze_event.get('type') == 'lookAway':
+            duration = gaze_event.get('duration', 0)
+            if duration > 3:  # Only count sustained look-aways >3 seconds
+                eye_contact_look_away_seconds += duration
+
+    # Concatenate full transcript (only final segments)
+    final_transcript_segments = [
+        seg for seg in all_transcript_segments if seg.get('isFinal', False)
+    ]
+    full_transcript = ' '.join([seg.get('text', '') for seg in final_transcript_segments])
+
+    print(f"[INFO] Calculated metrics:")
+    print(f"  - Avg WPM: {avg_wpm:.2f}")
+    print(f"  - Avg Volume: {avg_volume:.2f}%")
+    print(f"  - Volume Variance: {volume_variance:.2f}")
+    print(f"  - Filler Words: {filler_words_count}")
+    print(f"  - Pauses: {pauses_count}")
+    print(f"  - Eye Contact Look-Away: {eye_contact_look_away_seconds:.2f}s")
+    print(f"  - Transcript length: {len(full_transcript)} characters")
+
+    return {
+        'avgWpm': round(avg_wpm, 2),
+        'avgVolume': round(avg_volume, 2),
+        'volumeVariance': round(volume_variance, 2),
+        'fillerWordsCount': filler_words_count,
+        'pausesCount': pauses_count,
+        'eyeContactLookAwaySeconds': round(eye_contact_look_away_seconds, 2),
+        'transcript': full_transcript,
+        'duration': total_duration
+    }
+
+
 def lambda_handler(event, context):
     """
     Step Functions State 1: Performance Metrics
