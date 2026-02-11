@@ -8,8 +8,10 @@ for WPM, eye contact, filler words, and volume.
 import boto3
 import json
 import os
-from typing import Dict, List
+import statistics
+from typing import Dict, List, Any
 from decimal import Decimal
+from botocore.exceptions import ClientError
 
 
 def normalize_wpm(avg_wpm: float) -> float:
@@ -97,6 +99,51 @@ def normalize_volume(avg_volume: float, volume_variance: float) -> float:
         consistency_score = max(0, 50 - 50 * ((volume_variance - 20) / 20))
 
     return 0.7 * level_score + 0.3 * consistency_score
+
+
+def list_and_read_chunks(s3_bucket: str, s3_key_prefix: str) -> List[Dict[str, Any]]:
+    """
+    List and read all chunk JSON files from S3.
+
+    :param s3_bucket: S3 bucket name
+    :param s3_key_prefix: S3 key prefix (date/userID/sessionID)
+    :return: List of chunk data dictionaries
+    """
+    s3_client = boto3.client('s3')
+    chunks = []
+
+    # List all objects with prefix: {date}/{userID}/{sessionID}/data/
+    data_prefix = f"{s3_key_prefix}/data/"
+    print(f"[INFO] Listing chunks from s3://{s3_bucket}/{data_prefix}")
+
+    try:
+        paginator = s3_client.get_paginator('list_objects_v2')
+        pages = paginator.paginate(Bucket=s3_bucket, Prefix=data_prefix)
+
+        for page in pages:
+            if 'Contents' not in page:
+                continue
+
+            for obj in page['Contents']:
+                s3_key = obj['Key']
+
+                # Skip if not a JSON file
+                if not s3_key.endswith('.json'):
+                    continue
+
+                print(f"[INFO] Reading chunk: {s3_key}")
+
+                # Read the chunk content
+                response = s3_client.get_object(Bucket=s3_bucket, Key=s3_key)
+                chunk_data = json.loads(response['Body'].read().decode('utf-8'))
+                chunks.append(chunk_data)
+
+        print(f"[INFO] Successfully read {len(chunks)} chunks")
+        return chunks
+
+    except ClientError as e:
+        print(f"[ERROR] Failed to read chunks from S3: {str(e)}")
+        raise
 
 
 def lambda_handler(event, context):
