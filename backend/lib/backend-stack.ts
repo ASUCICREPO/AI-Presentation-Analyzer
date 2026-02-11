@@ -7,6 +7,8 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
+import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
+import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 
 export class AIPresentationCoachStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -223,6 +225,145 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // DELETE /personas/{id} - delete persona by ID
     persona_id_resource.addMethod('DELETE', new apigateway.LambdaIntegration(personaCrudLambda));
 
+    // ──────────────────────────────────────────────
+    // Analytics Pipeline Lambda Functions
+    // ──────────────────────────────────────────────
+
+    // Performance Metrics Lambda (State 1)
+    const performanceMetricsLambda = new lambda.Function(this, 'PerformanceMetricsLambda', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      handler: 'calculate_metrics.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'performance_metrics')),
+      timeout: cdk.Duration.seconds(120), // 2 minutes for aggregating chunks
+      memorySize: 512,
+      environment: {
+        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
+        'PERSONA_TABLE_NAME': personasTable.tableName,
+      },
+    });
+
+    // Engagement Scores + AI Lambda (State 2)
+    const engagementScoresAILambda = new lambda.Function(this, 'EngagementScoresAILambda', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      handler: 'generate_feedback.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'engagement_scores_ai')),
+      timeout: cdk.Duration.seconds(300), // 5 minutes for Bedrock API call
+      memorySize: 1024,
+      environment: {
+        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
+        'PERSONA_TABLE_NAME': personasTable.tableName,
+        'BEDROCK_MODEL_ID': 'anthropic.claude-sonnet-4-20250514-v1:0', // Default model, can be changed
+      },
+    });
+
+    // PDF Generator Lambda (State 3)
+    const pdfGeneratorLambda = new lambda.Function(this, 'PDFGeneratorLambda', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      handler: 'generate_pdf.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'pdf_generator')),
+      timeout: cdk.Duration.seconds(120), // 2 minutes for PDF generation
+      memorySize: 1024,
+      environment: {
+        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
+      },
+    });
+
+    // Report URL Issuer Lambda
+    const reportUrlIssuerLambda = new lambda.Function(this, 'ReportUrlIssuerLambda', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      handler: 'get_report_urls.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'report_url_issuer')),
+      timeout: cdk.Duration.seconds(20),
+      environment: {
+        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
+        'PRESIGNED_URL_EXPIRATION': '3600', // 1 hour
+      },
+    });
+
+    // Grant S3 permissions to Lambda functions
+    presentationAndSessionUploadsBucket.grantReadWrite(performanceMetricsLambda);
+    presentationAndSessionUploadsBucket.grantReadWrite(engagementScoresAILambda);
+    presentationAndSessionUploadsBucket.grantReadWrite(pdfGeneratorLambda);
+    presentationAndSessionUploadsBucket.grantRead(reportUrlIssuerLambda);
+
+    // Grant DynamoDB read permissions to analytics Lambdas
+    personasTable.grantReadData(performanceMetricsLambda);
+    personasTable.grantReadData(engagementScoresAILambda);
+
+    // Grant Bedrock permissions to engagement scores Lambda
+    engagementScoresAILambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: ['bedrock:InvokeModel'],
+        resources: ['*'], // Bedrock model ARNs
+      })
+    );
+
+    // ──────────────────────────────────────────────
+    // Step Functions State Machine
+    // ──────────────────────────────────────────────
+
+    // Define the state machine workflow
+    const performanceMetricsTask = new tasks.LambdaInvoke(this, 'PerformanceMetricsTask', {
+      lambdaFunction: performanceMetricsLambda,
+      outputPath: '$.Payload',
+      retryOnServiceExceptions: true,
+    });
+
+    const engagementScoresAITask = new tasks.LambdaInvoke(this, 'EngagementScoresAITask', {
+      lambdaFunction: engagementScoresAILambda,
+      outputPath: '$.Payload',
+      retryOnServiceExceptions: true,
+    });
+
+    const pdfGeneratorTask = new tasks.LambdaInvoke(this, 'PDFGeneratorTask', {
+      lambdaFunction: pdfGeneratorLambda,
+      outputPath: '$.Payload',
+      retryOnServiceExceptions: true,
+    });
+
+    // Chain the tasks together
+    const analyticsWorkflow = performanceMetricsTask
+      .addRetry({
+        errors: ['States.TaskFailed'],
+        interval: cdk.Duration.seconds(2),
+        maxAttempts: 3,
+        backoffRate: 2.0,
+      })
+      .next(engagementScoresAITask.addRetry({
+        errors: ['States.TaskFailed'],
+        interval: cdk.Duration.seconds(3),
+        maxAttempts: 3,
+        backoffRate: 2.0,
+      }))
+      .next(pdfGeneratorTask.addRetry({
+        errors: ['States.TaskFailed'],
+        interval: cdk.Duration.seconds(2),
+        maxAttempts: 2,
+        backoffRate: 2.0,
+      }));
+
+    // Create the state machine
+    const analyticsPipeline = new sfn.StateMachine(this, 'AnalyticsPipeline', {
+      stateMachineName: 'AnalyticsPipeline',
+      definitionBody: sfn.DefinitionBody.fromChainable(analyticsWorkflow),
+      timeout: cdk.Duration.minutes(15),
+    });
+
+    // Grant Step Functions permission to invoke Lambdas
+    performanceMetricsLambda.grantInvoke(analyticsPipeline);
+    engagementScoresAILambda.grantInvoke(analyticsPipeline);
+    pdfGeneratorLambda.grantInvoke(analyticsPipeline);
+
+    // ──────────────────────────────────────────────
+    // API Gateway Routes for Analytics
+    // ──────────────────────────────────────────────
+
+    // /report_urls/{sessionID} - Get presigned URLs for reports
+    const reportUrlsResource = apiGateway.root.addResource('report_urls');
+    const reportUrlsSessionResource = reportUrlsResource.addResource('{sessionID}');
+    reportUrlsSessionResource.addMethod('GET', new apigateway.LambdaIntegration(reportUrlIssuerLambda));
+
 
     // ──────────────────────────────────────────────
     // Stack Outputs (useful for frontend configuration)
@@ -246,5 +387,15 @@ export class AIPresentationCoachStack extends cdk.Stack {
       value: this.region,
       description: 'AWS Region',
     });
-  } 
+
+    new cdk.CfnOutput(this, 'PostPresentationJobsQueueUrl', {
+      value: postPresentationJobsQueue.queueUrl,
+      description: 'SQS Queue URL for Analytics Pipeline',
+    });
+
+    new cdk.CfnOutput(this, 'AnalyticsPipelineArn', {
+      value: analyticsPipeline.stateMachineArn,
+      description: 'Step Functions State Machine ARN',
+    });
+  }
 }
