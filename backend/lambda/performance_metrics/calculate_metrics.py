@@ -254,6 +254,75 @@ def aggregate_metrics(chunks: List[Dict[str, Any]], total_duration: int) -> Dict
     }
 
 
+def fetch_persona(persona_id: str, persona_table_name: str) -> Dict[str, Any]:
+    """
+    Fetch persona from DynamoDB.
+
+    :param persona_id: Persona ID
+    :param persona_table_name: DynamoDB table name
+    :return: Persona dictionary with metricWeights
+    """
+    dynamodb = boto3.resource('dynamodb')
+    table = dynamodb.Table(persona_table_name)
+
+    print(f"[INFO] Fetching persona {persona_id} from DynamoDB")
+
+    try:
+        response = table.get_item(Key={'personaID': persona_id})
+
+        if 'Item' not in response:
+            print(f"[WARN] Persona {persona_id} not found, using default weights")
+            return {
+                'personaID': persona_id,
+                'name': 'Unknown',
+                'metricWeights': {
+                    'wpm': 0.25,
+                    'eyeContact': 0.25,
+                    'fillerWords': 0.25,
+                    'volume': 0.25
+                }
+            }
+
+        persona = response['Item']
+
+        # Convert Decimal to float for JSON serialization
+        if 'metricWeights' in persona:
+            weights = persona['metricWeights']
+            persona['metricWeights'] = {
+                'wpm': float(weights.get('wpm', 0.25)),
+                'eyeContact': float(weights.get('eyeContact', 0.25)),
+                'fillerWords': float(weights.get('fillerWords', 0.25)),
+                'volume': float(weights.get('volume', 0.25))
+            }
+        else:
+            # Use default weights if not set
+            persona['metricWeights'] = {
+                'wpm': 0.25,
+                'eyeContact': 0.25,
+                'fillerWords': 0.25,
+                'volume': 0.25
+            }
+
+        print(f"[INFO] Fetched persona: {persona.get('name', 'Unknown')}")
+        print(f"[INFO] Metric weights: {persona['metricWeights']}")
+
+        return persona
+
+    except ClientError as e:
+        print(f"[ERROR] Failed to fetch persona from DynamoDB: {str(e)}")
+        # Return default persona on error
+        return {
+            'personaID': persona_id,
+            'name': 'Unknown',
+            'metricWeights': {
+                'wpm': 0.25,
+                'eyeContact': 0.25,
+                'fillerWords': 0.25,
+                'volume': 0.25
+            }
+        }
+
+
 def lambda_handler(event, context):
     """
     Step Functions State 1: Performance Metrics
