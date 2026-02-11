@@ -327,33 +327,129 @@ def lambda_handler(event, context):
     """
     Step Functions State 1: Performance Metrics
 
-    Input: {sessionID, s3Bucket, s3KeyPrefix (date/userID/sessionID)}
-    Output: {normalizedScores, rawMetrics, transcript, personaID, duration}
+    Input: {sessionID, userID, personaID, totalDuration, s3Bucket, s3KeyPrefix}
+    Output: {sessionID, userID, personaID, date, s3KeyPrefix, normalizedScores, rawMetrics, transcript, metricWeights, duration}
     """
     print(f"[INFO] Received event: {json.dumps(event)}")
 
-    # TODO: Implement chunk aggregation from S3
-    # TODO: Fetch persona from DynamoDB for metricWeights
-    # TODO: Calculate normalized scores
-    # TODO: Return results to Step Functions
+    # Extract input parameters
+    session_id = event.get('sessionID')
+    user_id = event.get('userID')
+    persona_id = event.get('personaID')
+    total_duration = event.get('totalDuration', 0)
+    s3_bucket = event.get('s3Bucket', os.environ.get('UPLOADS_BUCKET'))
+    s3_key_prefix = event.get('s3KeyPrefix')
+    date = event.get('date')
 
-    # Placeholder response
-    return {
-        'statusCode': 200,
-        'normalizedScores': {
-            'wpmScore': 85.0,
-            'eyeContactScore': 92.0,
-            'fillerWordsScore': 68.0,
-            'volumeScore': 83.0
-        },
-        'rawMetrics': {
-            'avgWpm': 145,
-            'eyeContactLookAwaySeconds': 12,
-            'fillerWordsCount': 8,
-            'avgVolume': 72,
-            'volumeVariance': 8.5
-        },
-        'transcript': "Sample transcript...",
-        'personaID': event.get('personaID', 'default'),
-        'duration': 180
-    }
+    # Validate required parameters
+    if not all([session_id, persona_id, s3_bucket, s3_key_prefix]):
+        error_msg = 'Missing required parameters: sessionID, personaID, s3Bucket, s3KeyPrefix'
+        print(f"[ERROR] {error_msg}")
+        raise ValueError(error_msg)
+
+    print(f"[INFO] Processing session {session_id} for user {user_id}")
+    print(f"[INFO] S3 location: s3://{s3_bucket}/{s3_key_prefix}/data/")
+
+    try:
+        # Step 1: Read all chunks from S3
+        chunks = list_and_read_chunks(s3_bucket, s3_key_prefix)
+
+        if not chunks:
+            print("[WARN] No chunks found, returning empty metrics")
+            return {
+                'statusCode': 200,
+                'sessionID': session_id,
+                'userID': user_id,
+                'personaID': persona_id,
+                'date': date,
+                's3KeyPrefix': s3_key_prefix,
+                'normalizedScores': {
+                    'wpmScore': 0.0,
+                    'eyeContactScore': 0.0,
+                    'fillerWordsScore': 0.0,
+                    'volumeScore': 0.0
+                },
+                'rawMetrics': {
+                    'avgWpm': 0.0,
+                    'avgVolume': 0.0,
+                    'volumeVariance': 0.0,
+                    'fillerWordsCount': 0,
+                    'pausesCount': 0,
+                    'eyeContactLookAwaySeconds': 0.0
+                },
+                'transcript': '',
+                'metricWeights': {
+                    'wpm': 0.25,
+                    'eyeContact': 0.25,
+                    'fillerWords': 0.25,
+                    'volume': 0.25
+                },
+                'duration': total_duration
+            }
+
+        # Step 2: Aggregate metrics from all chunks
+        raw_metrics = aggregate_metrics(chunks, total_duration)
+
+        # Step 3: Fetch persona to get metric weights
+        persona_table_name = os.environ.get('PERSONA_TABLE_NAME', 'UserPersonaTable')
+        persona = fetch_persona(persona_id, persona_table_name)
+        metric_weights = persona.get('metricWeights', {
+            'wpm': 0.25,
+            'eyeContact': 0.25,
+            'fillerWords': 0.25,
+            'volume': 0.25
+        })
+
+        # Step 4: Calculate normalized scores
+        duration_minutes = total_duration / 60.0
+
+        wpm_score = normalize_wpm(raw_metrics['avgWpm'])
+        eye_contact_score = normalize_eye_contact(
+            raw_metrics['eyeContactLookAwaySeconds'],
+            total_duration
+        )
+        filler_words_score = normalize_filler_words(
+            raw_metrics['fillerWordsCount'],
+            duration_minutes
+        )
+        volume_score = normalize_volume(
+            raw_metrics['avgVolume'],
+            raw_metrics['volumeVariance']
+        )
+
+        normalized_scores = {
+            'wpmScore': round(wpm_score, 2),
+            'eyeContactScore': round(eye_contact_score, 2),
+            'fillerWordsScore': round(filler_words_score, 2),
+            'volumeScore': round(volume_score, 2)
+        }
+
+        print(f"[INFO] Normalized scores calculated:")
+        print(f"  - WPM: {normalized_scores['wpmScore']}/100")
+        print(f"  - Eye Contact: {normalized_scores['eyeContactScore']}/100")
+        print(f"  - Filler Words: {normalized_scores['fillerWordsScore']}/100")
+        print(f"  - Volume: {normalized_scores['volumeScore']}/100")
+
+        # Step 5: Return results for next Step Functions state
+        result = {
+            'statusCode': 200,
+            'sessionID': session_id,
+            'userID': user_id,
+            'personaID': persona_id,
+            'date': date,
+            's3KeyPrefix': s3_key_prefix,
+            'normalizedScores': normalized_scores,
+            'rawMetrics': raw_metrics,
+            'transcript': raw_metrics['transcript'],
+            'metricWeights': metric_weights,
+            'duration': total_duration
+        }
+
+        print(f"[INFO] Successfully processed session {session_id}")
+        return result
+
+    except Exception as e:
+        print(f"[ERROR] Failed to process session {session_id}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise
