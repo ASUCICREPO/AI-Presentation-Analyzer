@@ -6,6 +6,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
 
 export class AIPresentationCoachStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -28,6 +29,26 @@ export class AIPresentationCoachStack extends cdk.Stack {
     });
 
     // ──────────────────────────────────────────────
+    // SQS Queue for Post-Presentation Analytics Pipeline
+    // ──────────────────────────────────────────────
+    // Dead Letter Queue (DLQ) for failed processing attempts
+    const postPresentationDLQ = new sqs.Queue(this, 'PostPresentationDLQ', {
+      queueName: 'PostPresentationDLQ',
+      retentionPeriod: cdk.Duration.days(14), // Keep failed messages for 14 days
+    });
+
+    // Main queue for analytics pipeline
+    const postPresentationJobsQueue = new sqs.Queue(this, 'PostPresentationJobsQueue', {
+      queueName: 'PostPresentationJobsQueue',
+      visibilityTimeout: cdk.Duration.seconds(900), // 15 minutes (should be >= Step Functions max execution time)
+      receiveMessageWaitTime: cdk.Duration.seconds(20), // Enable long polling
+      deadLetterQueue: {
+        queue: postPresentationDLQ,
+        maxReceiveCount: 3, // Retry 3 times before moving to DLQ
+      },
+    });
+
+    // ──────────────────────────────────────────────
     // Lambda for presigned URL generation
     // ──────────────────────────────────────────────
     const s3UrlIssuerLambda = new lambda.Function(this, 's3UrlIssuerLambda', {
@@ -44,7 +65,8 @@ export class AIPresentationCoachStack extends cdk.Stack {
       environment: {
         'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
         'PDF_UPLOAD_TIMEOUT': '120', //PDF upload timeout in 2 minutes
-        'PRESENTATION_TIMEOUT': '1200' //Max Presentation video duration timeout 20 minutes
+        'PRESENTATION_TIMEOUT': '1200', //Max Presentation video duration timeout 20 minutes
+        'CHUNK_UPLOAD_TIMEOUT': '300' //Chunk upload timeout 5 minutes
       },
     });
 
