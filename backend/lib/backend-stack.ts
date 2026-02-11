@@ -299,6 +299,17 @@ export class AIPresentationCoachStack extends cdk.Stack {
       })
     );
 
+    // SSE Notifier Lambda
+    const sseNotifierLambda = new lambda.Function(this, 'SSENotifierLambda', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      handler: 'notifier.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'sse_notifier')),
+      timeout: cdk.Duration.seconds(300), // 5 minutes for long-lived SSE connections
+      environment: {
+        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
+      },
+    });
+
     // ──────────────────────────────────────────────
     // Step Functions State Machine
     // ──────────────────────────────────────────────
@@ -355,9 +366,35 @@ export class AIPresentationCoachStack extends cdk.Stack {
     engagementScoresAILambda.grantInvoke(analyticsPipeline);
     pdfGeneratorLambda.grantInvoke(analyticsPipeline);
 
+    // Session Complete Trigger Lambda (triggers Step Functions)
+    const sessionCompleteTriggerLambda = new lambda.Function(this, 'SessionCompleteTriggerLambda', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      handler: 'trigger_analytics.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'session_complete_trigger')),
+      timeout: cdk.Duration.seconds(30),
+      environment: {
+        'STEP_FUNCTIONS_ARN': analyticsPipeline.stateMachineArn,
+        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
+      },
+    });
+
+    // Grant permission to start Step Functions execution
+    analyticsPipeline.grantStartExecution(sessionCompleteTriggerLambda);
+
     // ──────────────────────────────────────────────
     // API Gateway Routes for Analytics
     // ──────────────────────────────────────────────
+
+    // /sessions/{sessionID}/complete - Trigger analytics pipeline
+    const sessionsResource = apiGateway.root.addResource('sessions');
+    const sessionIdResource = sessionsResource.addResource('{sessionID}');
+    const completeResource = sessionIdResource.addResource('complete');
+    completeResource.addMethod('POST', new apigateway.LambdaIntegration(sessionCompleteTriggerLambda));
+
+    // /sse/{sessionID} - Server-Sent Events for real-time notifications
+    const sseResource = apiGateway.root.addResource('sse');
+    const sseSessionResource = sseResource.addResource('{sessionID}');
+    sseSessionResource.addMethod('GET', new apigateway.LambdaIntegration(sseNotifierLambda));
 
     // /report_urls/{sessionID} - Get presigned URLs for reports
     const reportUrlsResource = apiGateway.root.addResource('report_urls');
