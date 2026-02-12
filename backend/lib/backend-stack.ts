@@ -257,7 +257,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     const engagementScoresAILambda = new lambda.Function(this, 'EngagementScoresAILambda', {
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'generate_feedback.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'engagement_scores_ai')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'engagement_scores')),
       timeout: cdk.Duration.seconds(300), // 5 minutes for Bedrock API call
       memorySize: 1024,
       environment: {
@@ -327,6 +327,9 @@ export class AIPresentationCoachStack extends cdk.Stack {
 
     // Grant SSE Notifier Lambda access to SSE Notifications table
     sseNotificationsTable.grantReadWriteData(sseNotifierLambda);
+
+    // Grant engagement scores Lambda permission to invoke SSE notifier
+    sseNotifierLambda.grantInvoke(engagementScoresAILambda);
 
     // ──────────────────────────────────────────────
     // Step Functions State Machine
