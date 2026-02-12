@@ -106,6 +106,13 @@ export function createAwsTranscribeProvider(
 
       // 1. AudioContext at the sample rate Transcribe requires (16 kHz)
       audioCtx = new AudioContext({ sampleRate: cfg.SAMPLE_RATE });
+
+      // Ensure the context is running — browsers may create it in a
+      // "suspended" state, which prevents the AudioWorklet from processing.
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+
       const source = audioCtx.createMediaStreamSource(stream);
 
       await audioCtx.audioWorklet.addModule('/audio-capture-processor.js');
