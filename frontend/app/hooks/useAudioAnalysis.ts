@@ -12,6 +12,12 @@ export interface AudioMetrics {
   volume: number;        // 0-100
   fillerWords: number;
   pauses: number;
+  vocalVariety?: {
+    pitchVariation: number;
+    volumeVariation: number;
+    spectralVariation: number;
+    monotoneScore: number;
+  };
 }
 
 export interface TranscriptEntry {
@@ -76,11 +82,16 @@ export function useAudioAnalysis(): AudioAnalysisReturn {
 
   // Volume: Exponential Moving Average
   const emaVolumeRef = useRef(0);
+  const lastVolumeUpdateRef = useRef(0);
+  const displayVolumeRef = useRef(0);
 
   // Sliding-window timestamped entries for rolling counters
   const wordEntriesRef = useRef<{ time: number; count: number }[]>([]);
-  const fillerEntriesRef = useRef<number[]>([]);
-  const pauseEntriesRef = useRef<number[]>([]);
+
+  // Fixed 30-second interval tracking for fillers and pauses
+  const currentIntervalStartRef = useRef<number>(0);
+  const currentIntervalFillersRef = useRef<number>(0);
+  const currentIntervalPausesRef = useRef<number>(0);
 
   // Silence/pause tracking
   const inSilenceRef = useRef(false);
@@ -90,44 +101,54 @@ export function useAudioAnalysis(): AudioAnalysisReturn {
   // ─── Calculate and emit metrics ───
   const emitMetrics = useCallback(() => {
     const now = Date.now();
+    const sessionElapsed = now - startTimeRef.current - pausedDurationRef.current
+      - (pausedAtRef.current ? now - pausedAtRef.current : 0);
+
+    // Check if we've crossed into a new 30-second interval
+    const currentInterval = Math.floor(sessionElapsed / (WINDOWS.FILLER_SECONDS * 1000));
+    const expectedIntervalStart = currentInterval * WINDOWS.FILLER_SECONDS * 1000;
+
+    if (expectedIntervalStart !== currentIntervalStartRef.current) {
+      // New interval - reset counters
+      currentIntervalStartRef.current = expectedIntervalStart;
+      currentIntervalFillersRef.current = 0;
+      currentIntervalPausesRef.current = 0;
+    }
 
     // 1. Speaking pace — sliding window WPM
     const paceStart = now - WINDOWS.PACE_SECONDS * 1000;
     const wordEntries = wordEntriesRef.current;
     while (wordEntries.length > 0 && wordEntries[0].time < paceStart) wordEntries.shift();
     const windowWords = wordEntries.reduce((sum, e) => sum + e.count, 0);
-    const sessionAge = now - startTimeRef.current - pausedDurationRef.current
-      - (pausedAtRef.current ? now - pausedAtRef.current : 0);
-    const windowMs = Math.min(WINDOWS.PACE_SECONDS * 1000, Math.max(sessionAge, 1));
+    const windowMs = Math.min(WINDOWS.PACE_SECONDS * 1000, Math.max(sessionElapsed, 1));
     // Require at least 5 seconds of data (0.083 min) before showing WPM to
     // avoid wild spikes when Transcribe delivers a batch of words early on.
     const rawWpm = windowMs / 60000 > 0.083 ? Math.round(windowWords / (windowMs / 60000)) : 0;
     // Hard cap: human speech rarely exceeds 200 wpm in presentations
     const wpm = Math.min(rawWpm, 250);
 
-    // 2. Volume from EMA
-    const volume = Math.round(Math.min(100, (emaVolumeRef.current / VOLUME_MAX_RMS) * 100));
+    // 2. Volume from EMA - update every 5 seconds
+    if (now - lastVolumeUpdateRef.current >= 5000) {
+      displayVolumeRef.current = Math.round(Math.min(100, (emaVolumeRef.current / VOLUME_MAX_RMS) * 100));
+      lastVolumeUpdateRef.current = now;
+    }
+    const volume = displayVolumeRef.current;
 
-    // 3. Filler words — rolling window
-    const fillerStart = now - WINDOWS.FILLER_SECONDS * 1000;
-    const fillerEntries = fillerEntriesRef.current;
-    while (fillerEntries.length > 0 && fillerEntries[0] < fillerStart) fillerEntries.shift();
-
-    // 4. Pauses — rolling window
-    const pauseStart = now - WINDOWS.PAUSE_SECONDS * 1000;
-    const pauseEntries = pauseEntriesRef.current;
-    while (pauseEntries.length > 0 && pauseEntries[0] < pauseStart) pauseEntries.shift();
-
-    // 5. Real-time pause check
+    // 3. Real-time pause check for current interval
     if (inSilenceRef.current && !pauseAlreadyCountedRef.current && silenceStartRef.current > 0) {
       const silenceDur = now - silenceStartRef.current;
       if (silenceDur > PAUSE_DURATION_MS) {
-        pauseEntries.push(now);
+        currentIntervalPausesRef.current++;
         pauseAlreadyCountedRef.current = true;
       }
     }
 
-    setMetrics({ wpm, volume, fillerWords: fillerEntries.length, pauses: pauseEntries.length });
+    setMetrics({
+      wpm,
+      volume,
+      fillerWords: currentIntervalFillersRef.current,
+      pauses: currentIntervalPausesRef.current
+    });
   }, []);
 
   // ─── Process final transcript text ───
@@ -146,10 +167,12 @@ export function useAudioAnalysis(): AudioAnalysisReturn {
       wordEntriesRef.current.push({ time: Math.round(spreadStart + step * i), count: 1 });
     }
 
-    const ts = Date.now();
+    // Count filler words in current interval
     words.forEach((w) => {
       const clean = w.replace(/[.,!?;:'"()\-]/g, '');
-      if (FILLER_WORDS.includes(clean)) fillerEntriesRef.current.push(ts);
+      if (FILLER_WORDS.includes(clean)) {
+        currentIntervalFillersRef.current++;
+      }
     });
 
     const totalElapsed = Date.now() - startTimeRef.current;
@@ -221,9 +244,12 @@ export function useAudioAnalysis(): AudioAnalysisReturn {
     pausedDurationRef.current = 0;
     pausedAtRef.current = null;
     emaVolumeRef.current = 0;
+    lastVolumeUpdateRef.current = 0;
+    displayVolumeRef.current = 0;
     wordEntriesRef.current = [];
-    fillerEntriesRef.current = [];
-    pauseEntriesRef.current = [];
+    currentIntervalStartRef.current = 0;
+    currentIntervalFillersRef.current = 0;
+    currentIntervalPausesRef.current = 0;
     inSilenceRef.current = false;
     silenceStartRef.current = 0;
     pauseAlreadyCountedRef.current = false;
@@ -275,7 +301,7 @@ export function useAudioAnalysis(): AudioAnalysisReturn {
           } else if (!pauseAlreadyCountedRef.current) {
             const dur = Date.now() - silenceStartRef.current;
             if (dur > PAUSE_DURATION_MS) {
-              pauseEntriesRef.current.push(Date.now());
+              currentIntervalPausesRef.current++;
               pauseAlreadyCountedRef.current = true;
               emitMetrics();
             }
@@ -319,7 +345,7 @@ export function useAudioAnalysis(): AudioAnalysisReturn {
     if (inSilenceRef.current && silenceStartRef.current > 0) {
       const dur = Date.now() - silenceStartRef.current;
       if (dur > PAUSE_DURATION_MS && !pauseAlreadyCountedRef.current) {
-        pauseEntriesRef.current.push(Date.now());
+        currentIntervalPausesRef.current++;
       }
       inSilenceRef.current = false;
     }

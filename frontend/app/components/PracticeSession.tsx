@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useFaceLandmarker } from '../hooks/useFaceLandmarker';
 import { useAudioAnalysis } from '../hooks/useAudioAnalysis';
+import { useVocalVariety } from '../hooks/useVocalVariety';
 import { ANALYSIS_CONFIG, PRESENTATION_LIMITS, DEFAULT_TIME_LIMIT_SEC } from '../config/config';
 
 import { toast } from 'sonner';
@@ -13,6 +14,7 @@ import CameraView from './practice/CameraView';
 import CalibrationPanel from './practice/CalibrationPanel';
 import RealTimeFeedbackPanel from './practice/RealTimeFeedbackPanel';
 import TranscriptionPanel from './practice/TranscriptionPanel';
+import { VocalVarietyPanel } from './practice/VocalVarietyPanel';
 
 interface PracticeSessionProps {
   personaTitle: string;
@@ -29,14 +31,14 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
   const [timer, setTimer] = useState(0);
   const [cameraActive, setCameraActive] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
-  
+
   // MediaPipe & Tracking State
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationFrameRef = useRef<number | null>(null);
   const lastProcessTimeRef = useRef<number>(0);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  
+
   // Audio Feedback State
   const [soundEnabled, setSoundEnabled] = useState(true);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -49,7 +51,7 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
   // New Calibration Mode State
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [showMesh, setShowMesh] = useState(false);
-  
+
   // Time-limit alert tracking (each fires once)
   const shownAlertsRef = useRef<Set<string>>(new Set());
 
@@ -72,7 +74,10 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
     resumeAnalysis,
     stopAnalysis,
   } = useAudioAnalysis();
-  
+
+  // Vocal Variety Hook
+  const vocalVariety = useVocalVariety();
+
   // Hook initialization
   const {
     status: mpStatus,
@@ -97,7 +102,7 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
 
   const playAlertSound = useCallback(() => {
     if (!audioContextRef.current || !soundEnabled) return;
-    
+
     if (audioContextRef.current.state === 'suspended') {
       audioContextRef.current.resume();
     }
@@ -105,16 +110,16 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
     const ctx = audioContextRef.current;
     const oscillator = ctx.createOscillator();
     const gainNode = ctx.createGain();
-    
+
     oscillator.connect(gainNode);
     gainNode.connect(ctx.destination);
-    
+
     oscillator.frequency.setValueAtTime(ANALYSIS_CONFIG.AUDIO.FREQUENCY_START, ctx.currentTime);
     oscillator.type = 'sine';
-    
+
     gainNode.gain.setValueAtTime(ANALYSIS_CONFIG.AUDIO.GAIN_START, ctx.currentTime);
     gainNode.gain.exponentialRampToValueAtTime(ANALYSIS_CONFIG.AUDIO.GAIN_END, ctx.currentTime + ANALYSIS_CONFIG.AUDIO.DURATION);
-    
+
     oscillator.start(ctx.currentTime);
     oscillator.stop(ctx.currentTime + ANALYSIS_CONFIG.AUDIO.DURATION);
   }, [soundEnabled]);
@@ -169,7 +174,7 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
       }, 1000);
     }
     return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRecording, isPaused, maxDuration]);
 
   // Analyze gaze from blendshapes
@@ -178,14 +183,14 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
 
     const categories = shapes[0].categories;
     const scores: Record<string, number> = {};
-    
+
     categories.forEach((cat) => {
       scores[cat.categoryName] = cat.score;
     });
 
     const eyesWide = (scores.eyeWideLeft + scores.eyeWideRight) / 2;
     const isSurprised = eyesWide > 0.4;
-    
+
     const { SURPRISE_MULTIPLIER } = ANALYSIS_CONFIG.GAZE_THRESHOLDS;
     const lookUpThreshold = isSurprised ? SURPRISE_MULTIPLIER.LOOK_UP : 0.3;
 
@@ -193,7 +198,7 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
     const lookRight = (scores.eyeLookInLeft + scores.eyeLookOutRight) / 2;
     const lookUp = (scores.eyeLookUpLeft + scores.eyeLookUpRight) / 2;
     const lookDown = (scores.eyeLookDownLeft + scores.eyeLookDownRight) / 2;
-    
+
     let isLookingAtScreen = true;
     let message = 'Good Eye Contact';
     let color = 'text-green-600';
@@ -263,7 +268,7 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
       } else {
         ctx?.clearRect(0, 0, canvas.width, canvas.height);
       }
-      
+
       if (result.faceBlendshapes && result.faceBlendshapes.length > 0) {
         const { isLookingAtScreen } = analyzeGaze(result.faceBlendshapes);
 
@@ -309,11 +314,11 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
   // Camera handling
   const startCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { width: 640, height: 480 }, 
-        audio: true 
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 640, height: 480 },
+        audio: true
       });
-      
+
       mediaStreamRef.current = stream;
 
       if (videoRef.current) {
@@ -358,6 +363,8 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
   // Recording Handlers
   const handleStartRecording = async () => {
     if (cameraActive && mediaStreamRef.current) {
+      const currentStream = mediaStreamRef.current;
+
       setIsCalibrating(false);
       setIsRecording(true);
       setIsPaused(false);
@@ -365,16 +372,23 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
       lookBackStartTimeRef.current = null;
       alertPlayedRef.current = false;
 
-      // Start audio analysis (Transcribe + volume/filler/pause detection)
-      await startAnalysis(mediaStreamRef.current);
+      // Start both audio analysis and vocal variety in parallel
+      try {
+        await Promise.all([
+          startAnalysis(currentStream),
+          vocalVariety.startAnalysis(currentStream)
+        ]);
+      } catch (error) {
+        console.error('[PracticeSession] Error starting analyses:', error);
+      }
     }
   };
-  
+
   const handlePauseRecording = () => {
     setIsPaused(true);
     pauseAnalysis();
   };
-  
+
   const handleResumeRecording = () => {
     setIsPaused(false);
     resumeAnalysis();
@@ -384,6 +398,7 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
     setIsRecording(false);
     setIsPaused(false);
     stopAnalysis();
+    vocalVariety.stopAnalysis();
     stopCamera();
     onComplete();
   };
@@ -399,7 +414,7 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 py-3 sm:px-6 sm:py-4 2xl:max-w-[1600px] 2xl:py-8">
       {/* 1. Header Section */}
-      <PracticeSessionHeader 
+      <PracticeSessionHeader
         onBack={onBack}
         timer={timer}
         maxDurationSec={maxDuration}
@@ -409,7 +424,7 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 2xl:gap-6">
         {/* 2. Left Column: Camera View & Controls */}
         <div className="lg:col-span-2 space-y-3">
-          <CameraView 
+          <CameraView
             videoRef={videoRef}
             canvasRef={canvasRef}
             cameraActive={cameraActive}
@@ -427,18 +442,18 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
         </div>
 
         {/* 3. Right Column: Dynamic Panel (Feedback OR Calibration) */}
-        <div className="lg:col-span-1">
+        <div className="lg:col-span-1 space-y-4">
           <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm 2xl:p-6 relative overflow-hidden">
-            
+
             {isCalibrating ? (
-              <CalibrationPanel 
+              <CalibrationPanel
                 showMesh={showMesh}
                 onToggleMesh={() => setShowMesh(!showMesh)}
                 gazeStatus={gazeStatus}
                 onComplete={() => setIsCalibrating(false)}
               />
             ) : (
-              <RealTimeFeedbackPanel 
+              <RealTimeFeedbackPanel
                 isRecording={isRecording && !isPaused}
                 soundEnabled={soundEnabled}
                 onToggleSound={() => setSoundEnabled(!soundEnabled)}
@@ -447,6 +462,11 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
               />
             )}
           </div>
+
+          {/* Vocal Variety Panel */}
+          {!isCalibrating && isRecording && (
+            <VocalVarietyPanel metrics={vocalVariety.metrics} />
+          )}
         </div>
       </div>
 
