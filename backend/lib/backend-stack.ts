@@ -188,6 +188,17 @@ export class AIPresentationCoachStack extends cdk.Stack {
       // pointInTimeRecovery: true, // Commenting for now to avoid additional costs, can be enabled in production for data protection.
     });
 
+    // SSE Notifications DynamoDB Table
+    const sseNotificationsTable = new dynamodb.TableV2(this, 'SSENotificationsTable', {
+      partitionKey: {
+        name: 'sessionID',
+        type: dynamodb.AttributeType.STRING,
+      },
+      billing: dynamodb.Billing.onDemand(),
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      timeToLiveAttribute: 'ttl', // Auto-delete entries after TTL expires
+    });
+
     // Persona CRUD Lambda
     const personaCrudLambda = new lambda.Function(this, 'PersonaCrudLambda', {
       runtime: lambda.Runtime.PYTHON_3_11,
@@ -299,6 +310,9 @@ export class AIPresentationCoachStack extends cdk.Stack {
       })
     );
 
+    // Grant engagement scores Lambda permission to invoke SSE notifier
+    sseNotifierLambda.grantInvoke(engagementScoresAILambda);
+
     // SSE Notifier Lambda
     const sseNotifierLambda = new lambda.Function(this, 'SSENotifierLambda', {
       runtime: lambda.Runtime.PYTHON_3_11,
@@ -307,8 +321,12 @@ export class AIPresentationCoachStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(300), // 5 minutes for long-lived SSE connections
       environment: {
         'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
+        'SSE_NOTIFICATIONS_TABLE': sseNotificationsTable.tableName,
       },
     });
+
+    // Grant SSE Notifier Lambda access to SSE Notifications table
+    sseNotificationsTable.grantReadWriteData(sseNotifierLambda);
 
     // ──────────────────────────────────────────────
     // Step Functions State Machine
