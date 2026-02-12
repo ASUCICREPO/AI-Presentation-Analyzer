@@ -30,10 +30,27 @@ export interface Persona {
   attentionSpan: string;
   communicationStyle: string;
   timeLimitSec?: number; // Per-persona presentation time limit (seconds)
+  metricWeights?: {
+    wpm: number;
+    eyeContact: number;
+    fillerWords: number;
+    volume: number;
+  };
 }
 
 /** Fallback when a persona has no timeLimitSec set */
 export const DEFAULT_TIME_LIMIT_SEC = 15 * 60; // 15 minutes
+
+/** Default metric weights when persona has no custom weights */
+export const DEFAULT_METRIC_WEIGHTS = {
+  wpm: 0.25,
+  eyeContact: 0.25,
+  fillerWords: 0.25,
+  volume: 0.25,
+};
+
+/** Interval for uploading data chunks during session (milliseconds) */
+export const DATA_CHUNK_INTERVAL_MS = 15000; // 15 seconds
 
 
 // ---------------------------------------------------------------------------

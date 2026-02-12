@@ -3,7 +3,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useFaceLandmarker } from '../hooks/useFaceLandmarker';
 import { useAudioAnalysis } from '../hooks/useAudioAnalysis';
-import { ANALYSIS_CONFIG, PRESENTATION_LIMITS, DEFAULT_TIME_LIMIT_SEC } from '../config/config';
+import { ANALYSIS_CONFIG, PRESENTATION_LIMITS, DEFAULT_TIME_LIMIT_SEC, DATA_CHUNK_INTERVAL_MS, API_BASE_URL } from '../config/config';
+import { useAuth } from '../context/AuthContext';
 
 import { toast } from 'sonner';
 
@@ -17,11 +18,14 @@ import TranscriptionPanel from './practice/TranscriptionPanel';
 interface PracticeSessionProps {
   personaTitle: string;
   timeLimitSec?: number;
+  sessionID: string;
+  personaID: string;
   onBack: () => void;
-  onComplete: () => void;
+  onComplete: (sessionID: string) => void;
 }
 
-export default function PracticeSession({ personaTitle, timeLimitSec, onBack, onComplete }: PracticeSessionProps) {
+export default function PracticeSession({ personaTitle, timeLimitSec, sessionID, personaID, onBack, onComplete }: PracticeSessionProps) {
+  const { getIdToken } = useAuth();
   // Resolve the effective time cap for this session
   const maxDuration = timeLimitSec ?? DEFAULT_TIME_LIMIT_SEC;
   const [isRecording, setIsRecording] = useState(false);
@@ -45,6 +49,15 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
   const lookAwayStartTimeRef = useRef<number | null>(null);
   const lookBackStartTimeRef = useRef<number | null>(null);
   const alertPlayedRef = useRef(false);
+
+  // Chunk Upload Refs - track data for 15-second intervals
+  const chunkIndexRef = useRef(0);
+  const wpmSamplesRef = useRef<number[]>([]);
+  const volumeSamplesRef = useRef<number[]>([]);
+  const fillerWordsRef = useRef<{word: string; timestamp: number}[]>([]);
+  const gazeEventsRef = useRef<{type: 'lookAway' | 'lookBack'; timestamp: number; duration?: number}[]>([]);
+  const lastFillerCountRef = useRef(0);
+  const lastChunkTimeRef = useRef<number>(0);
 
   // New Calibration Mode State
   const [isCalibrating, setIsCalibrating] = useState(false);
@@ -172,6 +185,31 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRecording, isPaused, maxDuration]);
 
+  // Sample metrics every second for chunk uploads
+  useEffect(() => {
+    if (!isRecording || isPaused) return;
+
+    const interval = setInterval(() => {
+      // Sample WPM and volume
+      wpmSamplesRef.current.push(audioMetrics.wpm);
+      volumeSamplesRef.current.push(audioMetrics.volume);
+
+      // Track filler word changes
+      if (audioMetrics.fillerWords > lastFillerCountRef.current) {
+        const newFillers = audioMetrics.fillerWords - lastFillerCountRef.current;
+        for (let i = 0; i < newFillers; i++) {
+          fillerWordsRef.current.push({
+            word: 'filler', // Generic placeholder
+            timestamp: Date.now()
+          });
+        }
+        lastFillerCountRef.current = audioMetrics.fillerWords;
+      }
+    }, 1000); // Sample every second
+
+    return () => clearInterval(interval);
+  }, [isRecording, isPaused, audioMetrics]);
+
   // Analyze gaze from blendshapes
   const analyzeGaze = useCallback((shapes: { categories: { categoryName: string; score: number }[] }[]) => {
     if (!shapes || shapes.length === 0) return { isLookingAtScreen: false, direction: 'Unknown' };
@@ -267,7 +305,7 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
       if (result.faceBlendshapes && result.faceBlendshapes.length > 0) {
         const { isLookingAtScreen } = analyzeGaze(result.faceBlendshapes);
 
-        // Audio Alert Logic
+        // Audio Alert Logic + Gaze Event Tracking
         if (isRecording && !isPaused) {
           const now = Date.now();
 
@@ -283,8 +321,26 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
             if (durationLookingAway > ANALYSIS_CONFIG.TIMING.LOOK_AWAY_THRESHOLD_MS && !alertPlayedRef.current) {
               playAlertSound();
               alertPlayedRef.current = true;
+
+              // Track gaze event (sustained look away >3sec)
+              gazeEventsRef.current.push({
+                type: 'lookAway',
+                timestamp: now,
+                duration: durationLookingAway
+              });
             }
           } else {
+            // Looking back - record duration if we were looking away
+            if (lookAwayStartTimeRef.current !== null) {
+              const lookAwayDuration = now - lookAwayStartTimeRef.current;
+              if (lookAwayDuration > ANALYSIS_CONFIG.TIMING.LOOK_AWAY_THRESHOLD_MS) {
+                gazeEventsRef.current.push({
+                  type: 'lookBack',
+                  timestamp: now,
+                  duration: lookAwayDuration
+                });
+              }
+            }
             lookAwayStartTimeRef.current = null;
 
             if (lookBackStartTimeRef.current === null) {
@@ -355,6 +411,91 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
     };
   }, [cameraActive, mpStatus, processFrame]);
 
+  // Chunk Upload Logic
+  const uploadChunk = useCallback(async () => {
+    try {
+      const now = Date.now();
+      const token = await getIdToken();
+
+      // Prepare chunk data
+      const chunk = {
+        chunkIndex: chunkIndexRef.current,
+        timestamp: now,
+        wpmSamples: [...wpmSamplesRef.current],
+        volumeSamples: [...volumeSamplesRef.current],
+        fillerWords: [...fillerWordsRef.current],
+        gazeEvents: [...gazeEventsRef.current],
+        transcriptSegments: transcripts
+          .filter(t => t.isFinal)
+          .map(t => ({
+            text: t.text,
+            timestamp: t.timestamp,
+            isFinal: t.isFinal
+          }))
+      };
+
+      // Get multipart upload URL
+      const uploadUrlResponse = await fetch(
+        `${API_BASE_URL}/multipart_upload?sessionID=${sessionID}&chunkIndex=${chunk.chunkIndex}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        }
+      );
+
+      if (!uploadUrlResponse.ok) {
+        throw new Error('Failed to get upload URL');
+      }
+
+      const { uploadUrl, fields } = await uploadUrlResponse.json();
+
+      // Upload chunk to S3
+      const formData = new FormData();
+      Object.entries(fields).forEach(([key, value]) => {
+        formData.append(key, value as string);
+      });
+      formData.append('file', new Blob([JSON.stringify(chunk)], { type: 'application/json' }));
+
+      const uploadResponse = await fetch(uploadUrl, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error('Failed to upload chunk');
+      }
+
+      console.log(`[INFO] Uploaded chunk ${chunk.chunkIndex}`);
+
+      // Clear collected data and increment chunk index
+      wpmSamplesRef.current = [];
+      volumeSamplesRef.current = [];
+      fillerWordsRef.current = [];
+      gazeEventsRef.current = [];
+      chunkIndexRef.current++;
+      lastChunkTimeRef.current = now;
+    } catch (error) {
+      console.error('[ERROR] Failed to upload chunk:', error);
+    }
+  }, [sessionID, getIdToken, transcripts]);
+
+  // Upload chunks every 15 seconds during recording
+  useEffect(() => {
+    if (!isRecording || isPaused) return;
+
+    // Upload immediately on start if it's been 15+ seconds
+    if (lastChunkTimeRef.current === 0) {
+      lastChunkTimeRef.current = Date.now();
+    }
+
+    const interval = setInterval(() => {
+      uploadChunk();
+    }, DATA_CHUNK_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [isRecording, isPaused, uploadChunk]);
+
   // Recording Handlers
   const handleStartRecording = async () => {
     if (cameraActive && mediaStreamRef.current) {
@@ -380,12 +521,46 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
     resumeAnalysis();
   };
 
-  const handleStopRecording = () => {
+  const handleStopRecording = async () => {
     setIsRecording(false);
     setIsPaused(false);
     stopAnalysis();
-    stopCamera();
-    onComplete();
+
+    try {
+      // Upload final chunk if there's any collected data
+      if (wpmSamplesRef.current.length > 0 || volumeSamplesRef.current.length > 0) {
+        await uploadChunk();
+      }
+
+      // Trigger analytics pipeline
+      const token = await getIdToken();
+      const completeResponse = await fetch(
+        `${API_BASE_URL}/sessions/${sessionID}/complete`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            personaID,
+            totalDuration: timer
+          })
+        }
+      );
+
+      if (!completeResponse.ok) {
+        throw new Error('Failed to trigger analytics');
+      }
+
+      console.log(`[INFO] Session ${sessionID} marked complete, analytics pipeline triggered`);
+    } catch (error) {
+      console.error('[ERROR] Failed to complete session:', error);
+      toast.error('Failed to save session data');
+    } finally {
+      stopCamera();
+      onComplete(sessionID);
+    }
   };
 
   // Map audio metrics to the shape RealTimeFeedbackPanel expects
