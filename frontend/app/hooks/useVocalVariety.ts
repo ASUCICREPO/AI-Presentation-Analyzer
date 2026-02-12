@@ -57,13 +57,8 @@ export function useVocalVariety() {
     const activeRef = useRef(false);
 
     const startAnalysis = useCallback(async (stream: MediaStream) => {
-        console.log('[Vocal] ========== START ANALYSIS CALLED ==========');
-        console.log('[Vocal] Stream provided:', stream);
-        console.log('[Vocal] Stream active:', stream?.active);
-
         // Prevent multiple initializations
         if (activeRef.current) {
-            console.log('[Vocal] Already active, skipping initialization');
             return;
         }
 
@@ -74,7 +69,6 @@ export function useVocalVariety() {
         activeRef.current = true;
 
         try {
-            console.log('[Vocal] Creating AudioContext...');
             const audioContext = new AudioContext({ sampleRate: 48000 });
             audioContextRef.current = audioContext;
 
@@ -126,8 +120,6 @@ export function useVocalVariety() {
                     return;
                 }
 
-                console.log('[Vocal] Calculating metrics from', rmsHistory.current.length, 'samples');
-
                 const pitchVar = toScore(stdDev(zcrHistory.current), 0.05);
                 const volumeVar = toScore(stdDev(rmsHistory.current), 0.02);
                 const spectralVar = toScore(stdDev(spectralHistory.current), 0.1);
@@ -145,18 +137,13 @@ export function useVocalVariety() {
                 zcrHistory.current = [];
                 spectralHistory.current = [];
             }, 10000);
-
-            console.log('[Vocal] Setup complete');
         } catch (error) {
-            console.error('[Vocal] !!!!! ERROR DURING SETUP !!!!!');
-            console.error('[Vocal] Error:', error);
-            console.error('[Vocal] Error stack:', error instanceof Error ? error.stack : 'No stack');
+            console.error('[VocalVariety] Error during setup:', error);
             activeRef.current = false;
         }
     }, []);
 
     const stopAnalysis = useCallback(() => {
-        console.log('[Vocal] Stopping analysis');
         activeRef.current = false;
 
         if (timerRef.current) {

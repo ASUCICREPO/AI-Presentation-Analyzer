@@ -6,10 +6,12 @@ import Header from './components/Header';
 import PersonaSelection from './components/PersonaSelection';
 import UploadContent from './components/UploadContent';
 import PracticeSession from './components/PracticeSession';
+import ReviewAnalytics from './components/ReviewAnalytics';
 import ConfirmationModal from './components/ConfirmationModal';
 import LoginPage from './components/LoginPage';
 import SignUpPage from './components/SignUpPage';
 import ConfirmSignUpPage from './components/ConfirmSignUpPage';
+import { SessionAnalytics } from './hooks/useSessionAnalytics';
 import { Loader2 } from 'lucide-react';
 
 type AuthView = 'login' | 'signup' | 'confirm';
@@ -27,7 +29,8 @@ export default function Home() {
   const [selectedPersonaName, setSelectedPersonaName] = useState<string>('');
   const [selectedPersonaTimeLimit, setSelectedPersonaTimeLimit] = useState<number | undefined>(undefined);
   const [customNotes, setCustomNotes] = useState('');
-  
+  const [sessionData, setSessionData] = useState<SessionAnalytics | null>(null);
+
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [pendingStep, setPendingStep] = useState<number | null>(null);
@@ -73,8 +76,29 @@ export default function Home() {
     window.scrollTo(0, 0);
   };
 
-  const handlePracticeComplete = () => {
+  const handlePracticeComplete = (data: SessionAnalytics) => {
+    setSessionData(data);
     setCurrentStep(4);
+    window.scrollTo(0, 0);
+  };
+
+  const handleDownloadSessionData = () => {
+    if (sessionData) {
+      const blob = new Blob([JSON.stringify(sessionData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `session_analytics_${sessionData.sessionId}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  const handleBackToStart = () => {
+    setCurrentStep(1);
+    setSessionData(null);
     window.scrollTo(0, 0);
   };
 
@@ -143,7 +167,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-gray-50">
       <Header currentStep={currentStep} onStepClick={handleStepClick} />
-      
+
       {currentStep === 1 && (
         <PersonaSelection
           selectedPersona={selectedPersona}
@@ -157,7 +181,7 @@ export default function Home() {
       )}
 
       {currentStep === 2 && (
-        <UploadContent 
+        <UploadContent
           personaName={selectedPersonaName}
           onBack={handleBackToPersona}
           onContinue={handleContinueFromUpload}
@@ -172,12 +196,20 @@ export default function Home() {
           onComplete={handlePracticeComplete}
         />
       )}
-      
-      {currentStep === 4 && (
+
+      {currentStep === 4 && sessionData && (
+        <ReviewAnalytics
+          sessionData={sessionData}
+          onDownload={handleDownloadSessionData}
+          onBackToStart={handleBackToStart}
+        />
+      )}
+
+      {currentStep === 4 && !sessionData && (
         <div className="flex min-h-[60vh] items-center justify-center">
           <div className="text-center">
             <h2 className="text-2xl font-bold text-gray-900 font-serif">Review Analytics</h2>
-            <p className="mt-2 text-gray-500 font-sans">Coming Soon...</p>
+            <p className="mt-2 text-gray-500 font-sans">No session data available</p>
           </div>
         </div>
       )}

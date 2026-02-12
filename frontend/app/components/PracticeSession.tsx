@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useFaceLandmarker } from '../hooks/useFaceLandmarker';
 import { useAudioAnalysis } from '../hooks/useAudioAnalysis';
 import { useVocalVariety } from '../hooks/useVocalVariety';
+import { useSessionAnalytics, SessionAnalytics } from '../hooks/useSessionAnalytics';
 import { ANALYSIS_CONFIG, PRESENTATION_LIMITS, DEFAULT_TIME_LIMIT_SEC } from '../config/config';
 
 import { toast } from 'sonner';
@@ -20,7 +21,7 @@ interface PracticeSessionProps {
   personaTitle: string;
   timeLimitSec?: number;
   onBack: () => void;
-  onComplete: () => void;
+  onComplete: (sessionData: SessionAnalytics) => void;
 }
 
 export default function PracticeSession({ personaTitle, timeLimitSec, onBack, onComplete }: PracticeSessionProps) {
@@ -78,6 +79,21 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
   // Vocal Variety Hook
   const vocalVariety = useVocalVariety();
 
+  // Session Analytics Hook
+  const sessionAnalytics = useSessionAnalytics(personaTitle);
+  const analyticsIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const windowIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const isPausedRef = useRef(false);
+
+  // Refs to store latest metric values
+  const latestMetricsRef = useRef({
+    wpm: 0,
+    volume: 0,
+    isLookingAtScreen: true,
+    fillerWords: 0,
+    pauses: 0,
+  });
+
   // Hook initialization
   const {
     status: mpStatus,
@@ -99,6 +115,61 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
       audioContextRef.current?.close();
     };
   }, []);
+
+  // Update latest metrics ref whenever they change
+  useEffect(() => {
+    latestMetricsRef.current = {
+      wpm: audioMetrics.wpm,
+      volume: audioMetrics.volume,
+      isLookingAtScreen: gazeStatus.isLookingAtScreen,
+      fillerWords: audioMetrics.fillerWords,
+      pauses: audioMetrics.pauses,
+    };
+  }, [audioMetrics.wpm, audioMetrics.volume, audioMetrics.fillerWords, audioMetrics.pauses, gazeStatus.isLookingAtScreen]);
+
+  // Collect metrics every second when recording
+  useEffect(() => {
+    if (!isRecording || isPaused) {
+      if (analyticsIntervalRef.current) {
+        clearInterval(analyticsIntervalRef.current);
+        analyticsIntervalRef.current = null;
+      }
+      return;
+    }
+
+    analyticsIntervalRef.current = setInterval(() => {
+      sessionAnalytics.updateMetrics(latestMetricsRef.current);
+    }, 1000);
+
+    return () => {
+      if (analyticsIntervalRef.current) {
+        clearInterval(analyticsIntervalRef.current);
+        analyticsIntervalRef.current = null;
+      }
+    };
+  }, [isRecording, isPaused]);
+
+  // Finalize 30-second windows
+  useEffect(() => {
+    if (!isRecording || isPaused) {
+      if (windowIntervalRef.current) {
+        clearInterval(windowIntervalRef.current);
+        windowIntervalRef.current = null;
+      }
+      return;
+    }
+
+    windowIntervalRef.current = setInterval(() => {
+      sessionAnalytics.finalizeWindow();
+    }, 30000);
+
+    return () => {
+      if (windowIntervalRef.current) {
+        clearInterval(windowIntervalRef.current);
+        windowIntervalRef.current = null;
+      }
+    };
+  }, [isRecording, isPaused]);
 
   const playAlertSound = useCallback(() => {
     if (!audioContextRef.current || !soundEnabled) return;
@@ -368,9 +439,13 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
       setIsCalibrating(false);
       setIsRecording(true);
       setIsPaused(false);
+      isPausedRef.current = false;
       lookAwayStartTimeRef.current = null;
       lookBackStartTimeRef.current = null;
       alertPlayedRef.current = false;
+
+      // Reset session analytics
+      sessionAnalytics.resetSession();
 
       // Start both audio analysis and vocal variety in parallel
       try {
@@ -381,16 +456,20 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
       } catch (error) {
         console.error('[PracticeSession] Error starting analyses:', error);
       }
+
+      // Metrics collection handled by useEffect
     }
   };
 
   const handlePauseRecording = () => {
     setIsPaused(true);
+    isPausedRef.current = true;
     pauseAnalysis();
   };
 
   const handleResumeRecording = () => {
     setIsPaused(false);
+    isPausedRef.current = false;
     resumeAnalysis();
   };
 
@@ -399,8 +478,15 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
     setIsPaused(false);
     stopAnalysis();
     vocalVariety.stopAnalysis();
+
+    // Finalize the last window if there's data
+    sessionAnalytics.finalizeWindow();
+
+    // Get session data and pass to parent
+    const sessionData = sessionAnalytics.getSessionData();
+
     stopCamera();
-    onComplete();
+    onComplete(sessionData);
   };
 
   // Map audio metrics to the shape RealTimeFeedbackPanel expects
