@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useAuth } from './context/AuthContext';
 import Header from './components/Header';
 import PersonaSelection from './components/PersonaSelection';
@@ -27,6 +27,11 @@ export default function Home() {
   const [selectedPersonaName, setSelectedPersonaName] = useState<string>('');
   const [selectedPersonaTimeLimit, setSelectedPersonaTimeLimit] = useState<number | undefined>(undefined);
   const [customNotes, setCustomNotes] = useState('');
+
+  // Generate a unique session ID for this practice session
+  const sessionID = useMemo(() => {
+    return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }, []);
   
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -164,10 +169,12 @@ export default function Home() {
         />
       )}
 
-      {currentStep === 3 && (
+      {currentStep === 3 && selectedPersona && (
         <PracticeSession
           personaTitle={selectedPersonaName}
           timeLimitSec={selectedPersonaTimeLimit}
+          sessionID={sessionID}
+          personaID={selectedPersona}
           onBack={handleBackToUpload}
           onComplete={handlePracticeComplete}
         />

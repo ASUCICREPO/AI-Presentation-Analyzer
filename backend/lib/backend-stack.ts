@@ -10,14 +10,23 @@ import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 
+interface AIPresentationCoachStackProps extends cdk.StackProps {
+  resourceSuffix: string;
+}
+
 export class AIPresentationCoachStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
-    super(scope, id, props);
+  constructor(scope: Construct,
+    id: string, props?: AIPresentationCoachStackProps
+  ){
+    const stackId = props?.resourceSuffix ? `${id}-${props.resourceSuffix}` : id;
+    super(scope, stackId, props);
+
+    const suffix = props?.resourceSuffix ? `-${props.resourceSuffix}` : '';
 
     // ──────────────────────────────────────────────
     // S3 bucket for uploads
     // ──────────────────────────────────────────────
-    const presentationAndSessionUploadsBucket = new cdk.aws_s3.Bucket(this, 'AIPresentationCoach-Presentations-Videos', {
+    const presentationAndSessionUploadsBucket = new cdk.aws_s3.Bucket(this, `AIPresentationCoach-Presentations-Videos${suffix}`, {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       cors: [
@@ -34,14 +43,14 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // SQS Queue for Post-Presentation Analytics Pipeline
     // ──────────────────────────────────────────────
     // Dead Letter Queue (DLQ) for failed processing attempts
-    const postPresentationDLQ = new sqs.Queue(this, 'PostPresentationDLQ', {
-      queueName: 'PostPresentationDLQ',
+    const postPresentationDLQ = new sqs.Queue(this, `PostPresentationDLQ${suffix}`, {
+      queueName: `PostPresentationDLQ${suffix}`,
       retentionPeriod: cdk.Duration.days(14), // Keep failed messages for 14 days
     });
 
     // Main queue for analytics pipeline
-    const postPresentationJobsQueue = new sqs.Queue(this, 'PostPresentationJobsQueue', {
-      queueName: 'PostPresentationJobsQueue',
+    const postPresentationJobsQueue = new sqs.Queue(this, `PostPresentationJobsQueue${suffix}`, {
+      queueName: `PostPresentationJobsQueue${suffix}`,
       visibilityTimeout: cdk.Duration.seconds(900), // 15 minutes (should be >= Step Functions max execution time)
       receiveMessageWaitTime: cdk.Duration.seconds(20), // Enable long polling
       deadLetterQueue: {
@@ -53,12 +62,12 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // ──────────────────────────────────────────────
     // Lambda for presigned URL generation
     // ──────────────────────────────────────────────
-    const s3UrlIssuerLambda = new lambda.Function(this, 's3UrlIssuerLambda', {
+    const s3UrlIssuerLambda = new lambda.Function(this, `s3UrlIssuerLambda${suffix}`, {
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'get_presigned_url.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambdas', 's3_presigned_url_gen')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 's3_presigned_url_gen')),
       timeout: cdk.Duration.seconds(20),
-      role: new iam.Role(this, 'S3UrlIssuerLambdaRole', {
+      role: new iam.Role(this, `S3UrlIssuerLambdaRole${suffix}`, {
         assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
         managedPolicies: [
           iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
@@ -75,7 +84,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // ──────────────────────────────────────────────
     // Cognito User Pool
     // ──────────────────────────────────────────────
-    const userPool = new cognito.UserPool(this, 'UserPool', {
+    const userPool = new cognito.UserPool(this, `UserPool${suffix}`, {
       selfSignUpEnabled: true,
       signInAliases: {
         email: true,
@@ -96,7 +105,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     });
 
     // User Pool Client (needed by the Identity Pool to authenticate users)
-    const userPoolClient = new cognito.UserPoolClient(this, 'UserPoolClient', {
+    const userPoolClient = new cognito.UserPoolClient(this, `UserPoolClient${suffix}`, {
       userPool,
       authFlows: {
         userSrp: true,
@@ -108,7 +117,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // ──────────────────────────────────────────────
     // Cognito Identity Pool
     // ──────────────────────────────────────────────
-    const identityPool = new cognito.CfnIdentityPool(this, 'IdentityPool', {
+    const identityPool = new cognito.CfnIdentityPool(this, `IdentityPool${suffix}`, {
       allowUnauthenticatedIdentities: false,
       cognitoIdentityProviders: [
         {
@@ -121,7 +130,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // ──────────────────────────────────────────────
     // IAM Role for authenticated users
     // ──────────────────────────────────────────────
-    const authenticatedRole = new iam.Role(this, 'CognitoAuthenticatedRole', {
+    const authenticatedRole = new iam.Role(this, `CognitoAuthenticatedRole${suffix}`, {
       assumedBy: new iam.FederatedPrincipal(
         'cognito-identity.amazonaws.com',
         {
@@ -150,7 +159,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     );
 
     // Attach role to the Identity Pool
-    new cognito.CfnIdentityPoolRoleAttachment(this, 'IdentityPoolRoleAttachment', {
+    new cognito.CfnIdentityPoolRoleAttachment(this, `IdentityPoolRoleAttachment${suffix}`, {
       identityPoolId: identityPool.ref,
       roles: {
         authenticated: authenticatedRole.roleArn,
@@ -161,9 +170,9 @@ export class AIPresentationCoachStack extends cdk.Stack {
     presentationAndSessionUploadsBucket.grantReadWrite(s3UrlIssuerLambda);
 
     // API Gateway definitions
-    const apiGateway = new apigateway.LambdaRestApi(this, 'AIPresentationCoachApi', {
-      handler: s3UrlIssuerLambda,
-      proxy: false,
+    const apiGateway = new apigateway.RestApi(this, `AIPresentationCoachApi${suffix}`, {
+      restApiName: `AIPresentationCoachApi${suffix}`,
+      description: 'API for AI Presentation Coach',
       defaultCorsPreflightOptions: {
         allowOrigins: apigateway.Cors.ALL_ORIGINS,
         allowMethods: apigateway.Cors.ALL_METHODS,
@@ -177,7 +186,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
 
     
     //Personas Dynamo DB Table Config
-    const personasTable = new dynamodb.TableV2(this, 'UserPersonaTable', {
+    const personasTable = new dynamodb.TableV2(this, `UserPersonaTable${suffix}`, {
       // Required: Define the partition key
       partitionKey: {
         name: 'personaID', // The name of the partition key attribute
@@ -189,7 +198,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     });
 
     // SSE Notifications DynamoDB Table
-    const sseNotificationsTable = new dynamodb.TableV2(this, 'SSENotificationsTable', {
+    const sseNotificationsTable = new dynamodb.TableV2(this, `SSENotificationsTable${suffix}`, {
       partitionKey: {
         name: 'sessionID',
         type: dynamodb.AttributeType.STRING,
@@ -200,12 +209,12 @@ export class AIPresentationCoachStack extends cdk.Stack {
     });
 
     // Persona CRUD Lambda
-    const personaCrudLambda = new lambda.Function(this, 'PersonaCrudLambda', {
+    const personaCrudLambda = new lambda.Function(this, `PersonaCrudLambda${suffix}`, {
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'persona_crud.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'dynamo_persona_lambdas')),
       timeout: cdk.Duration.seconds(20),
-      role: new iam.Role(this, 'PersonaCrudLambdaRole', {
+      role: new iam.Role(this, `PersonaCrudLambdaRole${suffix}`, {
         assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
         managedPolicies: [
           iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
@@ -241,7 +250,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // ──────────────────────────────────────────────
 
     // Performance Metrics Lambda (State 1)
-    const performanceMetricsLambda = new lambda.Function(this, 'PerformanceMetricsLambda', {
+    const performanceMetricsLambda = new lambda.Function(this, `PerformanceMetricsLambda${suffix}`, {
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'calculate_metrics.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'performance_metrics')),
@@ -254,7 +263,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     });
 
     // Engagement Scores + AI Lambda (State 2)
-    const engagementScoresAILambda = new lambda.Function(this, 'EngagementScoresAILambda', {
+    const engagementScoresAILambda = new lambda.Function(this, `EngagementScoresAILambda${suffix}`, {
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'generate_feedback.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'engagement_scores')),
@@ -268,7 +277,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     });
 
     // PDF Generator Lambda (State 3)
-    const pdfGeneratorLambda = new lambda.Function(this, 'PDFGeneratorLambda', {
+    const pdfGeneratorLambda = new lambda.Function(this, `PDFGeneratorLambda${suffix}`, {
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'generate_pdf.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'pdf_generator')),
@@ -280,7 +289,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     });
 
     // Report URL Issuer Lambda
-    const reportUrlIssuerLambda = new lambda.Function(this, 'ReportUrlIssuerLambda', {
+    const reportUrlIssuerLambda = new lambda.Function(this, `ReportUrlIssuerLambda${suffix}`, {
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'get_report_urls.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'report_url_issuer')),
@@ -301,6 +310,18 @@ export class AIPresentationCoachStack extends cdk.Stack {
     personasTable.grantReadData(performanceMetricsLambda);
     personasTable.grantReadData(engagementScoresAILambda);
 
+    // SSE Notifier Lambda
+    const sseNotifierLambda = new lambda.Function(this, `SSENotifierLambda${suffix}`, {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      handler: 'notifier.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'sse_notifier')),
+      timeout: cdk.Duration.seconds(300), // 5 minutes for long-lived SSE connections
+      environment: {
+        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
+        'SSE_NOTIFICATIONS_TABLE': sseNotificationsTable.tableName,
+      },
+    });
+
     // Grant Bedrock permissions to engagement scores Lambda
     engagementScoresAILambda.addToRolePolicy(
       new iam.PolicyStatement({
@@ -312,18 +333,6 @@ export class AIPresentationCoachStack extends cdk.Stack {
 
     // Grant engagement scores Lambda permission to invoke SSE notifier
     sseNotifierLambda.grantInvoke(engagementScoresAILambda);
-
-    // SSE Notifier Lambda
-    const sseNotifierLambda = new lambda.Function(this, 'SSENotifierLambda', {
-      runtime: lambda.Runtime.PYTHON_3_11,
-      handler: 'notifier.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'sse_notifier')),
-      timeout: cdk.Duration.seconds(300), // 5 minutes for long-lived SSE connections
-      environment: {
-        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
-        'SSE_NOTIFICATIONS_TABLE': sseNotificationsTable.tableName,
-      },
-    });
 
     // Grant SSE Notifier Lambda access to SSE Notifications table
     sseNotificationsTable.grantReadWriteData(sseNotifierLambda);
@@ -376,8 +385,8 @@ export class AIPresentationCoachStack extends cdk.Stack {
       }));
 
     // Create the state machine
-    const analyticsPipeline = new sfn.StateMachine(this, 'AnalyticsPipeline', {
-      stateMachineName: 'AnalyticsPipeline',
+    const analyticsPipeline = new sfn.StateMachine(this, `AnalyticsPipeline${suffix}`, {
+      stateMachineName: `AnalyticsPipeline${suffix}`,
       definitionBody: sfn.DefinitionBody.fromChainable(analyticsWorkflow),
       timeout: cdk.Duration.minutes(15),
     });
@@ -388,7 +397,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     pdfGeneratorLambda.grantInvoke(analyticsPipeline);
 
     // Session Complete Trigger Lambda (triggers Step Functions)
-    const sessionCompleteTriggerLambda = new lambda.Function(this, 'SessionCompleteTriggerLambda', {
+    const sessionCompleteTriggerLambda = new lambda.Function(this, `SessionCompleteTriggerLambda${suffix}`, {
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'trigger_analytics.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'session_complete_trigger')),
