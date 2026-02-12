@@ -241,6 +241,14 @@ export function useAudioAnalysis(): AudioAnalysisReturn {
       const audioCtx = new AudioContext({ sampleRate: WORKLET_SAMPLE_RATE });
       audioContextRef.current = audioCtx;
 
+      // Ensure the AudioContext is running before creating worklet nodes.
+      // Browsers may start contexts in a "suspended" state; attempting to
+      // construct an AudioWorkletNode while suspended throws
+      // "No execution context available".
+      if (audioCtx.state === 'suspended') {
+        await audioCtx.resume();
+      }
+
       const source = audioCtx.createMediaStreamSource(stream);
       await audioCtx.audioWorklet.addModule('/audio-capture-processor.js');
       const workletNode = new AudioWorkletNode(audioCtx, 'audio-capture-processor');

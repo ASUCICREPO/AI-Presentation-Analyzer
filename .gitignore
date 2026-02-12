@@ -22,10 +22,10 @@ out/
 # Production
 /build
 
-# Compiled JavaScript files
-*.js
-!jest.config.js
-*.d.ts
+# Compiled JavaScript files (CDK backend only)
+backend/**/*.js
+!backend/jest.config.js
+backend/**/*.d.ts
 
 # TypeScript cache
 *.tsbuildinfo
