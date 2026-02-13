@@ -133,6 +133,19 @@ export class AIPresentationCoachStack extends cdk.Stack {
       },
     });
 
+    //Add users to gorups for role-based access control (RBAC)
+    const adminGroup = new cognito.CfnUserPoolGroup(this, 'AdminGroup', {
+      groupName: 'Admin',
+      userPoolId: userPool.userPoolId,
+      description: 'Administrators with full access to the system configs. Can create new personas, manage existing personas, and alter system defaults.',
+    });
+
+    const userGroup = new cognito.CfnUserPoolGroup(this, 'UserGroup', {
+      groupName: 'User',
+      userPoolId: userPool.userPoolId,
+      description: 'Regular users. Can take sessions, upload presentations, and view their own data.',
+    });
+
     // Grant Lambda permission to generate presigned URLs for the S3 bucket
     presentationAndSessionUploadsBucket.grantReadWrite(s3UrlIssuerLambda);
 
@@ -147,11 +160,20 @@ export class AIPresentationCoachStack extends cdk.Stack {
       },
     });
 
+    const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'CognitoAuthorizer', {
+      cognitoUserPools: [userPool],
+    });
+
     // S3 URLs resource
     let s3_urls_resource = apiGateway.root.addResource('s3_urls');
     s3_urls_resource.addMethod('GET', new apigateway.LambdaIntegration(s3UrlIssuerLambda));
 
-    
+    s3_urls_resource.addMethod('GET', new apigateway.LambdaIntegration(s3UrlIssuerLambda), {
+      authorizer: {
+        authorizerId: authorizer.authorizerId,
+      },
+    });
+
     //Personas Dynamo DB Table Config
     const personasTable = new dynamodb.TableV2(this, 'UserPersonaTable', {
       // Required: Define the partition key

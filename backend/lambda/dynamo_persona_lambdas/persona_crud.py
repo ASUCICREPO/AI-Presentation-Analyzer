@@ -1,4 +1,3 @@
-import logging
 import boto3
 from botocore.exceptions import ClientError
 from decimal import Decimal
@@ -6,6 +5,16 @@ from typing import Dict, Optional
 import os
 import json
 import uuid
+
+'''
+This Dynamo DB CRUD API is only meant to be used by Administrators of the system 
+to create and manage personas that can be used to induce specific behaviors in the AI 
+when analyzing presentation recordings.
+
+All cutomizations made to the personas for specific user sessions are stores in that user's 
+own session-specific data in S3, and not in this Dynamo DB table. 
+Check out the s3_presigned_url_gen Lambda for more details on how session-specific data is stored in S3.
+'''
 
 
 class _DecimalEncoder(json.JSONEncoder):
@@ -19,7 +28,7 @@ PERSONA_TABLE_NAME: str = os.environ.get("PERSONA_TABLE_NAME")
 MAX_ITEMS_PER_PAGE: int = int(os.environ.get("MAX_ITEMS_PER_PAGE", 20)) # Default to 20 items per page for pagination
 
 if not PERSONA_TABLE_NAME:
-    logging.error("[!]Error: PERSONA_TABLE_NAME environment variable is not set.")
+    print("[!]Error: PERSONA_TABLE_NAME environment variable is not set.")
     raise ValueError("PERSONA_TABLE_NAME environment variable is not set")
 
 dynamodb = boto3.resource('dynamodb')
@@ -55,10 +64,10 @@ def get_persona_from_id(id: str) -> Dict[str, str] | None:
         if item:
             return item
         else:
-            logging.warning(f"Persona with ID {id} not found.")
+            print(f"Persona with ID {id} not found.")
             return None
     except ClientError as e:
-        logging.error(f"Error fetching persona with ID {id}: {e.response['Error']['Message']}")
+        print(f"Error fetching persona with ID {id}: {e.response['Error']['Message']}")
         return None
 
 def save_persona(persona: Dict[str, str]) -> dict[str, str]:
@@ -74,14 +83,14 @@ def save_persona(persona: Dict[str, str]) -> dict[str, str]:
     """
     try:
         if not all(key in persona for key in ['name', 'description', 'personaPrompt']):
-            logging.error("Persona dictionary is missing required keys: name, description, personaPrompt.")
+            print("Persona dictionary is missing required keys: name, description, personaPrompt.")
             return _response(400, {
                 'message': 'Error saving persona: Missing required field(s): name, description, and personaPrompt are required.'
             })
         table.put_item(Item=persona)
         return _response(201, {'message': 'Persona saved successfully', 'persona': persona})
     except ClientError as e:
-        logging.error(f"Error saving persona: {e.response['Error']['Message']}")
+        print(f"Error saving persona: {e.response['Error']['Message']}")
         return _response(500, {'message': 'Error saving persona'})
 
 def list_all_personas(last_evaled_key: Optional[str]) -> Dict[str, str]:
@@ -108,7 +117,7 @@ def list_all_personas(last_evaled_key: Optional[str]) -> Dict[str, str]:
             result['lastEvaluatedKey'] = lk.get('personaID')
         return _response(200, result)
     except ClientError as e:
-        logging.error(f"Error fetching personas: {e.response['Error']['Message']}")
+        print(f"Error fetching personas: {e.response['Error']['Message']}")
         return _response(500, {'message': 'Error fetching personas'})
 
 def update_persona(persona_id: str, updated_fields: Dict[str, str]) -> dict[str, str]:
@@ -132,7 +141,7 @@ def update_persona(persona_id: str, updated_fields: Dict[str, str]) -> dict[str,
         )
         return _response(200, {'message': 'Persona updated successfully'})
     except ClientError as e:
-        logging.error(f"Error updating persona with ID {persona_id}: {e.response['Error']['Message']}")
+        print(f"Error updating persona with ID {persona_id}: {e.response['Error']['Message']}")
         return _response(500, {'message': 'Error updating persona'})
 
 def delete_persona(persona_id: str) -> dict[str, str]:
@@ -146,7 +155,7 @@ def delete_persona(persona_id: str) -> dict[str, str]:
         table.delete_item(Key={'personaID': persona_id})
         return _response(200, {'message': 'Persona deleted successfully'})
     except ClientError as e:
-        logging.error(f"Error deleting persona with ID {persona_id}: {e.response['Error']['Message']}")
+        print(f"Error deleting persona with ID {persona_id}: {e.response['Error']['Message']}")
         return _response(500, {'message': 'Error deleting persona'})
 
 def lambda_handler(event, context):
@@ -159,14 +168,25 @@ def lambda_handler(event, context):
         PUT    /personas/{personaID}  → update persona
         DELETE /personas/{personaID}  → delete persona
     """
-    logging.info(f"Event: {json.dumps(event)}")
+    print(f"Event: {json.dumps(event)}")
 
     method = event.get('httpMethod', '')
+
+    authorizer = event.get('requestContext', {}).get('authorizer', {})
+    user_id = authorizer.get('claims', {}).get('sub')
+    groups = authorizer.get('claims', {}).get('cognito:groups', [])  # List of groups
+
+    if 'Admin' not in groups:
+        print(f"Unauthorized access attempt by user {user_id} who is not in Admin group.")
+        return _response(403, {'message': 'Forbidden: You do not have permission to access this resource.'})
+
     path_params = event.get('pathParameters') or {}
     qs = event.get('queryStringParameters') or {}
     persona_id = path_params.get('personaID')
 
+
     if method == 'OPTIONS':
+        print(f"Health check heartbeat received from user {user_id}.")
         return _response(200, {'message': 'OK'})
 
     if method == 'GET':
@@ -182,17 +202,20 @@ def lambda_handler(event, context):
         body = json.loads(event.get('body') or '{}')
         if 'personaID' not in body:
             body['personaID'] = str(uuid.uuid4())
+        print(f"New persona create by user {user_id}: {body['personaID']}")
         return save_persona(body)
 
     if method == 'PUT':
         if not persona_id:
             return _response(400, {'message': 'Missing personaID in path'})
         body = json.loads(event.get('body') or '{}')
+        print(f"Persona update attempted by user {user_id} on persona {persona_id} with fields: {list(body.keys())}")
         return update_persona(persona_id, body)
 
     if method == 'DELETE':
         if not persona_id:
             return _response(400, {'message': 'Missing personaID in path'})
+        print(f"Persona delete attempted by user {user_id} on persona {persona_id}")
         return delete_persona(persona_id)
 
     return _response(400, {'message': f'Unsupported method: {method}'})

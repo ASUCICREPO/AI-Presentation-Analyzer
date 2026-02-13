@@ -6,12 +6,11 @@ import uuid
 import os
 
 ## Environment variables
-PRESENTATION_TIMEOUT: int = int(os.environ.get("PRESENTATION_TIMEOUT", 1200)) # 20 minutes default
-PDF_UPLOAD_TIMEOUT: int = int(os.environ.get("PDF_UPLOAD_TIMEOUT", 120)) # 120 seconds default
+CUSTOMIZATION_UPLOAD_TIMEOUT: int = int(os.environ.get("CUSTOMIZATION_UPLOAD_TIMEOUT", 5)) # 5 second default for small JSON uploads of persona customizations
 UPLOADS_BUCKET: str = os.environ.get("UPLOADS_BUCKET")
 
 ## Constants
-AUTHORIZED_REQUEST_TYPES: List[str] = ['ppt', 'session', 'metric_chunk']
+AUTHORIZED_REQUEST_TYPES: List[str] = ['persona_customization']
 
 
 if not UPLOADS_BUCKET:
@@ -33,7 +32,6 @@ def _response(status_code: int, body: dict) -> dict:
         "body": json.dumps(body),
     }
 
-
 def generate_object_name()-> str:
     """Generate a unique object name for the S3 upload
 
@@ -54,38 +52,19 @@ def get_upload_url(object_name: str, request_type: Literal['ppt', 'session', 'ch
     # Create a S3 client
     s3_client = boto3.client('s3')
     try:
-        if request_type == 'ppt':
-            print("[INFO] Generating presigned URL for PPT upload")
+        if request_type == 'persona_customization':
+            print("[INFO] Generating presigned URL for persona customization upload")
             response = s3_client.generate_presigned_post(
                 Bucket=UPLOADS_BUCKET,
-                Key=f"{user_id}/{session_id}/data/presentation/{object_name}.pdf",
-                Fields={"Content-Type": "application/pdf"},
+                Key=f"{user_id}/{session_id}/data/persona/{object_name}.json",
+                ExpiresIn=CUSTOMIZATION_UPLOAD_TIMEOUT,
+                Fields={
+                    "Content-Type": "application/json"
+                },
                 Conditions=[
-                    {"Content-Type": "application/pdf"}
-                ],
-                ExpiresIn=PDF_UPLOAD_TIMEOUT
-            )
-        elif request_type == 'session':
-            print("[INFO] Generating presigned URL for Session upload")
-            response = s3_client.generate_presigned_post(
-                Bucket=UPLOADS_BUCKET,
-                Key=f"{user_id}/{session_id}/data/recording/{object_name}.webm",
-                ExpiresIn=PRESENTATION_TIMEOUT,
-                Fields={"Content-Type": "video/webm"},
-                Conditions=[
-                    {"Content-Type": "video/webm"}
-                ],
-            )
-        elif request_type == 'metric_chunk':
-            print("[INFO] Generating presigned URL for Metric Chunk upload")
-            response = s3_client.generate_presigned_post(
-                Bucket=UPLOADS_BUCKET,
-                Key=f"{user_id}/{session_id}/data/raw/{object_name}.json",
-                ExpiresIn=PRESENTATION_TIMEOUT,
-                Fields={"Content-Type": "application/json"},
-                Conditions=[
-                    {"Content-Type": "application/json"}
-                ],
+                    {"Content-Type": "application/json"},
+                    ["content-length-range", 1, 10*1024]  # Limit to 10KB for small JSON uploads
+                ]
             )
         else:
             return None
@@ -98,7 +77,7 @@ def get_upload_url(object_name: str, request_type: Literal['ppt', 'session', 'ch
 def lambda_handler(event, context):
     """AWS Lambda handler to generate presigned S3 upload URLs.
 
-    Called via API Gateway:  GET /s3_urls?request_type=ppt|session|metric_chunk&session_id={session_id}
+    Called via API Gateway:  GET /s3_urls?request_type=persona_customization&session_id={session_id}
     """
     print(f"[INFO] Received event: {json.dumps(event)}")
 
