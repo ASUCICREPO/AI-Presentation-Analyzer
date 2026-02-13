@@ -104,10 +104,10 @@ def lambda_handler(event, context):
 
 
     qs = event.get('queryStringParameters') or {}
-    request_type = qs.get('request_type')
+    persona_id = qs.get('persona_id')
 
-    if not request_type or request_type not in AUTHORIZED_REQUEST_TYPES:
-        return _response(400, {'message': f"Missing or invalid 'request_type'. Use one of {AUTHORIZED_REQUEST_TYPES}."})
+    if not persona_id:
+        return _response(400, {'message': f"Missing 'persona_id.'"})
 
     object_name = generate_object_name()
     presigned_url = get_upload_url(

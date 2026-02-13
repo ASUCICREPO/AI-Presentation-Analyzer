@@ -6,6 +6,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as bedrockl1 from 'aws-cdk-lib/aws-bedrock';
 
 export class AIPresentationCoachStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -149,7 +150,9 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // Grant Lambda permission to generate presigned URLs for the S3 bucket
     presentationAndSessionUploadsBucket.grantReadWrite(s3UrlIssuerLambda);
 
+    // ──────────────────────────────────────────────
     // API Gateway definitions
+    // ──────────────────────────────────────────────
     const apiGateway = new apigateway.LambdaRestApi(this, 'AIPresentationCoachApi', {
       handler: s3UrlIssuerLambda,
       proxy: false,
@@ -160,6 +163,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
       },
     });
 
+    // Cognito Authorizer for API Gateway
     const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'CognitoAuthorizer', {
       cognitoUserPools: [userPool],
     });
@@ -174,7 +178,9 @@ export class AIPresentationCoachStack extends cdk.Stack {
       },
     });
 
-    //Personas Dynamo DB Table Config
+    // ──────────────────────────────────────────────
+    // Personas Dynamo DB Table Config
+    // ──────────────────────────────────────────────
     const personasTable = new dynamodb.TableV2(this, 'UserPersonaTable', {
       // Required: Define the partition key
       partitionKey: {
@@ -222,6 +228,37 @@ export class AIPresentationCoachStack extends cdk.Stack {
     persona_id_resource.addMethod('PUT', new apigateway.LambdaIntegration(personaCrudLambda));
     // DELETE /personas/{id} - delete persona by ID
     persona_id_resource.addMethod('DELETE', new apigateway.LambdaIntegration(personaCrudLambda));
+
+    // ────────────────────────────────────────────
+    // Persona Customization Lambda
+    // ────────────────────────────────────────────
+    const personaCustomizerLambda = new lambda.Function(this, 'PersonaCustomizerLambda', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      handler: 'persona_customizer.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'persona_customizer')),
+      timeout: cdk.Duration.seconds(20),
+      role: new iam.Role(this, 'PersonaCustomizerLambdaRole', {
+        assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+        managedPolicies: [
+          iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+        ],
+      }),
+      environment: {
+        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
+        'CUSTOMIZATION_UPLOAD_TIMEOUT': "5",
+      },
+    });
+
+    // Grant Lambda permission to write to S3
+    presentationAndSessionUploadsBucket.grantReadWrite(personaCustomizerLambda);
+
+    // Add /customize_persona resource for persona customization uploads
+    let customize_persona_resource = apiGateway.root.addResource('customize_persona');
+    customize_persona_resource.addMethod('POST', new apigateway.LambdaIntegration(personaCustomizerLambda), {
+      authorizer: {
+        authorizerId: authorizer.authorizerId,
+      },
+    });
 
 
     // ──────────────────────────────────────────────

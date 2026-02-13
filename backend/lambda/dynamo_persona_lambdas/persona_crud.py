@@ -176,7 +176,7 @@ def lambda_handler(event, context):
     user_id = authorizer.get('claims', {}).get('sub')
     groups = authorizer.get('claims', {}).get('cognito:groups', [])  # List of groups
 
-    if 'Admin' not in groups:
+    if 'admin' not in list(map(str.lower(),groups)):
         print(f"Unauthorized access attempt by user {user_id} who is not in Admin group.")
         return _response(403, {'message': 'Forbidden: You do not have permission to access this resource.'})
 
