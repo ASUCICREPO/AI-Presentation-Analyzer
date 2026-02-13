@@ -5,11 +5,12 @@ import { getPresignedUrl, uploadFileWithPresignedUrl } from '../services/api';
 
 interface UploadContentProps {
   personaName: string;
+  sessionId: string;
   onBack: () => void;
   onContinue: () => void;
 }
 
-export default function UploadContent({ personaName, onBack, onContinue }: UploadContentProps) {
+export default function UploadContent({ personaName, sessionId, onBack, onContinue }: UploadContentProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -26,7 +27,7 @@ export default function UploadContent({ personaName, onBack, onContinue }: Uploa
     setProgress(0);
     setError(null);
     try {
-      const presigned = await getPresignedUrl('ppt');
+      const presigned = await getPresignedUrl('ppt', sessionId);
       await uploadFileWithPresignedUrl(file, presigned, (pct) => setProgress(pct));
       setProgress(100);
       setUploaded(true);
@@ -193,7 +194,8 @@ export default function UploadContent({ personaName, onBack, onContinue }: Uploa
         <div className="flex flex-col items-end gap-2">
           <button
             onClick={onContinue}
-            className="rounded-lg bg-maroon-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-maroon-700 hover:shadow-md active:scale-[0.98] font-sans 2xl:px-8 2xl:py-3.5 2xl:text-lg flex items-center gap-2"
+            disabled={uploading}
+            className="rounded-lg bg-maroon-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-maroon-700 hover:shadow-md active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed font-sans 2xl:px-8 2xl:py-3.5 2xl:text-lg flex items-center gap-2"
           >
             {uploaded ? 'Continue' : 'Skip & Continue'}
             <svg

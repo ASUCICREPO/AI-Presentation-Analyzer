@@ -6,7 +6,6 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
-import * as bedrockl1 from 'aws-cdk-lib/aws-bedrock';
 
 export class AIPresentationCoachStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -34,7 +33,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     const s3UrlIssuerLambda = new lambda.Function(this, 's3UrlIssuerLambda', {
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'get_presigned_url.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambdas', 's3_presigned_url_gen')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 's3_presigned_url_gen')),
       timeout: cdk.Duration.seconds(20),
       role: new iam.Role(this, 'S3UrlIssuerLambdaRole', {
         assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
@@ -45,7 +44,8 @@ export class AIPresentationCoachStack extends cdk.Stack {
       environment: {
         'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
         'PDF_UPLOAD_TIMEOUT': '120', //PDF upload timeout in 2 minutes
-        'PRESENTATION_TIMEOUT': '1200' //Max Presentation video duration timeout 20 minutes
+        'PRESENTATION_TIMEOUT': '1200', //Max Presentation video duration timeout 20 minutes
+        'CUSTOMIZATION_UPLOAD_TIMEOUT': '10', //Persona customization text upload timeout 10 seconds
       },
     });
 
@@ -134,17 +134,11 @@ export class AIPresentationCoachStack extends cdk.Stack {
       },
     });
 
-    //Add users to gorups for role-based access control (RBAC)
+    //Add users to groups for role-based access control (RBAC)
     const adminGroup = new cognito.CfnUserPoolGroup(this, 'AdminGroup', {
       groupName: 'Admin',
       userPoolId: userPool.userPoolId,
       description: 'Administrators with full access to the system configs. Can create new personas, manage existing personas, and alter system defaults.',
-    });
-
-    const userGroup = new cognito.CfnUserPoolGroup(this, 'UserGroup', {
-      groupName: 'User',
-      userPoolId: userPool.userPoolId,
-      description: 'Regular users. Can take sessions, upload presentations, and view their own data.',
     });
 
     // Grant Lambda permission to generate presigned URLs for the S3 bucket
@@ -170,12 +164,9 @@ export class AIPresentationCoachStack extends cdk.Stack {
 
     // S3 URLs resource
     let s3_urls_resource = apiGateway.root.addResource('s3_urls');
-    s3_urls_resource.addMethod('GET', new apigateway.LambdaIntegration(s3UrlIssuerLambda));
-
     s3_urls_resource.addMethod('GET', new apigateway.LambdaIntegration(s3UrlIssuerLambda), {
-      authorizer: {
-        authorizerId: authorizer.authorizerId,
-      },
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
     });
 
     // ──────────────────────────────────────────────
@@ -215,49 +206,30 @@ export class AIPresentationCoachStack extends cdk.Stack {
 
     // Personas resource
     let personas_resource = apiGateway.root.addResource('personas');
-    // GET /personas - list all personas (with optional pagination)
+    // GET /personas - list all personas (public — needed before login to show persona cards)
     personas_resource.addMethod('GET', new apigateway.LambdaIntegration(personaCrudLambda));
-    // POST /personas - create a new persona
-    personas_resource.addMethod('POST', new apigateway.LambdaIntegration(personaCrudLambda));
+    // POST /personas - create a new persona (auth required)
+    personas_resource.addMethod('POST', new apigateway.LambdaIntegration(personaCrudLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
+    });
 
     // /personas/{id} resource for GET, PUT, DELETE by ID
     let persona_id_resource = personas_resource.addResource('{personaID}');
-    // GET /personas/{id} - get persona by ID
-    persona_id_resource.addMethod('GET', new apigateway.LambdaIntegration(personaCrudLambda));
-    // PUT /personas/{id} - update persona by ID
-    persona_id_resource.addMethod('PUT', new apigateway.LambdaIntegration(personaCrudLambda));
-    // DELETE /personas/{id} - delete persona by ID
-    persona_id_resource.addMethod('DELETE', new apigateway.LambdaIntegration(personaCrudLambda));
-
-    // ────────────────────────────────────────────
-    // Persona Customization Lambda
-    // ────────────────────────────────────────────
-    const personaCustomizerLambda = new lambda.Function(this, 'PersonaCustomizerLambda', {
-      runtime: lambda.Runtime.PYTHON_3_11,
-      handler: 'persona_customizer.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'persona_customizer')),
-      timeout: cdk.Duration.seconds(20),
-      role: new iam.Role(this, 'PersonaCustomizerLambdaRole', {
-        assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-        managedPolicies: [
-          iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
-        ],
-      }),
-      environment: {
-        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
-        'CUSTOMIZATION_UPLOAD_TIMEOUT': "5",
-      },
+    // GET /personas/{id} - get persona by ID (auth required)
+    persona_id_resource.addMethod('GET', new apigateway.LambdaIntegration(personaCrudLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
     });
-
-    // Grant Lambda permission to write to S3
-    presentationAndSessionUploadsBucket.grantReadWrite(personaCustomizerLambda);
-
-    // Add /customize_persona resource for persona customization uploads
-    let customize_persona_resource = apiGateway.root.addResource('customize_persona');
-    customize_persona_resource.addMethod('POST', new apigateway.LambdaIntegration(personaCustomizerLambda), {
-      authorizer: {
-        authorizerId: authorizer.authorizerId,
-      },
+    // PUT /personas/{id} - update persona by ID (auth required)
+    persona_id_resource.addMethod('PUT', new apigateway.LambdaIntegration(personaCrudLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
+    });
+    // DELETE /personas/{id} - delete persona by ID (auth required)
+    persona_id_resource.addMethod('DELETE', new apigateway.LambdaIntegration(personaCrudLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
     });
 
 

@@ -19,12 +19,13 @@ import { VocalVarietyPanel } from './practice/VocalVarietyPanel';
 
 interface PracticeSessionProps {
   personaTitle: string;
+  sessionId: string;
   timeLimitSec?: number;
   onBack: () => void;
   onComplete: (sessionData: SessionAnalytics) => void;
 }
 
-export default function PracticeSession({ personaTitle, timeLimitSec, onBack, onComplete }: PracticeSessionProps) {
+export default function PracticeSession({ personaTitle, sessionId, timeLimitSec, onBack, onComplete }: PracticeSessionProps) {
   // Resolve the effective time cap for this session
   const maxDuration = timeLimitSec ?? DEFAULT_TIME_LIMIT_SEC;
   const [isRecording, setIsRecording] = useState(false);
@@ -80,7 +81,7 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
   const vocalVariety = useVocalVariety();
 
   // Session Analytics Hook
-  const sessionAnalytics = useSessionAnalytics(personaTitle);
+  const sessionAnalytics = useSessionAnalytics(personaTitle, sessionId);
   const analyticsIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const windowIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isPausedRef = useRef(false);

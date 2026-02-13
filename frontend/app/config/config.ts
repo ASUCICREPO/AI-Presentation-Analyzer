@@ -35,6 +35,36 @@ export interface Persona {
 /** Fallback when a persona has no timeLimitSec set */
 export const DEFAULT_TIME_LIMIT_SEC = 15 * 60; // 15 minutes
 
+// ---------------------------------------------------------------------------
+// Session
+// ---------------------------------------------------------------------------
+/** Generate a unique session ID for a new practice session. */
+export function generateSessionId(): string {
+  return `session_${Date.now()}`;
+}
+
+// ---------------------------------------------------------------------------
+// Persona Customization
+// ---------------------------------------------------------------------------
+export const PERSONA_CUSTOMIZATION = {
+  MAX_WORDS: 100,                         // Max words allowed in custom notes
+  MAX_BYTES: 10 * 1024,                   // 10 KB backend limit
+  S3_FILENAME: 'CUSTOM_PERSONA_INSTRUCTION.txt',
+};
+
+// ---------------------------------------------------------------------------
+// S3 Upload — fixed file names (no UUIDs, overwrites on re-upload)
+// ---------------------------------------------------------------------------
+export const S3_FILENAMES = {
+  PRESENTATION: 'presentation.pdf',
+  RECORDING: 'recording.webm',
+  ANALYTICS: 'analytics.json',
+  PERSONA_CUSTOMIZATION: PERSONA_CUSTOMIZATION.S3_FILENAME,
+};
+
+/** Valid request types for the presigned URL endpoint */
+export type S3RequestType = 'ppt' | 'session' | 'metric_chunk' | 'persona_customization';
+
 
 // ---------------------------------------------------------------------------
 // Presentation Time Limits (seconds)
