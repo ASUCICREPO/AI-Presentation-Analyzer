@@ -41,11 +41,13 @@ interface PracticeSessionProps {
   personaTitle: string;
   sessionId: string;
   timeLimitSec?: number;
+  hasPresentationPdf?: boolean;
+  hasPersonaCustomization?: boolean;
   onBack: () => void;
   onComplete: (sessionData: SessionAnalytics) => void;
 }
 
-export default function PracticeSession({ personaTitle, sessionId, timeLimitSec, onBack, onComplete }: PracticeSessionProps) {
+export default function PracticeSession({ personaTitle, sessionId, timeLimitSec, hasPresentationPdf, hasPersonaCustomization, onBack, onComplete }: PracticeSessionProps) {
   // Resolve the effective time cap for this session
   const maxDuration = timeLimitSec ?? DEFAULT_TIME_LIMIT_SEC;
   const [isRecording, setIsRecording] = useState(false);
@@ -127,6 +129,7 @@ export default function PracticeSession({ personaTitle, sessionId, timeLimitSec,
     isLookingAtScreen: true,
     fillerWords: 0,
     pauses: 0,
+    direction: 'Center' as string,
   });
 
   // Hook initialization
@@ -159,8 +162,9 @@ export default function PracticeSession({ personaTitle, sessionId, timeLimitSec,
       isLookingAtScreen: gazeStatus.isLookingAtScreen,
       fillerWords: audioMetrics.fillerWords,
       pauses: audioMetrics.pauses,
+      direction: gazeStatus.direction,
     };
-  }, [audioMetrics.wpm, audioMetrics.volume, audioMetrics.fillerWords, audioMetrics.pauses, gazeStatus.isLookingAtScreen]);
+  }, [audioMetrics.wpm, audioMetrics.volume, audioMetrics.fillerWords, audioMetrics.pauses, gazeStatus.isLookingAtScreen, gazeStatus.direction]);
 
   // Collect metrics every second when recording
   useEffect(() => {
@@ -182,7 +186,7 @@ export default function PracticeSession({ personaTitle, sessionId, timeLimitSec,
         gaze: latestMetricsRef.current.isLookingAtScreen,
         fillers: latestMetricsRef.current.fillerWords,
         pauses: latestMetricsRef.current.pauses,
-        direction: gazeStatus.direction,
+        direction: latestMetricsRef.current.direction,
       });
     }, 1000);
 
@@ -496,7 +500,10 @@ export default function PracticeSession({ personaTitle, sessionId, timeLimitSec,
       detailedMetrics.reset();
 
       // Create session manifest in S3
-      manifest.create();
+      manifest.create({
+        hasPresentationPdf: hasPresentationPdf ?? false,
+        hasPersonaCustomization: hasPersonaCustomization ?? false,
+      });
 
       // Start both audio analysis and vocal variety in parallel
       try {

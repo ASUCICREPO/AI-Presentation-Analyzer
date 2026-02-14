@@ -30,6 +30,7 @@ export default function Home() {
   const [selectedPersonaName, setSelectedPersonaName] = useState<string>('');
   const [selectedPersonaTimeLimit, setSelectedPersonaTimeLimit] = useState<number | undefined>(undefined);
   const [customNotes, setCustomNotes] = useState('');
+  const [pdfUploaded, setPdfUploaded] = useState(false);
   const [sessionId, setSessionId] = useState<string>(generateSessionId);
   const [sessionData, setSessionData] = useState<SessionAnalytics | null>(null);
 
@@ -102,6 +103,7 @@ export default function Home() {
     setCurrentStep(1);
     setSessionData(null);
     setSessionId(generateSessionId());
+    setPdfUploaded(false);
     window.scrollTo(0, 0);
   };
 
@@ -169,7 +171,7 @@ export default function Home() {
   // --- Authenticated app ---
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header currentStep={currentStep} onStepClick={handleStepClick} />
+      <Header currentStep={currentStep} onStepClick={handleStepClick} sessionId={sessionId} />
 
       {currentStep === 1 && (
         <PersonaSelection
@@ -190,6 +192,7 @@ export default function Home() {
           sessionId={sessionId}
           onBack={handleBackToPersona}
           onContinue={handleContinueFromUpload}
+          onPdfUploaded={() => setPdfUploaded(true)}
         />
       )}
 
@@ -198,6 +201,8 @@ export default function Home() {
           personaTitle={selectedPersonaName}
           sessionId={sessionId}
           timeLimitSec={selectedPersonaTimeLimit}
+          hasPresentationPdf={pdfUploaded}
+          hasPersonaCustomization={customNotes.trim().length > 0}
           onBack={handleBackToUpload}
           onComplete={handlePracticeComplete}
         />

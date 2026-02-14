@@ -13,6 +13,7 @@ interface Step {
 interface HeaderProps {
   currentStep: number;
   onStepClick?: (step: number) => void;
+  sessionId?: string;
 }
 
 const steps: Step[] = [
@@ -22,7 +23,7 @@ const steps: Step[] = [
   { number: 4, label: 'Review Analytics' },
 ];
 
-export default function Header({ currentStep, onStepClick }: HeaderProps) {
+export default function Header({ currentStep, onStepClick, sessionId }: HeaderProps) {
   const { signOut, userEmail } = useAuth();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -166,6 +167,12 @@ export default function Header({ currentStep, onStepClick }: HeaderProps) {
                   </div>
                 </div>
               </div>
+              {sessionId && (
+                <div className="border-b border-gray-100 px-4 py-2">
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-gray-400 font-sans">Session ID</p>
+                  <p className="mt-0.5 truncate text-xs text-gray-600 font-mono">{sessionId}</p>
+                </div>
+              )}
               <div className="py-1">
                 <button
                   onClick={() => {

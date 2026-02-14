@@ -8,9 +8,10 @@ interface UploadContentProps {
   sessionId: string;
   onBack: () => void;
   onContinue: () => void;
+  onPdfUploaded?: () => void;
 }
 
-export default function UploadContent({ personaName, sessionId, onBack, onContinue }: UploadContentProps) {
+export default function UploadContent({ personaName, sessionId, onBack, onContinue, onPdfUploaded }: UploadContentProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -31,6 +32,7 @@ export default function UploadContent({ personaName, sessionId, onBack, onContin
       await uploadFileWithPresignedUrl(file, presigned, (pct) => setProgress(pct));
       setProgress(100);
       setUploaded(true);
+      onPdfUploaded?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {

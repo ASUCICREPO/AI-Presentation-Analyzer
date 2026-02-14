@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useCallback, useState } from 'react';
+import fixWebmDuration from 'fix-webm-duration';
 import { VIDEO_RECORDING_CONFIG } from '../config/config';
 import {
   initiateMultipartUpload,
@@ -50,6 +51,7 @@ export function useVideoRecording(sessionId: string, options?: VideoRecordingOpt
   const bufferRef = useRef<Blob[]>([]);
   const flushIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeRef = useRef(false);
+  const startTimeRef = useRef<number>(0);
   const onPartUploadedRef = useRef(options?.onPartUploaded);
   onPartUploadedRef.current = options?.onPartUploaded;
 
@@ -100,6 +102,7 @@ export function useVideoRecording(sessionId: string, options?: VideoRecordingOpt
         partsRef.current = [];
         bufferRef.current = [];
         activeRef.current = true;
+        startTimeRef.current = Date.now();
 
         // 2. Choose a supported MIME type
         const mimeType = MediaRecorder.isTypeSupported(VIDEO_RECORDING_CONFIG.MIME_TYPE)
@@ -175,15 +178,32 @@ export function useVideoRecording(sessionId: string, options?: VideoRecordingOpt
 
     // Final flush (upload whatever is left in the buffer, even < 5 MB)
     if (uploadIdRef.current && bufferRef.current.length > 0) {
-      const blob = new Blob(bufferRef.current, { type: 'video/webm' });
+      let blob = new Blob(bufferRef.current, { type: 'video/webm' });
       bufferRef.current = [];
 
       if (blob.size > 0) {
+        // If no parts have been uploaded yet, the entire recording is in
+        // this blob.  Patch the WebM EBML header with the real duration so
+        // browsers can seek and display the video without artifacts.
+        if (partsRef.current.length === 0) {
+          const durationMs = Date.now() - startTimeRef.current;
+          try {
+            console.log(`[useVideoRecording] Fixing WebM duration (${(durationMs / 1000).toFixed(1)}s) on final blob`);
+            blob = await fixWebmDuration(blob, durationMs, { logger: false });
+          } catch (err) {
+            // Non-fatal — upload the blob without the fix
+            console.warn('[useVideoRecording] fixWebmDuration failed, uploading as-is:', err);
+          }
+        }
+
         const partNum = partNumberRef.current++;
         try {
           const { url } = await getMultipartPartUrl(sessionId, uploadIdRef.current, partNum);
           const etag = await uploadMultipartPart(url, blob);
           partsRef.current.push({ PartNumber: partNum, ETag: etag });
+          const count = partsRef.current.length;
+          setState((prev) => ({ ...prev, partsUploaded: count }));
+          onPartUploadedRef.current?.(count);
         } catch (err) {
           console.error('[useVideoRecording] Failed to upload final part:', err);
         }
