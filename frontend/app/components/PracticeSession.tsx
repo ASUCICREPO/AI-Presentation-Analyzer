@@ -19,7 +19,6 @@ import CameraView from './practice/CameraView';
 import CalibrationPanel from './practice/CalibrationPanel';
 import RealTimeFeedbackPanel from './practice/RealTimeFeedbackPanel';
 import TranscriptionPanel from './practice/TranscriptionPanel';
-import { VocalVarietyPanel } from './practice/VocalVarietyPanel';
 
 // ─── Small helper for the processing screen ──────────────────────────
 function ProcessingStep({ label }: { label: string }) {
@@ -72,6 +71,8 @@ export default function PracticeSession({ personaTitle, sessionId, timeLimitSec,
   const lookAwayStartTimeRef = useRef<number | null>(null);
   const lookBackStartTimeRef = useRef<number | null>(null);
   const alertPlayedRef = useRef(false);
+  // Debounced "distracted" flag — only true after looking away for 3+ seconds
+  const [gazeDisplayDistracted, setGazeDisplayDistracted] = useState(false);
 
   // New Calibration Mode State
   const [isCalibrating, setIsCalibrating] = useState(false);
@@ -392,7 +393,7 @@ export default function PracticeSession({ personaTitle, sessionId, timeLimitSec,
       if (result.faceBlendshapes && result.faceBlendshapes.length > 0) {
         const { isLookingAtScreen } = analyzeGaze(result.faceBlendshapes);
 
-        // Audio Alert Logic
+        // Audio Alert & Debounced Display Logic
         if (isRecording && !isPaused) {
           const now = Date.now();
 
@@ -405,9 +406,14 @@ export default function PracticeSession({ personaTitle, sessionId, timeLimitSec,
 
             const durationLookingAway = now - lookAwayStartTimeRef.current;
 
-            if (durationLookingAway > ANALYSIS_CONFIG.TIMING.LOOK_AWAY_THRESHOLD_MS && !alertPlayedRef.current) {
-              playAlertSound();
-              alertPlayedRef.current = true;
+            if (durationLookingAway > ANALYSIS_CONFIG.TIMING.LOOK_AWAY_THRESHOLD_MS) {
+              // Show "distracted" in the UI after the threshold
+              setGazeDisplayDistracted(true);
+
+              if (!alertPlayedRef.current) {
+                playAlertSound();
+                alertPlayedRef.current = true;
+              }
             }
           } else {
             lookAwayStartTimeRef.current = null;
@@ -418,12 +424,14 @@ export default function PracticeSession({ personaTitle, sessionId, timeLimitSec,
 
             if (now - lookBackStartTimeRef.current > ANALYSIS_CONFIG.TIMING.LOOK_BACK_THRESHOLD_MS) {
               alertPlayedRef.current = false;
+              setGazeDisplayDistracted(false);
             }
           }
         } else {
           lookAwayStartTimeRef.current = null;
           lookBackStartTimeRef.current = null;
           alertPlayedRef.current = false;
+          setGazeDisplayDistracted(false);
         }
       }
     }
@@ -714,16 +722,13 @@ export default function PracticeSession({ personaTitle, sessionId, timeLimitSec,
                 isRecording={isRecording && !isPaused}
                 soundEnabled={soundEnabled}
                 onToggleSound={() => setSoundEnabled(!soundEnabled)}
-                gazeStatus={gazeStatus}
+                isDistracted={gazeDisplayDistracted}
                 metrics={feedbackMetrics}
+                vocalVariety={vocalVariety.metrics}
               />
             )}
           </div>
 
-          {/* Vocal Variety Panel */}
-          {!isCalibrating && isRecording && (
-            <VocalVarietyPanel metrics={vocalVariety.metrics} />
-          )}
         </div>
       </div>
 

@@ -51,7 +51,7 @@ export function useSessionAnalytics(personaTitle: string, sessionId: string) {
         pauses: 0,
     });
 
-    const windowStartTimeRef = useRef<number>(Date.now());
+    const windowStartTimeRef = useRef<number>(0);
 
     // Update metrics during the window
     const updateMetrics = useCallback((metrics: {

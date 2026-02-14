@@ -38,34 +38,36 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // ---------- Provider ----------
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [authState, setAuthState] = useState<AuthState>({
-    isAuthenticated: false,
-    isLoading: true,
-    user: null,
-    userEmail: null,
+  // Determine initial loading state — only need to verify session if a user exists
+  const [authState, setAuthState] = useState<AuthState>(() => {
+    const hasCurrentUser = typeof window !== 'undefined' && !!userPool.getCurrentUser();
+    return {
+      isAuthenticated: false,
+      isLoading: hasCurrentUser,   // only loading if we need to verify an existing session
+      user: null,
+      userEmail: null,
+    };
   });
 
   // Check for an existing session on mount
   useEffect(() => {
     const currentUser = userPool.getCurrentUser();
-    if (currentUser) {
-      currentUser.getSession((err: Error | null, session: CognitoUserSession | null) => {
-        if (err || !session?.isValid()) {
-          setAuthState({ isAuthenticated: false, isLoading: false, user: null, userEmail: null });
-        } else {
-          const email =
-            session.getIdToken().payload?.email ?? currentUser.getUsername();
-          setAuthState({
-            isAuthenticated: true,
-            isLoading: false,
-            user: currentUser,
-            userEmail: email as string,
-          });
-        }
-      });
-    } else {
-      setAuthState((s) => ({ ...s, isLoading: false }));
-    }
+    if (!currentUser) return;   // isLoading is already false from initializer
+
+    currentUser.getSession((err: Error | null, session: CognitoUserSession | null) => {
+      if (err || !session?.isValid()) {
+        setAuthState({ isAuthenticated: false, isLoading: false, user: null, userEmail: null });
+      } else {
+        const email =
+          session.getIdToken().payload?.email ?? currentUser.getUsername();
+        setAuthState({
+          isAuthenticated: true,
+          isLoading: false,
+          user: currentUser,
+          userEmail: email as string,
+        });
+      }
+    });
   }, []);
 
   // --- Sign In ---
