@@ -1,24 +1,33 @@
 import boto3
 from botocore.exceptions import ClientError
-from typing import Literal, Optional
+from typing import Optional
 import json
 import os
 from datetime import date
 
-## Environment variables
-PRESENTATION_TIMEOUT: int = int(os.environ.get("PRESENTATION_TIMEOUT", 1200))  # 20 minutes default
-PDF_UPLOAD_TIMEOUT: int = int(os.environ.get("PDF_UPLOAD_TIMEOUT", 120))  # 120 seconds default
-CUSTOMIZATION_UPLOAD_TIMEOUT: int = int(os.environ.get("CUSTOMIZATION_UPLOAD_TIMEOUT", 10))  # 10 seconds for small text
+# ─── Environment variables ────────────────────────────────────────────
+PRESENTATION_TIMEOUT: int = int(os.environ.get("PRESENTATION_TIMEOUT", 1200))
+PDF_UPLOAD_TIMEOUT: int = int(os.environ.get("PDF_UPLOAD_TIMEOUT", 120))
+CUSTOMIZATION_UPLOAD_TIMEOUT: int = int(os.environ.get("CUSTOMIZATION_UPLOAD_TIMEOUT", 10))
+JSON_UPLOAD_TIMEOUT: int = int(os.environ.get("JSON_UPLOAD_TIMEOUT", 60))
+MULTIPART_PART_URL_TIMEOUT: int = int(os.environ.get("MULTIPART_PART_URL_TIMEOUT", 300))
 UPLOADS_BUCKET: str = os.environ.get("UPLOADS_BUCKET")
 
 # ─── Constants — fixed S3 filenames (overwrite on re-upload) ──────────
-AUTHORIZED_REQUEST_TYPES = ['ppt', 'session', 'metric_chunk', 'persona_customization']
+AUTHORIZED_REQUEST_TYPES = [
+    'ppt', 'session', 'metric_chunk', 'persona_customization',
+    'transcript', 'session_analytics', 'detailed_metrics', 'manifest',
+]
 
 S3_FILENAMES = {
     'ppt': 'presentation.pdf',
     'session': 'recording.webm',
     'metric_chunk': 'analytics.json',
     'persona_customization': 'CUSTOM_PERSONA_INSTRUCTION.txt',
+    'transcript': 'transcript.json',
+    'session_analytics': 'session_analytics.json',
+    'detailed_metrics': 'detailed_metrics.json',
+    'manifest': 'manifest.json',
 }
 
 if not UPLOADS_BUCKET:
@@ -30,85 +39,71 @@ s3_client = boto3.client('s3')
 
 # ─── CORS response helper ────────────────────────────────────────────
 def _response(status_code: int, body: dict) -> dict:
-    """Return a properly formatted API Gateway proxy response with CORS headers."""
     return {
         "statusCode": status_code,
         "headers": {
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Headers": "Content-Type,Authorization",
-            "Access-Control-Allow-Methods": "GET,OPTIONS",
+            "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
         },
         "body": json.dumps(body),
     }
 
 
 def _today() -> str:
-    """Return today's date as YYYY-MM-DD for the S3 key prefix."""
     return date.today().isoformat()
 
 
 def _build_s3_key(user_id: str, session_id: str, request_type: str) -> str:
-    """Build the full S3 key: {user_id}/{date}/{session_id}/{filename}."""
     filename = S3_FILENAMES.get(request_type)
     if not filename:
         raise ValueError(f"Unknown request_type: {request_type}")
     return f"{user_id}/{_today()}/{session_id}/{filename}"
 
 
-# ─── Presigned URL generation ─────────────────────────────────────────
-def get_upload_url(
-    request_type: Literal['ppt', 'session', 'metric_chunk', 'persona_customization'],
-    user_id: str,
-    session_id: str,
-) -> Optional[dict]:
+# ─── Presigned POST URL generation ───────────────────────────────────
+def get_upload_url(request_type: str, user_id: str, session_id: str) -> Optional[dict]:
     """Generate a presigned POST URL for uploading to S3.
 
-    S3 key structure (fixed filenames, no UUID — re-uploads overwrite):
-        {user_id}/{date}/{session_id}/presentation.pdf
-        {user_id}/{date}/{session_id}/recording.webm
-        {user_id}/{date}/{session_id}/analytics.json
-        {user_id}/{date}/{session_id}/CUSTOM_PERSONA_INSTRUCTION.txt
+    S3 key structure (fixed filenames — re-uploads overwrite):
+        {user_id}/{date}/{session_id}/{filename}
     """
     key = _build_s3_key(user_id, session_id, request_type)
 
     try:
         if request_type == 'ppt':
-            print(f"[INFO] Presigned URL for PDF → {key}")
+            print(f"[INFO] Presigned URL for PDF -> {key}")
             response = s3_client.generate_presigned_post(
-                Bucket=UPLOADS_BUCKET,
-                Key=key,
+                Bucket=UPLOADS_BUCKET, Key=key,
                 Fields={"Content-Type": "application/pdf"},
                 Conditions=[{"Content-Type": "application/pdf"}],
                 ExpiresIn=PDF_UPLOAD_TIMEOUT,
             )
         elif request_type == 'session':
-            print(f"[INFO] Presigned URL for recording → {key}")
+            print(f"[INFO] Presigned URL for recording -> {key}")
             response = s3_client.generate_presigned_post(
-                Bucket=UPLOADS_BUCKET,
-                Key=key,
+                Bucket=UPLOADS_BUCKET, Key=key,
                 Fields={"Content-Type": "video/webm"},
                 Conditions=[{"Content-Type": "video/webm"}],
                 ExpiresIn=PRESENTATION_TIMEOUT,
             )
-        elif request_type == 'metric_chunk':
-            print(f"[INFO] Presigned URL for analytics → {key}")
+        elif request_type in ('metric_chunk', 'transcript', 'session_analytics', 'detailed_metrics', 'manifest'):
+            print(f"[INFO] Presigned URL for JSON ({request_type}) -> {key}")
             response = s3_client.generate_presigned_post(
-                Bucket=UPLOADS_BUCKET,
-                Key=key,
+                Bucket=UPLOADS_BUCKET, Key=key,
                 Fields={"Content-Type": "application/json"},
                 Conditions=[{"Content-Type": "application/json"}],
-                ExpiresIn=PRESENTATION_TIMEOUT,
+                ExpiresIn=JSON_UPLOAD_TIMEOUT,
             )
         elif request_type == 'persona_customization':
-            print(f"[INFO] Presigned URL for persona customization → {key}")
+            print(f"[INFO] Presigned URL for persona customization -> {key}")
             response = s3_client.generate_presigned_post(
-                Bucket=UPLOADS_BUCKET,
-                Key=key,
+                Bucket=UPLOADS_BUCKET, Key=key,
                 Fields={"Content-Type": "text/plain"},
                 Conditions=[
                     {"Content-Type": "text/plain"},
-                    ["content-length-range", 1, 10 * 1024],  # 10 KB max
+                    ["content-length-range", 1, 10 * 1024],
                 ],
                 ExpiresIn=CUSTOMIZATION_UPLOAD_TIMEOUT,
             )
@@ -123,10 +118,6 @@ def get_upload_url(
 
 # ─── Read persona customization from S3 ──────────────────────────────
 def get_persona_customization(user_id: str, session_id: str) -> Optional[str]:
-    """Read the CUSTOM_PERSONA_INSTRUCTION.txt from S3 for a given session.
-
-    Returns the text content, or None if the file doesn't exist.
-    """
     key = _build_s3_key(user_id, session_id, 'persona_customization')
     try:
         obj = s3_client.get_object(Bucket=UPLOADS_BUCKET, Key=key)
@@ -138,16 +129,99 @@ def get_persona_customization(user_id: str, session_id: str) -> Optional[str]:
         return None
 
 
+# ─── Multipart upload helpers ─────────────────────────────────────────
+def initiate_multipart(user_id: str, session_id: str) -> Optional[dict]:
+    """Create a new multipart upload for recording.webm."""
+    key = _build_s3_key(user_id, session_id, 'session')
+    try:
+        response = s3_client.create_multipart_upload(
+            Bucket=UPLOADS_BUCKET,
+            Key=key,
+            ContentType='video/webm',
+        )
+        print(f"[INFO] Initiated multipart upload: key={key}, uploadId={response['UploadId']}")
+        return {
+            'uploadId': response['UploadId'],
+            'key': key,
+        }
+    except ClientError as e:
+        print(f"[ERROR] Failed to initiate multipart upload: {e}")
+        return None
+
+
+def get_part_presigned_url(user_id: str, session_id: str, upload_id: str, part_number: int) -> Optional[str]:
+    """Generate a presigned PUT URL for a single multipart part."""
+    key = _build_s3_key(user_id, session_id, 'session')
+    try:
+        url = s3_client.generate_presigned_url(
+            'upload_part',
+            Params={
+                'Bucket': UPLOADS_BUCKET,
+                'Key': key,
+                'UploadId': upload_id,
+                'PartNumber': part_number,
+            },
+            ExpiresIn=MULTIPART_PART_URL_TIMEOUT,
+        )
+        print(f"[INFO] Presigned URL for part {part_number} of upload {upload_id}")
+        return url
+    except ClientError as e:
+        print(f"[ERROR] Failed to generate part URL: {e}")
+        return None
+
+
+def complete_multipart(user_id: str, session_id: str, upload_id: str, parts: list) -> bool:
+    """Complete a multipart upload by assembling all parts."""
+    key = _build_s3_key(user_id, session_id, 'session')
+    try:
+        s3_client.complete_multipart_upload(
+            Bucket=UPLOADS_BUCKET,
+            Key=key,
+            UploadId=upload_id,
+            MultipartUpload={'Parts': parts},
+        )
+        print(f"[INFO] Completed multipart upload: key={key}")
+        return True
+    except ClientError as e:
+        print(f"[ERROR] Failed to complete multipart upload: {e}")
+        return False
+
+
+def abort_multipart(user_id: str, session_id: str, upload_id: str) -> bool:
+    """Abort a multipart upload and clean up parts."""
+    key = _build_s3_key(user_id, session_id, 'session')
+    try:
+        s3_client.abort_multipart_upload(
+            Bucket=UPLOADS_BUCKET, Key=key, UploadId=upload_id,
+        )
+        print(f"[INFO] Aborted multipart upload: key={key}")
+        return True
+    except ClientError as e:
+        print(f"[ERROR] Failed to abort multipart upload: {e}")
+        return False
+
+
 # ─── Lambda handler ───────────────────────────────────────────────────
 def lambda_handler(event, context):
-    """AWS Lambda handler for S3 presigned URL operations.
+    """AWS Lambda handler for S3 upload operations.
 
-    Endpoints (via API Gateway):
-        GET /s3_urls?request_type=ppt|session|metric_chunk|persona_customization&session_id={id}
-            → Returns a presigned POST URL for uploading.
+    GET  /s3_urls?request_type={type}&session_id={id}
+        -> presigned POST URL for uploading files
 
-        GET /s3_urls?action=get_persona&session_id={id}
-            → Returns the saved persona customization text (if any).
+    GET  /s3_urls?action=get_persona&session_id={id}
+        -> read saved persona customization text
+
+    GET  /s3_urls?action=get_part_url&session_id={id}&upload_id={uid}&part_number={n}
+        -> presigned PUT URL for a multipart upload part
+
+    POST /s3_urls?action=initiate_multipart&session_id={id}
+        -> initiate a new multipart upload for recording.webm
+
+    POST /s3_urls?action=complete_multipart&session_id={id}
+        body: { "upload_id": "...", "parts": [{"PartNumber": 1, "ETag": "..."}, ...] }
+
+    POST /s3_urls?action=abort_multipart&session_id={id}
+        body: { "upload_id": "..." }
     """
     print(f"[INFO] Received event: {json.dumps(event)}")
 
@@ -155,9 +229,6 @@ def lambda_handler(event, context):
 
     if method == 'OPTIONS':
         return _response(200, {'message': 'OK'})
-
-    if method != 'GET':
-        return _response(400, {'message': f'Unsupported method: {method}'})
 
     # ─── Auth & required params ───────────────────────────────────────
     try:
@@ -174,34 +245,75 @@ def lambda_handler(event, context):
         print(f"[ERROR] Missing required information: {e}")
         return _response(400, {'message': "Missing session_id or user authentication information."})
 
-    # ─── Route: get saved persona customization text ──────────────────
     action = qs.get('action')
-    if action == 'get_persona':
-        text = get_persona_customization(user_id, session_id)
+
+    # ═════════════════════════════════════════════════════════════════════
+    # POST routes — multipart upload lifecycle
+    # ═════════════════════════════════════════════════════════════════════
+    if method == 'POST':
+        body = json.loads(event.get('body') or '{}')
+
+        if action == 'initiate_multipart':
+            result = initiate_multipart(user_id, session_id)
+            if not result:
+                return _response(500, {'message': 'Failed to initiate multipart upload'})
+            return _response(200, result)
+
+        if action == 'complete_multipart':
+            upload_id = body.get('upload_id')
+            parts = body.get('parts')
+            if not upload_id or not parts:
+                return _response(400, {'message': "Missing 'upload_id' or 'parts' in request body."})
+            success = complete_multipart(user_id, session_id, upload_id, parts)
+            if not success:
+                return _response(500, {'message': 'Failed to complete multipart upload'})
+            return _response(200, {'message': 'Multipart upload completed'})
+
+        if action == 'abort_multipart':
+            upload_id = body.get('upload_id')
+            if not upload_id:
+                return _response(400, {'message': "Missing 'upload_id' in request body."})
+            success = abort_multipart(user_id, session_id, upload_id)
+            if not success:
+                return _response(500, {'message': 'Failed to abort multipart upload'})
+            return _response(200, {'message': 'Multipart upload aborted'})
+
+        return _response(400, {'message': f"Unknown POST action: {action}"})
+
+    # ═════════════════════════════════════════════════════════════════════
+    # GET routes — presigned URLs and reads
+    # ═════════════════════════════════════════════════════════════════════
+    if method == 'GET':
+        # Route: get saved persona customization text
+        if action == 'get_persona':
+            text = get_persona_customization(user_id, session_id)
+            return _response(200, {'customization': text, 'exists': text is not None})
+
+        # Route: presigned PUT URL for a multipart part
+        if action == 'get_part_url':
+            upload_id = qs.get('upload_id')
+            part_number = qs.get('part_number')
+            if not upload_id or not part_number:
+                return _response(400, {'message': "Missing 'upload_id' or 'part_number'."})
+            url = get_part_presigned_url(user_id, session_id, upload_id, int(part_number))
+            if not url:
+                return _response(500, {'message': 'Failed to generate part URL'})
+            return _response(200, {'url': url, 'part_number': int(part_number)})
+
+        # Route: presigned POST URL for file upload
+        request_type = qs.get('request_type')
+        if not request_type or request_type not in AUTHORIZED_REQUEST_TYPES:
+            return _response(400, {
+                'message': f"Missing or invalid 'request_type'. Use one of {AUTHORIZED_REQUEST_TYPES}."
+            })
+
+        presigned_url = get_upload_url(request_type, user_id, session_id)
+        if presigned_url is None:
+            return _response(500, {'message': 'Failed to generate presigned URL'})
+
         return _response(200, {
-            'customization': text,
-            'exists': text is not None,
+            "presigned_url": presigned_url.get('url'),
+            "fields": presigned_url.get('fields', {}),
         })
 
-    # ─── Route: generate presigned upload URL ─────────────────────────
-    request_type = qs.get('request_type')
-
-    if not request_type or request_type not in AUTHORIZED_REQUEST_TYPES:
-        return _response(400, {
-            'message': f"Missing or invalid 'request_type'. Use one of {AUTHORIZED_REQUEST_TYPES}."
-        })
-
-    presigned_url = get_upload_url(
-        request_type=request_type,
-        user_id=user_id,
-        session_id=session_id,
-    )
-
-    if presigned_url is None:
-        print("[ERROR] Failed to generate presigned URL")
-        return _response(500, {'message': 'Failed to generate presigned URL'})
-
-    return _response(200, {
-        "presigned_url": presigned_url.get('url'),
-        "fields": presigned_url.get('fields', {}),
-    })
+    return _response(400, {'message': f'Unsupported method: {method}'})

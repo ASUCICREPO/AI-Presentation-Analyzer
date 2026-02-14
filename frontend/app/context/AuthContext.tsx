@@ -9,6 +9,7 @@ import {
   CognitoUserSession,
 } from 'amazon-cognito-identity-js';
 import { cognitoConfig } from '../config/config';
+import { setAuthTokenResolver } from '../services/api';
 
 // ---------- Cognito pool singleton ----------
 const userPool = new CognitoUserPool({
@@ -146,6 +147,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
     });
   }, []);
+
+  // --- Wire getIdToken into the API service so all requests include auth ---
+  useEffect(() => {
+    if (authState.isAuthenticated) {
+      setAuthTokenResolver(getIdToken);
+    } else {
+      setAuthTokenResolver(null);
+    }
+  }, [authState.isAuthenticated, getIdToken]);
 
   return (
     <AuthContext.Provider

@@ -140,38 +140,81 @@ export default function CustomizePersona({
               {error && (
                 <span className="text-xs text-red-500 font-sans 2xl:text-sm">{error}</span>
               )}
-              {saved ? (
-                <span className="flex items-center gap-1 text-xs text-green-600 font-sans 2xl:text-sm">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" className="2xl:h-3.5 2xl:w-3.5">
-                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" fill="currentColor" />
-                  </svg>
-                  Saved
-                </span>
-              ) : (
-                <button
-                  onClick={handleSave}
-                  disabled={saving || !hasContent || isOverLimit}
-                  className="
-                    inline-flex items-center gap-1.5 rounded-lg border border-maroon-200
-                    bg-maroon-50 px-3 py-1.5 text-xs font-medium text-maroon-700
-                    transition-all duration-150
-                    hover:border-maroon-400 hover:bg-maroon-100 hover:text-maroon-800
-                    disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-maroon-50
-                    font-sans 2xl:px-4 2xl:py-2 2xl:text-sm
-                  "
-                >
-                  {saving ? (
-                    <>
-                      <svg className="h-3 w-3 animate-spin 2xl:h-3.5 2xl:w-3.5" viewBox="0 0 16 16" fill="none">
-                        <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="2" strokeDasharray="10 20" />
-                      </svg>
-                      Saving…
-                    </>
-                  ) : (
-                    'Save Notes'
-                  )}
-                </button>
-              )}
+              <button
+                onClick={handleSave}
+                disabled={saving || !hasContent || isOverLimit || saved}
+                className={`
+                  inline-flex items-center justify-center gap-1.5 rounded-lg
+                  px-3 py-1.5 text-xs font-medium
+                  shadow-sm transition-all duration-300 ease-out
+                  font-sans 2xl:px-4 2xl:py-2 2xl:text-sm
+                  ${saved
+                    ? 'bg-green-500 text-white scale-105 shadow-green-200'
+                    : saving
+                      ? 'bg-maroon-600 text-white opacity-80 cursor-wait'
+                      : 'bg-maroon-600 text-white hover:bg-maroon-700 hover:shadow-md active:scale-[0.97] disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-maroon-600'
+                  }
+                `}
+                style={{ minWidth: '90px' }}
+              >
+                {saved ? (
+                  <span className="inline-flex items-center gap-1.5 animate-[fadeScale_0.35s_ease-out]">
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      className="2xl:h-4 2xl:w-4"
+                    >
+                      <path
+                        d="M4.5 12.75l6 6 9-13.5"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="animate-[drawCheck_0.4s_ease-out_0.1s_both]"
+                        style={{
+                          strokeDasharray: 30,
+                          strokeDashoffset: 30,
+                        }}
+                      />
+                    </svg>
+                    Saved
+                  </span>
+                ) : saving ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <svg className="h-3 w-3 animate-spin 2xl:h-3.5 2xl:w-3.5" viewBox="0 0 16 16" fill="none">
+                      <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="2" strokeDasharray="10 20" />
+                    </svg>
+                    Saving…
+                  </span>
+                ) : (
+                  'Save Notes'
+                )}
+              </button>
+
+              {/* Keyframe styles for the micro-interaction */}
+              <style jsx>{`
+                @keyframes drawCheck {
+                  to {
+                    stroke-dashoffset: 0;
+                  }
+                }
+                @keyframes fadeScale {
+                  0% {
+                    opacity: 0;
+                    transform: scale(0.85);
+                  }
+                  50% {
+                    opacity: 1;
+                    transform: scale(1.05);
+                  }
+                  100% {
+                    opacity: 1;
+                    transform: scale(1);
+                  }
+                }
+              `}</style>
             </div>
           </div>
 

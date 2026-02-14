@@ -60,10 +60,38 @@ export const S3_FILENAMES = {
   RECORDING: 'recording.webm',
   ANALYTICS: 'analytics.json',
   PERSONA_CUSTOMIZATION: PERSONA_CUSTOMIZATION.S3_FILENAME,
+  TRANSCRIPT: 'transcript.json',
+  SESSION_ANALYTICS: 'session_analytics.json',
+  DETAILED_METRICS: 'detailed_metrics.json',
+  MANIFEST: 'manifest.json',
 };
 
 /** Valid request types for the presigned URL endpoint */
-export type S3RequestType = 'ppt' | 'session' | 'metric_chunk' | 'persona_customization';
+export type S3RequestType =
+  | 'ppt'
+  | 'session'
+  | 'metric_chunk'
+  | 'persona_customization'
+  | 'transcript'
+  | 'session_analytics'
+  | 'detailed_metrics'
+  | 'manifest';
+
+// ---------------------------------------------------------------------------
+// Video Recording (multipart upload)
+// ---------------------------------------------------------------------------
+export const VIDEO_RECORDING_CONFIG = {
+  /** Interval (ms) between video chunk uploads — 30 seconds */
+  CHUNK_INTERVAL_MS: 30_000,
+  /** MediaRecorder MIME type */
+  MIME_TYPE: 'video/webm;codecs=vp8,opus',
+  /** Fallback MIME if preferred isn't supported */
+  FALLBACK_MIME_TYPE: 'video/webm',
+  /** MediaRecorder timeslice (ms) — push data every 1s into buffer */
+  TIMESLICE_MS: 1_000,
+  /** Minimum chunk size in bytes before we bother uploading a part (5 MB — S3 minimum) */
+  MIN_PART_SIZE_BYTES: 5 * 1024 * 1024,
+};
 
 
 // ---------------------------------------------------------------------------

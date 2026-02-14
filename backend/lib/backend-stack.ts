@@ -6,6 +6,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 
 export class AIPresentationCoachStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -23,6 +24,12 @@ export class AIPresentationCoachStack extends cdk.Stack {
           allowedMethods: [cdk.aws_s3.HttpMethods.GET, cdk.aws_s3.HttpMethods.PUT, cdk.aws_s3.HttpMethods.POST],
           allowedHeaders: ['*'],
           exposedHeaders: ['ETag'],
+        },
+      ],
+      lifecycleRules: [
+        {
+          id: 'AbortIncompleteMultipartUploads',
+          abortIncompleteMultipartUploadAfter: cdk.Duration.days(1),
         },
       ],
     });
@@ -46,6 +53,8 @@ export class AIPresentationCoachStack extends cdk.Stack {
         'PDF_UPLOAD_TIMEOUT': '120', //PDF upload timeout in 2 minutes
         'PRESENTATION_TIMEOUT': '1200', //Max Presentation video duration timeout 20 minutes
         'CUSTOMIZATION_UPLOAD_TIMEOUT': '10', //Persona customization text upload timeout 10 seconds
+        'JSON_UPLOAD_TIMEOUT': '60', //JSON data upload timeout 1 minute
+        'MULTIPART_PART_URL_TIMEOUT': '300', //Multipart part URL timeout 5 minutes
       },
     });
 
@@ -165,6 +174,10 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // S3 URLs resource
     let s3_urls_resource = apiGateway.root.addResource('s3_urls');
     s3_urls_resource.addMethod('GET', new apigateway.LambdaIntegration(s3UrlIssuerLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
+    });
+    s3_urls_resource.addMethod('POST', new apigateway.LambdaIntegration(s3UrlIssuerLambda), {
       authorizer,
       authorizationType: apigateway.AuthorizationType.COGNITO,
     });
