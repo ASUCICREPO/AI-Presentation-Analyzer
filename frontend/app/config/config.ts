@@ -81,15 +81,20 @@ export type S3RequestType =
 // Video Recording (multipart upload)
 // ---------------------------------------------------------------------------
 export const VIDEO_RECORDING_CONFIG = {
-  /** Interval (ms) between video chunk uploads — 30 seconds */
-  CHUNK_INTERVAL_MS: 30_000,
-  /** MediaRecorder MIME type */
+  /** Interval (ms) between video chunk uploads — 90 seconds.
+   *  At typical 640×480 webcam bitrate (~500 kbps–1 Mbps),
+   *  90s produces ~5.6–11.25 MB, safely above the 5 MB S3 minimum. */
+  CHUNK_INTERVAL_MS: 90_000,
+  /** MediaRecorder MIME type (WebM is the standard for browser recording —
+   *  MP4/H.264 has limited MediaRecorder support and requires a moov atom
+   *  at EOF which breaks chunked streaming) */
   MIME_TYPE: 'video/webm;codecs=vp8,opus',
   /** Fallback MIME if preferred isn't supported */
   FALLBACK_MIME_TYPE: 'video/webm',
   /** MediaRecorder timeslice (ms) — push data every 1s into buffer */
   TIMESLICE_MS: 1_000,
-  /** Minimum chunk size in bytes before we bother uploading a part (5 MB — S3 minimum) */
+  /** S3 multipart minimum part size (5 MB). Parts below this can't be uploaded
+   *  except as the final part. The 60s interval ensures each chunk clears this. */
   MIN_PART_SIZE_BYTES: 5 * 1024 * 1024,
 };
 

@@ -60,16 +60,19 @@ export function useVideoRecording(sessionId: string, options?: VideoRecordingOpt
     const blob = new Blob(bufferRef.current, { type: 'video/webm' });
     bufferRef.current = [];
 
+    const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
+
     // S3 multipart requires minimum 5 MB per part (except the last).
-    // If the blob is tiny we'll keep it in the buffer until next flush.
-    // But we still upload if the recorder has stopped (final flush).
+    // With the configured bitrate, 30s should produce ~5.6 MB.
+    // If somehow still under the limit, hold the data for next flush.
     if (blob.size < VIDEO_RECORDING_CONFIG.MIN_PART_SIZE_BYTES && activeRef.current) {
-      // Put it back — it's too small and we're still recording
+      console.log(`[useVideoRecording] Buffer ${sizeMB} MB < 5 MB minimum, holding for next flush`);
       bufferRef.current.push(blob);
       return;
     }
 
     const partNum = partNumberRef.current++;
+    console.log(`[useVideoRecording] Uploading part ${partNum} (${sizeMB} MB)`);
     try {
       const { url } = await getMultipartPartUrl(sessionId, uploadIdRef.current, partNum);
       const etag = await uploadMultipartPart(url, blob);
