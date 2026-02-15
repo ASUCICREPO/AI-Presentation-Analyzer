@@ -41,7 +41,7 @@ def _response(status_code: int, body: dict) -> dict:
         "headers": {
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Allow-Headers": "Content-Type,Authorization",
             "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
         },
         "body": json.dumps(body, cls=_DecimalEncoder),
@@ -176,10 +176,6 @@ def lambda_handler(event, context):
     user_id = authorizer.get('claims', {}).get('sub')
     groups = authorizer.get('claims', {}).get('cognito:groups', [])  # List of groups
 
-    if 'admin' not in list(map(str.lower(),groups)):
-        print(f"Unauthorized access attempt by user {user_id} who is not in Admin group.")
-        return _response(403, {'message': 'Forbidden: You do not have permission to access this resource.'})
-
     path_params = event.get('pathParameters') or {}
     qs = event.get('queryStringParameters') or {}
     persona_id = path_params.get('personaID')
@@ -199,6 +195,9 @@ def lambda_handler(event, context):
             return list_all_personas(qs.get('lastEvaluatedKey'))
 
     if method == 'POST':
+        if 'admin' not in [g.lower() for g in groups]:
+            print(f"Unauthorized access attempt by user {user_id} who is not in Admin group.")
+            return _response(403, {'message': 'Forbidden: You do not have permission to access this resource.'})
         body = json.loads(event.get('body') or '{}')
         if 'personaID' not in body:
             body['personaID'] = str(uuid.uuid4())
@@ -206,6 +205,9 @@ def lambda_handler(event, context):
         return save_persona(body)
 
     if method == 'PUT':
+        if 'admin' not in [g.lower() for g in groups]:
+            print(f"Unauthorized access attempt by user {user_id} who is not in Admin group.")
+            return _response(403, {'message': 'Forbidden: You do not have permission to access this resource.'})
         if not persona_id:
             return _response(400, {'message': 'Missing personaID in path'})
         body = json.loads(event.get('body') or '{}')
@@ -213,6 +215,9 @@ def lambda_handler(event, context):
         return update_persona(persona_id, body)
 
     if method == 'DELETE':
+        if 'admin' not in [g.lower() for g in groups]:
+            print(f"Unauthorized access attempt by user {user_id} who is not in Admin group.")
+            return _response(403, {'message': 'Forbidden: You do not have permission to access this resource.'})
         if not persona_id:
             return _response(400, {'message': 'Missing personaID in path'})
         print(f"Persona delete attempted by user {user_id} on persona {persona_id}")

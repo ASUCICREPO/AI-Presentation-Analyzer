@@ -4,20 +4,16 @@ import React from 'react';
 
 interface PersonaCardProps {
   name: string;
-  expertise: string;
-  keyPriorities: string[];
-  attentionSpan: string;
-  communicationStyle: string;
+  description: string;
+  personaPrompt?: string;
   isSelected: boolean;
   onSelect: () => void;
 }
 
 export default function PersonaCard({
   name,
-  expertise,
-  keyPriorities,
-  attentionSpan,
-  communicationStyle,
+  description,
+  personaPrompt,
   isSelected,
   onSelect,
 }: PersonaCardProps) {
@@ -59,7 +55,7 @@ export default function PersonaCard({
       </div>
 
       {/* Header */}
-      <div className="mb-4 flex items-center gap-4 2xl:mb-8 2xl:gap-6">
+      <div className="mb-3 flex items-center gap-4 2xl:mb-5 2xl:gap-6">
         <div
           className={`
             flex h-10 w-10 items-center justify-center rounded-lg 2xl:h-14 2xl:w-14 2xl:rounded-xl
@@ -80,17 +76,20 @@ export default function PersonaCard({
             />
           </svg>
         </div>
-        <div>
+        <div className="flex-1">
           <h3 className="text-base font-semibold text-gray-900 2xl:text-2xl font-serif">{name}</h3>
-          <p className="text-sm text-gray-500 2xl:text-lg font-sans">Expertise: {expertise}</p>
         </div>
       </div>
 
-      {/* Content Grid */}
-      <div className="grid grid-cols-2 gap-x-8 gap-y-4 2xl:gap-x-12 2xl:gap-y-8">
-        {/* Key Priorities */}
-        <div>
-          <div className="mb-2 flex items-center gap-2 2xl:mb-3">
+      {/* Description */}
+      <div className="mb-3 2xl:mb-4">
+        <p className="text-sm text-gray-600 leading-relaxed 2xl:text-lg font-sans">{description}</p>
+      </div>
+
+      {/* Persona Prompt */}
+      {personaPrompt && (
+        <div className="border-t border-gray-100 pt-3 2xl:pt-4">
+          <div className="mb-2 flex items-center gap-2">
             <svg
               width="16"
               height="16"
@@ -99,64 +98,19 @@ export default function PersonaCard({
               className="text-gray-400 2xl:h-5 2xl:w-5"
             >
               <path
-                d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"
+                d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"
                 fill="currentColor"
               />
             </svg>
-            <span className="text-sm font-medium text-gray-600 2xl:text-lg font-sans">Key Priorities</span>
+            <span className="text-sm font-medium text-gray-600 2xl:text-lg font-sans">Persona Details</span>
           </div>
-          <ul className="space-y-1 pl-6 2xl:pl-7 2xl:space-y-2">
-            {keyPriorities.map((priority, index) => (
-              <li
-                key={index}
-                className="text-sm text-gray-500 2xl:text-lg font-sans"
-              >
-                · {priority}
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        {/* Attention Span */}
-        <div>
-          <div className="mb-2 flex items-center gap-2 2xl:mb-3">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              className="text-gray-400 2xl:h-5 2xl:w-5"
-            >
-              <path
-                d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z"
-                fill="currentColor"
-              />
-            </svg>
-            <span className="text-sm font-medium text-gray-600 2xl:text-lg font-sans">Attention Span</span>
+          <div className="bg-gray-50 rounded-lg p-3 2xl:p-4">
+            <pre className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap font-sans 2xl:text-sm">
+              {personaPrompt}
+            </pre>
           </div>
-          <p className="pl-6 text-sm text-gray-500 2xl:text-lg 2xl:pl-7 font-sans">{attentionSpan}</p>
         </div>
-      </div>
-
-      {/* Communication Style */}
-      <div className="mt-4 2xl:mt-8">
-        <div className="mb-2 flex items-center gap-2 2xl:mb-3">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            className="text-gray-400 2xl:h-5 2xl:w-5"
-          >
-            <path
-              d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"
-              fill="currentColor"
-            />
-          </svg>
-          <span className="text-sm font-medium text-gray-600 2xl:text-lg font-sans">Communication Style</span>
-        </div>
-        <p className="pl-6 text-sm text-gray-500 2xl:text-lg 2xl:pl-7 font-sans">{communicationStyle}</p>
-      </div>
+      )}
     </button>
   );
 }

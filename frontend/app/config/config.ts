@@ -25,11 +25,6 @@ export interface Persona {
   name: string;
   description: string;
   personaPrompt?: string;
-  expertise: string;
-  keyPriorities: string[];
-  attentionSpan: string;
-  communicationStyle: string;
-  timeLimitSec?: number; // Per-persona presentation time limit (seconds)
 }
 
 /** Fallback when a persona has no timeLimitSec set */

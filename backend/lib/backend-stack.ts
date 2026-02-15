@@ -8,14 +8,28 @@ import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as bedrockl1 from 'aws-cdk-lib/aws-bedrock';
 
+interface AIPresentationCoachStackProps extends cdk.StackProps {
+  resourceSuffix: string; // Suffix to ensure unique resource names across stacks/environments
+}
+
 export class AIPresentationCoachStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+  constructor(scope: Construct, id: string, props: AIPresentationCoachStackProps) {
     super(scope, id, props);
+
+    const suffix = props.resourceSuffix;
+
+    // Helper to create Lambda integration with CORS support
+    const createCorsLambdaIntegration = (lambdaFunction: lambda.Function) => {
+      return new apigateway.LambdaIntegration(lambdaFunction, {
+        proxy: true, // Enable proxy mode for automatic CORS header handling
+      });
+    };
 
     // ──────────────────────────────────────────────
     // S3 bucket for uploads
     // ──────────────────────────────────────────────
     const presentationAndSessionUploadsBucket = new cdk.aws_s3.Bucket(this, 'AIPresentationCoach-Presentations-Videos', {
+      bucketName: `ai-presentation-coach-uploads-${suffix}`,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       cors: [
@@ -32,9 +46,10 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // Lambda for presigned URL generation
     // ──────────────────────────────────────────────
     const s3UrlIssuerLambda = new lambda.Function(this, 's3UrlIssuerLambda', {
+      functionName: `s3-url-issuer-${suffix}`,
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'get_presigned_url.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambdas', 's3_presigned_url_gen')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 's3_presigned_url_gen')),
       timeout: cdk.Duration.seconds(20),
       role: new iam.Role(this, 'S3UrlIssuerLambdaRole', {
         assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
@@ -53,6 +68,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // Cognito User Pool
     // ──────────────────────────────────────────────
     const userPool = new cognito.UserPool(this, 'UserPool', {
+      userPoolName: `ai-presentation-coach-users-${suffix}`,
       selfSignUpEnabled: true,
       signInAliases: {
         email: true,
@@ -86,6 +102,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // Cognito Identity Pool
     // ──────────────────────────────────────────────
     const identityPool = new cognito.CfnIdentityPool(this, 'IdentityPool', {
+      identityPoolName: `ai-presentation-coach-identity-${suffix}`,
       allowUnauthenticatedIdentities: false,
       cognitoIdentityProviders: [
         {
@@ -154,12 +171,25 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // API Gateway definitions
     // ──────────────────────────────────────────────
     const apiGateway = new apigateway.LambdaRestApi(this, 'AIPresentationCoachApi', {
+      restApiName: `ai-presentation-coach-api-${suffix}`,
       handler: s3UrlIssuerLambda,
       proxy: false,
       defaultCorsPreflightOptions: {
         allowOrigins: apigateway.Cors.ALL_ORIGINS,
         allowMethods: apigateway.Cors.ALL_METHODS,
         allowHeaders: ['Content-Type', 'Authorization'],
+      },
+      defaultMethodOptions: {
+        methodResponses: [
+          {
+            statusCode: '200',
+            responseParameters: {
+              'method.response.header.Access-Control-Allow-Origin': true,
+              'method.response.header.Access-Control-Allow-Headers': true,
+              'method.response.header.Access-Control-Allow-Methods': true,
+            },
+          },
+        ],
       },
     });
 
@@ -170,18 +200,15 @@ export class AIPresentationCoachStack extends cdk.Stack {
 
     // S3 URLs resource
     let s3_urls_resource = apiGateway.root.addResource('s3_urls');
-    s3_urls_resource.addMethod('GET', new apigateway.LambdaIntegration(s3UrlIssuerLambda));
-
-    s3_urls_resource.addMethod('GET', new apigateway.LambdaIntegration(s3UrlIssuerLambda), {
-      authorizer: {
-        authorizerId: authorizer.authorizerId,
-      },
+    s3_urls_resource.addMethod('GET', createCorsLambdaIntegration(s3UrlIssuerLambda), {
+      authorizer: authorizer,
     });
 
     // ──────────────────────────────────────────────
     // Personas Dynamo DB Table Config
     // ──────────────────────────────────────────────
     const personasTable = new dynamodb.TableV2(this, 'UserPersonaTable', {
+      tableName: `user-personas-${suffix}`,
       // Required: Define the partition key
       partitionKey: {
         name: 'personaID', // The name of the partition key attribute
@@ -194,6 +221,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
 
     // Persona CRUD Lambda
     const personaCrudLambda = new lambda.Function(this, 'PersonaCrudLambda', {
+      functionName: `persona-crud-${suffix}`,
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'persona_crud.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'dynamo_persona_lambdas')),
@@ -216,23 +244,54 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // Personas resource
     let personas_resource = apiGateway.root.addResource('personas');
     // GET /personas - list all personas (with optional pagination)
-    personas_resource.addMethod('GET', new apigateway.LambdaIntegration(personaCrudLambda));
+    personas_resource.addMethod('GET', createCorsLambdaIntegration(personaCrudLambda));
     // POST /personas - create a new persona
-    personas_resource.addMethod('POST', new apigateway.LambdaIntegration(personaCrudLambda));
+    personas_resource.addMethod('POST', createCorsLambdaIntegration(personaCrudLambda));
 
     // /personas/{id} resource for GET, PUT, DELETE by ID
     let persona_id_resource = personas_resource.addResource('{personaID}');
     // GET /personas/{id} - get persona by ID
-    persona_id_resource.addMethod('GET', new apigateway.LambdaIntegration(personaCrudLambda));
+    persona_id_resource.addMethod('GET', createCorsLambdaIntegration(personaCrudLambda));
     // PUT /personas/{id} - update persona by ID
-    persona_id_resource.addMethod('PUT', new apigateway.LambdaIntegration(personaCrudLambda));
+    persona_id_resource.addMethod('PUT', createCorsLambdaIntegration(personaCrudLambda));
     // DELETE /personas/{id} - delete persona by ID
-    persona_id_resource.addMethod('DELETE', new apigateway.LambdaIntegration(personaCrudLambda));
+    persona_id_resource.addMethod('DELETE', createCorsLambdaIntegration(personaCrudLambda));
 
     // ────────────────────────────────────────────
     // Persona Customization Lambda
     // ────────────────────────────────────────────
+    
+    // Setup guardrail to prevent persona injection
+    const personaCustomizationGuardrail = new bedrockl1.CfnGuardrail(this, 'PersonaCustomizationGuardrail', {
+      name: `PersonaCustomizationGuardrail-${suffix}`,
+      description: 'Guardrail to check for harmful persona customizations and prevent persona injection attacks',
+      blockedInputMessaging: 'The uploaded persona customization failed our security checks and has been rejected. Please review the content and try again.',
+      blockedOutputsMessaging: 'The generated persona response has been blocked by our security filters due to harmful content. Please modify your persona customization and try again.',
+      contentPolicyConfig: {
+        // Setup content filters. Set defaults to block harmful content with highest scrutiny.
+        // This setup is least permissive towards sensetive content in both inputs and outputs.
+        // To allow for more permissive configurations, consider picking one of the following strategies:
+        // LOW: Most permissive. Only blocks content that is extremely harmful (Least recommended).
+        // MEDIUM: Moderately permissive. Blocks content that is harmful but allows for some edge cases (Recommended for allowing students to practice presenting for topics that may be political, explicit or otherwise sensetive).
+        filtersConfig:[
+          {type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH'},
+          {type: 'INSULTS', inputStrength: 'HIGH', outputStrength: 'HIGH'},
+          {type: 'SEXUAL', inputStrength: 'HIGH', outputStrength: 'HIGH'},
+          {type: 'VIOLENCE', inputStrength: 'HIGH', outputStrength: 'HIGH'},
+          {type: 'MISCONDUCT', inputStrength: 'HIGH', outputStrength: 'HIGH'},
+          {type: 'PROMPT_ATTACK', inputStrength: 'HIGH', outputStrength: 'NONE'},
+        ]
+      }
+    });
+
+    // Create initial guardrail version to use with ApplyGuardrail API (Required)
+    const personaGuardrailVersion = new bedrockl1.CfnGuardrailVersion(this, 'GuardrailVersion', {
+      guardrailIdentifier: personaCustomizationGuardrail.attrGuardrailId,
+      description: 'Default Version'
+    });
+
     const personaCustomizerLambda = new lambda.Function(this, 'PersonaCustomizerLambda', {
+      functionName: `persona-customizer-${suffix}`,
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'persona_customizer.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'persona_customizer')),
@@ -246,6 +305,8 @@ export class AIPresentationCoachStack extends cdk.Stack {
       environment: {
         'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
         'CUSTOMIZATION_UPLOAD_TIMEOUT': "5",
+        'GUARDRAIL_ID': personaCustomizationGuardrail.attrGuardrailId,
+        'GUARDRAIL_VERSION': personaGuardrailVersion.attrVersion
       },
     });
 
@@ -254,11 +315,21 @@ export class AIPresentationCoachStack extends cdk.Stack {
 
     // Add /customize_persona resource for persona customization uploads
     let customize_persona_resource = apiGateway.root.addResource('customize_persona');
-    customize_persona_resource.addMethod('POST', new apigateway.LambdaIntegration(personaCustomizerLambda), {
-      authorizer: {
-        authorizerId: authorizer.authorizerId,
-      },
+    customize_persona_resource.addMethod('POST', createCorsLambdaIntegration(personaCustomizerLambda), {
+      authorizer: authorizer,
     });
+
+    // Grant Lambda permission to use Bedrock for guardrail checks
+    personaCustomizerLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "bedrock:ApplyGuardrail"
+        ],
+        resources: [
+          personaCustomizationGuardrail.attrGuardrailArn
+        ]
+      })
+    );
 
 
     // ──────────────────────────────────────────────
@@ -283,5 +354,10 @@ export class AIPresentationCoachStack extends cdk.Stack {
       value: this.region,
       description: 'AWS Region',
     });
-  } 
+
+    new cdk.CfnOutput(this, 'ApiGatewayUrl', {
+      value: apiGateway.url,
+      description: 'API Gateway URL',
+    });
+  }
 }

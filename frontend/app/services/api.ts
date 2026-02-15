@@ -62,3 +62,32 @@ export function uploadFileWithPresignedUrl(
     xhr.send(formData);
   });
 }
+
+// ─── Persona Customization ───────────────────────────────────────────
+
+interface PersonaCustomizationResponse {
+  message: string;
+  object_name: string;
+}
+
+export async function savePersonaCustomization(
+  content: string,
+  sessionId: string,
+  idToken: string,
+): Promise<PersonaCustomizationResponse> {
+  const res = await fetch(`${API_BASE_URL}/customize_persona?session_id=${sessionId}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': idToken,
+    },
+    body: JSON.stringify({ content }),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ message: 'Failed to save persona customization' }));
+    throw new Error(errorData.message || 'Failed to save persona customization');
+  }
+
+  return res.json();
+}

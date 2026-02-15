@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useAuth } from './context/AuthContext';
+import { savePersonaCustomization } from './services/api';
 import Header from './components/Header';
 import PersonaSelection from './components/PersonaSelection';
 import UploadContent from './components/UploadContent';
@@ -17,7 +18,7 @@ import { Loader2 } from 'lucide-react';
 type AuthView = 'login' | 'signup' | 'confirm';
 
 export default function Home() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, getIdToken } = useAuth();
 
   // Auth page state
   const [authView, setAuthView] = useState<AuthView>('login');
@@ -25,15 +26,19 @@ export default function Home() {
 
   // App state
   const [currentStep, setCurrentStep] = useState(1);
+  const [sessionId, setSessionId] = useState<string>(`session_${Date.now()}`);
   const [selectedPersona, setSelectedPersona] = useState<string | null>(null);
   const [selectedPersonaName, setSelectedPersonaName] = useState<string>('');
-  const [selectedPersonaTimeLimit, setSelectedPersonaTimeLimit] = useState<number | undefined>(undefined);
   const [customNotes, setCustomNotes] = useState('');
   const [sessionData, setSessionData] = useState<SessionAnalytics | null>(null);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [pendingStep, setPendingStep] = useState<number | null>(null);
+
+  // Saving State
+  const [isSavingCustomization, setIsSavingCustomization] = useState(false);
+  const [customizationError, setCustomizationError] = useState<string | null>(null);
 
   // --- Auth navigation ---
   const handleSwitchToSignUp = () => setAuthView('signup');
@@ -49,11 +54,27 @@ export default function Home() {
     setSelectedPersona(id);
   };
 
-  const handleContinueToUpload = () => {
-    if (selectedPersona) {
-      setCurrentStep(2);
-      window.scrollTo(0, 0);
+  const handleContinueToUpload = async () => {
+    if (!selectedPersona) return;
+
+    setCustomizationError(null);
+
+    // Save persona customization if provided
+    if (customNotes.trim()) {
+      setIsSavingCustomization(true);
+      try {
+        const idToken = await getIdToken();
+        await savePersonaCustomization(customNotes, sessionId, idToken);
+      } catch (error) {
+        setCustomizationError(error instanceof Error ? error.message : 'Failed to save customization');
+        setIsSavingCustomization(false);
+        return;
+      }
+      setIsSavingCustomization(false);
     }
+
+    setCurrentStep(2);
+    window.scrollTo(0, 0);
   };
 
   const handleBackToPersona = () => {
@@ -98,6 +119,7 @@ export default function Home() {
 
   const handleBackToStart = () => {
     setCurrentStep(1);
+    setSessionId(`session_${Date.now()}`);
     setSessionData(null);
     window.scrollTo(0, 0);
   };
@@ -170,13 +192,15 @@ export default function Home() {
 
       {currentStep === 1 && (
         <PersonaSelection
+          sessionId={sessionId}
           selectedPersona={selectedPersona}
           onSelectPersona={handlePersonaSelect}
           onPersonaNameChange={setSelectedPersonaName}
-          onTimeLimitChange={setSelectedPersonaTimeLimit}
           customNotes={customNotes}
           onCustomNotesChange={setCustomNotes}
           onContinue={handleContinueToUpload}
+          isSaving={isSavingCustomization}
+          saveError={customizationError}
         />
       )}
 
@@ -190,8 +214,8 @@ export default function Home() {
 
       {currentStep === 3 && (
         <PracticeSession
+          sessionId={sessionId}
           personaTitle={selectedPersonaName}
-          timeLimitSec={selectedPersonaTimeLimit}
           onBack={handleBackToUpload}
           onComplete={handlePracticeComplete}
         />

@@ -33,9 +33,9 @@ function calculateStdDev(values: number[]): number {
     return Math.sqrt(variance);
 }
 
-export function useSessionAnalytics(personaTitle: string) {
+export function useSessionAnalytics(sessionId: string, personaTitle: string) {
     const sessionDataRef = useRef<SessionAnalytics>({
-        sessionId: `session_${Date.now()}`,
+        sessionId,
         startTime: new Date().toISOString(),
         personaTitle,
         windows: [],
@@ -160,9 +160,9 @@ export function useSessionAnalytics(personaTitle: string) {
     }, [getSessionData]);
 
     // Reset session data
-    const resetSession = useCallback(() => {
+    const resetSession = useCallback((newSessionId?: string) => {
         sessionDataRef.current = {
-            sessionId: `session_${Date.now()}`,
+            sessionId: newSessionId || sessionId,
             startTime: new Date().toISOString(),
             personaTitle,
             windows: [],
@@ -176,7 +176,7 @@ export function useSessionAnalytics(personaTitle: string) {
             pauses: 0,
         };
         windowStartTimeRef.current = Date.now();
-    }, [personaTitle]);
+    }, [sessionId, personaTitle]);
 
     return {
         updateMetrics,
