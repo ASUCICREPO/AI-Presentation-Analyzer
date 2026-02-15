@@ -8,14 +8,15 @@ from datetime import date
 # ─── Environment variables ────────────────────────────────────────────
 PRESENTATION_TIMEOUT: int = int(os.environ.get("PRESENTATION_TIMEOUT", 1200))
 PDF_UPLOAD_TIMEOUT: int = int(os.environ.get("PDF_UPLOAD_TIMEOUT", 120))
-CUSTOMIZATION_UPLOAD_TIMEOUT: int = int(os.environ.get("CUSTOMIZATION_UPLOAD_TIMEOUT", 10))
 JSON_UPLOAD_TIMEOUT: int = int(os.environ.get("JSON_UPLOAD_TIMEOUT", 60))
 MULTIPART_PART_URL_TIMEOUT: int = int(os.environ.get("MULTIPART_PART_URL_TIMEOUT", 300))
 UPLOADS_BUCKET: str = os.environ.get("UPLOADS_BUCKET")
+PERSONA_GUARDRAIL_ID: str = os.environ.get("PERSONA_GUARDRAIL_ID", "")
+PERSONA_GUARDRAIL_VERSION: str = os.environ.get("PERSONA_GUARDRAIL_VERSION", "")
 
 # ─── Constants — fixed S3 filenames (overwrite on re-upload) ──────────
 AUTHORIZED_REQUEST_TYPES = [
-    'ppt', 'session', 'metric_chunk', 'persona_customization',
+    'ppt', 'session', 'metric_chunk',
     'transcript', 'session_analytics', 'detailed_metrics', 'manifest',
 ]
 
@@ -35,6 +36,47 @@ if not UPLOADS_BUCKET:
     raise ValueError("UPLOADS_BUCKET environment variable is not set")
 
 s3_client = boto3.client('s3')
+bedrock_runtime = boto3.client('bedrock-runtime')
+
+
+# ─── Guardrail scanning ─────────────────────────────────────────────
+def scan_persona_text(text: str) -> dict:
+    """Run persona customization text through the Bedrock guardrail.
+
+    Returns a dict with:
+        - allowed (bool): True if the content passed the guardrail.
+        - action (str): The guardrail action — 'NONE' (safe) or 'GUARDRAIL_INTERVENED'.
+        - message (str): Blocked messaging if the content was rejected.
+    """
+    if not PERSONA_GUARDRAIL_ID or not PERSONA_GUARDRAIL_VERSION:
+        print("[WARN] Guardrail env vars not set — skipping persona scan.")
+        return {"allowed": True, "action": "NONE", "message": ""}
+
+    try:
+        response = bedrock_runtime.apply_guardrail(
+            guardrailIdentifier=PERSONA_GUARDRAIL_ID,
+            guardrailVersion=PERSONA_GUARDRAIL_VERSION,
+            source="INPUT",
+            content=[{"text": {"text": text}}],
+        )
+        action = response.get("action", "NONE")
+        if action == "GUARDRAIL_INTERVENED":
+            # Pull the blocked message from the first output, or fall back to a default
+            outputs = response.get("outputs", [])
+            message = outputs[0]["text"] if outputs else (
+                "The persona customization was rejected by our safety filters."
+            )
+            print(f"[WARN] Guardrail INTERVENED for persona text. Action: {action}")
+            return {"allowed": False, "action": action, "message": message}
+
+        print(f"[INFO] Guardrail passed for persona text. Action: {action}")
+        return {"allowed": True, "action": action, "message": ""}
+
+    except ClientError as e:
+        print(f"[ERROR] Guardrail scan failed: {e}")
+        # Fail-open is intentional here so the feature still works if Bedrock
+        # has a transient error — but log loudly for monitoring.
+        return {"allowed": True, "action": "ERROR", "message": ""}
 
 
 # ─── CORS response helper ────────────────────────────────────────────
@@ -96,17 +138,6 @@ def get_upload_url(request_type: str, user_id: str, session_id: str) -> Optional
                 Conditions=[{"Content-Type": "application/json"}],
                 ExpiresIn=JSON_UPLOAD_TIMEOUT,
             )
-        elif request_type == 'persona_customization':
-            print(f"[INFO] Presigned URL for persona customization -> {key}")
-            response = s3_client.generate_presigned_post(
-                Bucket=UPLOADS_BUCKET, Key=key,
-                Fields={"Content-Type": "text/plain"},
-                Conditions=[
-                    {"Content-Type": "text/plain"},
-                    ["content-length-range", 1, 10 * 1024],
-                ],
-                ExpiresIn=CUSTOMIZATION_UPLOAD_TIMEOUT,
-            )
         else:
             return None
     except ClientError as e:
@@ -127,6 +158,27 @@ def get_persona_customization(user_id: str, session_id: str) -> Optional[str]:
     except ClientError as e:
         print(f"[ERROR] Failed to read persona customization: {e}")
         return None
+
+
+# ─── Write persona customization to S3 (Lambda-mediated) ─────────────
+MAX_PERSONA_TEXT_BYTES = 10 * 1024  # 10 KB — same limit as the old presigned URL
+
+
+def upload_persona_customization(user_id: str, session_id: str, text: str) -> bool:
+    """Write validated persona customization text directly to S3."""
+    key = _build_s3_key(user_id, session_id, 'persona_customization')
+    try:
+        s3_client.put_object(
+            Bucket=UPLOADS_BUCKET,
+            Key=key,
+            Body=text.encode('utf-8'),
+            ContentType='text/plain',
+        )
+        print(f"[INFO] Uploaded persona customization -> {key}")
+        return True
+    except ClientError as e:
+        print(f"[ERROR] Failed to upload persona customization: {e}")
+        return False
 
 
 # ─── Multipart upload helpers ─────────────────────────────────────────
@@ -209,10 +261,14 @@ def lambda_handler(event, context):
         -> presigned POST URL for uploading files
 
     GET  /s3_urls?action=get_persona&session_id={id}
-        -> read saved persona customization text
+        -> read saved persona customization text (guardrail-checked)
 
     GET  /s3_urls?action=get_part_url&session_id={id}&upload_id={uid}&part_number={n}
         -> presigned PUT URL for a multipart upload part
+
+    POST /s3_urls?action=upload_persona&session_id={id}
+        body: { "text": "..." }
+        -> scan text with Bedrock guardrail, then save to S3 if safe
 
     POST /s3_urls?action=initiate_multipart&session_id={id}
         -> initiate a new multipart upload for recording.webm
@@ -278,16 +334,57 @@ def lambda_handler(event, context):
                 return _response(500, {'message': 'Failed to abort multipart upload'})
             return _response(200, {'message': 'Multipart upload aborted'})
 
+        # Route: upload persona customization text (guardrail-gated)
+        if action == 'upload_persona':
+            text = body.get('text', '')
+
+            # Validate payload size
+            if not text or not text.strip():
+                return _response(400, {'message': 'Persona customization text cannot be empty.'})
+            if len(text.encode('utf-8')) > MAX_PERSONA_TEXT_BYTES:
+                return _response(400, {
+                    'message': f'Persona customization text exceeds the {MAX_PERSONA_TEXT_BYTES // 1024} KB limit.',
+                })
+
+            # Run through Bedrock guardrail before persisting
+            scan_result = scan_persona_text(text)
+            if not scan_result["allowed"]:
+                print(f"[WARN] Persona upload rejected for user={user_id}, session={session_id}")
+                return _response(400, {
+                    'message': scan_result["message"],
+                    'rejected': True,
+                })
+
+            # Guardrail passed — write to S3
+            success = upload_persona_customization(user_id, session_id, text)
+            if not success:
+                return _response(500, {'message': 'Failed to save persona customization.'})
+
+            return _response(200, {'message': 'Persona customization saved successfully.'})
+
         return _response(400, {'message': f"Unknown POST action: {action}"})
 
     # ═════════════════════════════════════════════════════════════════════
     # GET routes — presigned URLs and reads
     # ═════════════════════════════════════════════════════════════════════
     if method == 'GET':
-        # Route: get saved persona customization text
+        # Route: get saved persona customization text (with guardrail scan)
         if action == 'get_persona':
             text = get_persona_customization(user_id, session_id)
-            return _response(200, {'customization': text, 'exists': text is not None})
+            if text is None:
+                return _response(200, {'customization': None, 'exists': False})
+
+            # Run the text through Bedrock guardrail before returning
+            scan_result = scan_persona_text(text)
+            if not scan_result["allowed"]:
+                print(f"[WARN] Persona customization rejected for user={user_id}, session={session_id}")
+                return _response(400, {
+                    'message': scan_result["message"],
+                    'exists': True,
+                    'rejected': True,
+                })
+
+            return _response(200, {'customization': text, 'exists': True})
 
         # Route: presigned PUT URL for a multipart part
         if action == 'get_part_url':

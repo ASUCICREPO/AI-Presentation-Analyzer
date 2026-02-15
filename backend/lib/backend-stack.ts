@@ -7,6 +7,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as bedrock from 'aws-cdk-lib/aws-bedrock';
 
 export class AIPresentationCoachStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -52,7 +53,6 @@ export class AIPresentationCoachStack extends cdk.Stack {
         'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
         'PDF_UPLOAD_TIMEOUT': '120', //PDF upload timeout in 2 minutes
         'PRESENTATION_TIMEOUT': '1200', //Max Presentation video duration timeout 20 minutes
-        'CUSTOMIZATION_UPLOAD_TIMEOUT': '10', //Persona customization text upload timeout 10 seconds
         'JSON_UPLOAD_TIMEOUT': '60', //JSON data upload timeout 1 minute
         'MULTIPART_PART_URL_TIMEOUT': '300', //Multipart part URL timeout 5 minutes
       },
@@ -245,6 +245,52 @@ export class AIPresentationCoachStack extends cdk.Stack {
       authorizationType: apigateway.AuthorizationType.COGNITO,
     });
 
+
+    // ──────────────────────────────────────────────
+    // Bedrock Guardrail for Persona Customization
+    // Prevents persona injection attacks and blocks
+    // harmful content in custom persona uploads.
+    // ──────────────────────────────────────────────
+    const suffix = cdk.Names.uniqueId(this).slice(-8);
+
+    const personaCustomizationGuardrail = new bedrock.CfnGuardrail(this, 'PersonaCustomizationGuardrail', {
+      name: `PersonaCustomizationGuardrail-${suffix}`,
+      description: 'Guardrail to check for harmful persona customizations and prevent persona injection attacks',
+      blockedInputMessaging: 'The uploaded persona customization failed our security checks and has been rejected. Please review the content and try again.',
+      blockedOutputsMessaging: 'The generated persona response has been blocked by our security filters due to harmful content. Please modify your persona customization and try again.',
+      contentPolicyConfig: {
+        // Content filters set to HIGH for maximum scrutiny on both inputs and outputs.
+        // To allow more permissive configs, consider:
+        // LOW: Most permissive — only blocks extremely harmful content (least recommended).
+        // MEDIUM: Moderately permissive — blocks harmful content but allows edge cases
+        //         (recommended if students may present on political, explicit, or sensitive topics).
+        filtersConfig: [
+          { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+          { type: 'INSULTS', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+          { type: 'SEXUAL', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+          { type: 'VIOLENCE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+          { type: 'MISCONDUCT', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+          { type: 'PROMPT_ATTACK', inputStrength: 'HIGH', outputStrength: 'NONE' },
+        ],
+      },
+    });
+
+    // Create initial guardrail version (required for the ApplyGuardrail API)
+    const personaGuardrailVersion = new bedrock.CfnGuardrailVersion(this, 'PersonaGuardrailVersion', {
+      guardrailIdentifier: personaCustomizationGuardrail.attrGuardrailId,
+      description: 'Default Version',
+    });
+
+    // Pass guardrail identifiers to the presigned-URL Lambda so it can call ApplyGuardrail
+    s3UrlIssuerLambda.addEnvironment('PERSONA_GUARDRAIL_ID', personaCustomizationGuardrail.attrGuardrailId);
+    s3UrlIssuerLambda.addEnvironment('PERSONA_GUARDRAIL_VERSION', personaGuardrailVersion.attrVersion);
+
+    // Grant the presigned-URL Lambda permission to invoke the guardrail
+    s3UrlIssuerLambda.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['bedrock:ApplyGuardrail'],
+      resources: [personaCustomizationGuardrail.attrGuardrailArn],
+    }));
 
     // ──────────────────────────────────────────────
     // Stack Outputs (useful for frontend configuration)
