@@ -40,8 +40,8 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // ──────────────────────────────────────────────
     const s3UrlIssuerLambda = new lambda.Function(this, 's3UrlIssuerLambda', {
       runtime: lambda.Runtime.PYTHON_3_11,
-      handler: 'get_presigned_url.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 's3_presigned_url_gen')),
+      handler: 'index.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 's3-presigned-url-gen')),
       timeout: cdk.Duration.seconds(20),
       role: new iam.Role(this, 'S3UrlIssuerLambdaRole', {
         assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
@@ -199,8 +199,8 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // Persona CRUD Lambda
     const personaCrudLambda = new lambda.Function(this, 'PersonaCrudLambda', {
       runtime: lambda.Runtime.PYTHON_3_11,
-      handler: 'persona_crud.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'dynamo_persona_lambdas')),
+      handler: 'index.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'persona-crud')),
       timeout: cdk.Duration.seconds(20),
       role: new iam.Role(this, 'PersonaCrudLambdaRole', {
         assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
