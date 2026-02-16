@@ -26,7 +26,8 @@ async function authHeaders(): Promise<Record<string, string>> {
 // ─── Personas ────────────────────────────────────────────────────────
 
 export async function fetchPersonas(): Promise<Persona[]> {
-  const res = await fetch(`${API_BASE_URL}/personas`);
+  const headers = await authHeaders();
+  const res = await fetch(`${API_BASE_URL}/personas`, { headers });
   if (!res.ok) throw new Error('Failed to fetch personas');
   const data = await res.json();
   return data.personas ?? [];

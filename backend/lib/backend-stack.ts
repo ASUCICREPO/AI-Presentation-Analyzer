@@ -203,6 +203,24 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // Ensure the account-level CW role is set before the API stage deploys
     apiGateway.deploymentStage.node.addDependency(apiGatewayAccount);
 
+    // Add CORS headers to Gateway error responses (auth failures, etc.)
+    apiGateway.addGatewayResponse('Default4XX', {
+      type: apigateway.ResponseType.DEFAULT_4XX,
+      responseHeaders: {
+        'Access-Control-Allow-Origin': "'*'",
+        'Access-Control-Allow-Headers': "'Content-Type,Authorization'",
+        'Access-Control-Allow-Methods': "'GET,POST,PUT,DELETE,OPTIONS'",
+      },
+    });
+    apiGateway.addGatewayResponse('Default5XX', {
+      type: apigateway.ResponseType.DEFAULT_5XX,
+      responseHeaders: {
+        'Access-Control-Allow-Origin': "'*'",
+        'Access-Control-Allow-Headers': "'Content-Type,Authorization'",
+        'Access-Control-Allow-Methods': "'GET,POST,PUT,DELETE,OPTIONS'",
+      },
+    });
+
     // Cognito Authorizer for API Gateway
     const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'CognitoAuthorizer', {
       cognitoUserPools: [userPool],
