@@ -176,10 +176,6 @@ def lambda_handler(event, context):
     user_id = authorizer.get('claims', {}).get('sub')
     groups = authorizer.get('claims', {}).get('cognito:groups', [])  # List of groups
 
-    if 'admin' not in list(map(str.lower(),groups)):
-        print(f"Unauthorized access attempt by user {user_id} who is not in Admin group.")
-        return _response(403, {'message': 'Forbidden: You do not have permission to access this resource.'})
-
     path_params = event.get('pathParameters') or {}
     qs = event.get('queryStringParameters') or {}
     persona_id = path_params.get('personaID')
@@ -189,6 +185,7 @@ def lambda_handler(event, context):
         print(f"Health check heartbeat received from user {user_id}.")
         return _response(200, {'message': 'OK'})
 
+    # GET endpoints are open — anyone can list/view personas
     if method == 'GET':
         if persona_id:
             item = get_persona_from_id(persona_id)
@@ -197,6 +194,11 @@ def lambda_handler(event, context):
             return _response(404, {'message': f'Persona {persona_id} not found'})
         else:
             return list_all_personas(qs.get('lastEvaluatedKey'))
+
+    # ─── Write operations below require Admin group ────────────────────
+    if not groups or 'admin' not in list(map(str.lower, groups)):
+        print(f"Unauthorized access attempt by user {user_id} who is not in Admin group.")
+        return _response(403, {'message': 'Forbidden: Admin access required to modify personas.'})
 
     if method == 'POST':
         body = json.loads(event.get('body') or '{}')

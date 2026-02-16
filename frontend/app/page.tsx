@@ -12,6 +12,7 @@ import LoginPage from './components/LoginPage';
 import SignUpPage from './components/SignUpPage';
 import ConfirmSignUpPage from './components/ConfirmSignUpPage';
 import { SessionAnalytics } from './hooks/useSessionAnalytics';
+import { generateSessionId } from './config/config';
 import { Loader2 } from 'lucide-react';
 
 type AuthView = 'login' | 'signup' | 'confirm';
@@ -29,6 +30,8 @@ export default function Home() {
   const [selectedPersonaName, setSelectedPersonaName] = useState<string>('');
   const [selectedPersonaTimeLimit, setSelectedPersonaTimeLimit] = useState<number | undefined>(undefined);
   const [customNotes, setCustomNotes] = useState('');
+  const [pdfUploaded, setPdfUploaded] = useState(false);
+  const [sessionId, setSessionId] = useState<string>(generateSessionId);
   const [sessionData, setSessionData] = useState<SessionAnalytics | null>(null);
 
   // Modal State
@@ -99,6 +102,8 @@ export default function Home() {
   const handleBackToStart = () => {
     setCurrentStep(1);
     setSessionData(null);
+    setSessionId(generateSessionId());
+    setPdfUploaded(false);
     window.scrollTo(0, 0);
   };
 
@@ -166,7 +171,7 @@ export default function Home() {
   // --- Authenticated app ---
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header currentStep={currentStep} onStepClick={handleStepClick} />
+      <Header currentStep={currentStep} onStepClick={handleStepClick} sessionId={sessionId} />
 
       {currentStep === 1 && (
         <PersonaSelection
@@ -176,6 +181,7 @@ export default function Home() {
           onTimeLimitChange={setSelectedPersonaTimeLimit}
           customNotes={customNotes}
           onCustomNotesChange={setCustomNotes}
+          sessionId={sessionId}
           onContinue={handleContinueToUpload}
         />
       )}
@@ -183,15 +189,20 @@ export default function Home() {
       {currentStep === 2 && (
         <UploadContent
           personaName={selectedPersonaName}
+          sessionId={sessionId}
           onBack={handleBackToPersona}
           onContinue={handleContinueFromUpload}
+          onPdfUploaded={() => setPdfUploaded(true)}
         />
       )}
 
       {currentStep === 3 && (
         <PracticeSession
           personaTitle={selectedPersonaName}
+          sessionId={sessionId}
           timeLimitSec={selectedPersonaTimeLimit}
+          hasPresentationPdf={pdfUploaded}
+          hasPersonaCustomization={customNotes.trim().length > 0}
           onBack={handleBackToUpload}
           onComplete={handlePracticeComplete}
         />

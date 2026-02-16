@@ -35,6 +35,69 @@ export interface Persona {
 /** Fallback when a persona has no timeLimitSec set */
 export const DEFAULT_TIME_LIMIT_SEC = 15 * 60; // 15 minutes
 
+// ---------------------------------------------------------------------------
+// Session
+// ---------------------------------------------------------------------------
+/** Generate a unique session ID for a new practice session. */
+export function generateSessionId(): string {
+  return `session_${Date.now()}`;
+}
+
+// ---------------------------------------------------------------------------
+// Persona Customization
+// ---------------------------------------------------------------------------
+export const PERSONA_CUSTOMIZATION = {
+  MAX_WORDS: 100,                         // Max words allowed in custom notes
+  MAX_BYTES: 10 * 1024,                   // 10 KB backend limit
+  S3_FILENAME: 'CUSTOM_PERSONA_INSTRUCTION.txt',
+};
+
+// ---------------------------------------------------------------------------
+// S3 Upload — fixed file names (no UUIDs, overwrites on re-upload)
+// ---------------------------------------------------------------------------
+export const S3_FILENAMES = {
+  PRESENTATION: 'presentation.pdf',
+  RECORDING: 'recording.webm',
+  ANALYTICS: 'analytics.json',
+  PERSONA_CUSTOMIZATION: PERSONA_CUSTOMIZATION.S3_FILENAME,
+  TRANSCRIPT: 'transcript.json',
+  SESSION_ANALYTICS: 'session_analytics.json',
+  DETAILED_METRICS: 'detailed_metrics.json',
+  MANIFEST: 'manifest.json',
+};
+
+/** Valid request types for the presigned URL endpoint */
+export type S3RequestType =
+  | 'ppt'
+  | 'session'
+  | 'metric_chunk'
+  | 'persona_customization'
+  | 'transcript'
+  | 'session_analytics'
+  | 'detailed_metrics'
+  | 'manifest';
+
+// ---------------------------------------------------------------------------
+// Video Recording (multipart upload)
+// ---------------------------------------------------------------------------
+export const VIDEO_RECORDING_CONFIG = {
+  /** Interval (ms) between video chunk uploads — 90 seconds.
+   *  At typical 640×480 webcam bitrate (~500 kbps–1 Mbps),
+   *  90s produces ~5.6–11.25 MB, safely above the 5 MB S3 minimum. */
+  CHUNK_INTERVAL_MS: 90_000,
+  /** MediaRecorder MIME type (WebM is the standard for browser recording —
+   *  MP4/H.264 has limited MediaRecorder support and requires a moov atom
+   *  at EOF which breaks chunked streaming) */
+  MIME_TYPE: 'video/webm;codecs=vp8,opus',
+  /** Fallback MIME if preferred isn't supported */
+  FALLBACK_MIME_TYPE: 'video/webm',
+  /** MediaRecorder timeslice (ms) — push data every 1s into buffer */
+  TIMESLICE_MS: 1_000,
+  /** S3 multipart minimum part size (5 MB). Parts below this can't be uploaded
+   *  except as the final part. The 60s interval ensures each chunk clears this. */
+  MIN_PART_SIZE_BYTES: 5 * 1024 * 1024,
+};
+
 
 // ---------------------------------------------------------------------------
 // Presentation Time Limits (seconds)

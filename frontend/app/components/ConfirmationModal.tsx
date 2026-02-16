@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 
 interface ConfirmationModalProps {
   isOpen: boolean;
@@ -23,19 +23,28 @@ export default function ConfirmationModal({
   cancelText = 'Cancel',
   type = 'warning'
 }: ConfirmationModalProps) {
-  const [isVisible, setIsVisible] = useState(false);
+  // Keep the modal mounted for 300ms after isOpen becomes false (fade-out)
+  const [mounted, setMounted] = useState(isOpen);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Handle animation state
   useEffect(() => {
     if (isOpen) {
-      setIsVisible(true);
-    } else {
-      const timer = setTimeout(() => setIsVisible(false), 300); // Wait for fade out
-      return () => clearTimeout(timer);
+      // Clear any pending unmount and ensure mounted
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      setMounted(true);
+    } else if (mounted) {
+      // Delay unmount for fade-out animation
+      timerRef.current = setTimeout(() => setMounted(false), 300);
     }
-  }, [isOpen]);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!isVisible && !isOpen) return null;
+  if (!mounted) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

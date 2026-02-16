@@ -5,6 +5,10 @@ import { useFaceLandmarker } from '../hooks/useFaceLandmarker';
 import { useAudioAnalysis } from '../hooks/useAudioAnalysis';
 import { useVocalVariety } from '../hooks/useVocalVariety';
 import { useSessionAnalytics, SessionAnalytics } from '../hooks/useSessionAnalytics';
+import { useVideoRecording } from '../hooks/useVideoRecording';
+import { useDetailedMetrics } from '../hooks/useDetailedMetrics';
+import { useSessionManifest } from '../hooks/useSessionManifest';
+import { uploadJsonToS3 } from '../services/api';
 import { ANALYSIS_CONFIG, PRESENTATION_LIMITS, DEFAULT_TIME_LIMIT_SEC } from '../config/config';
 
 import { toast } from 'sonner';
@@ -15,16 +19,34 @@ import CameraView from './practice/CameraView';
 import CalibrationPanel from './practice/CalibrationPanel';
 import RealTimeFeedbackPanel from './practice/RealTimeFeedbackPanel';
 import TranscriptionPanel from './practice/TranscriptionPanel';
-import { VocalVarietyPanel } from './practice/VocalVarietyPanel';
+
+// ─── Small helper for the processing screen ──────────────────────────
+function ProcessingStep({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg bg-gray-50 px-4 py-2.5 2xl:px-5 2xl:py-3">
+      <svg
+        className="h-4 w-4 flex-shrink-0 animate-spin text-maroon-500 2xl:h-5 2xl:w-5"
+        viewBox="0 0 16 16"
+        fill="none"
+      >
+        <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="2" strokeDasharray="10 20" />
+      </svg>
+      <span className="text-sm text-gray-600 font-sans 2xl:text-base">{label}</span>
+    </div>
+  );
+}
 
 interface PracticeSessionProps {
   personaTitle: string;
+  sessionId: string;
   timeLimitSec?: number;
+  hasPresentationPdf?: boolean;
+  hasPersonaCustomization?: boolean;
   onBack: () => void;
   onComplete: (sessionData: SessionAnalytics) => void;
 }
 
-export default function PracticeSession({ personaTitle, timeLimitSec, onBack, onComplete }: PracticeSessionProps) {
+export default function PracticeSession({ personaTitle, sessionId, timeLimitSec, hasPresentationPdf, hasPersonaCustomization, onBack, onComplete }: PracticeSessionProps) {
   // Resolve the effective time cap for this session
   const maxDuration = timeLimitSec ?? DEFAULT_TIME_LIMIT_SEC;
   const [isRecording, setIsRecording] = useState(false);
@@ -32,6 +54,7 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
   const [timer, setTimer] = useState(0);
   const [cameraActive, setCameraActive] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   // MediaPipe & Tracking State
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -48,6 +71,8 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
   const lookAwayStartTimeRef = useRef<number | null>(null);
   const lookBackStartTimeRef = useRef<number | null>(null);
   const alertPlayedRef = useRef(false);
+  // Debounced "distracted" flag — only true after looking away for 3+ seconds
+  const [gazeDisplayDistracted, setGazeDisplayDistracted] = useState(false);
 
   // New Calibration Mode State
   const [isCalibrating, setIsCalibrating] = useState(false);
@@ -80,10 +105,23 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
   const vocalVariety = useVocalVariety();
 
   // Session Analytics Hook
-  const sessionAnalytics = useSessionAnalytics(personaTitle);
+  const sessionAnalytics = useSessionAnalytics(personaTitle, sessionId);
   const analyticsIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const windowIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isPausedRef = useRef(false);
+
+  // Session Manifest Hook (lightweight coordination file in S3)
+  const manifest = useSessionManifest(sessionId, personaTitle);
+
+  // Video Recording Hook (multipart upload) — updates manifest after each chunk
+  const videoRecording = useVideoRecording(sessionId, {
+    onPartUploaded: (partsUploaded) => {
+      manifest.update({ videoParts: partsUploaded });
+    },
+  });
+
+  // Detailed Metrics Hook (per-second snapshots)
+  const detailedMetrics = useDetailedMetrics(sessionId);
 
   // Refs to store latest metric values
   const latestMetricsRef = useRef({
@@ -92,6 +130,7 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
     isLookingAtScreen: true,
     fillerWords: 0,
     pauses: 0,
+    direction: 'Center' as string,
   });
 
   // Hook initialization
@@ -124,8 +163,9 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
       isLookingAtScreen: gazeStatus.isLookingAtScreen,
       fillerWords: audioMetrics.fillerWords,
       pauses: audioMetrics.pauses,
+      direction: gazeStatus.direction,
     };
-  }, [audioMetrics.wpm, audioMetrics.volume, audioMetrics.fillerWords, audioMetrics.pauses, gazeStatus.isLookingAtScreen]);
+  }, [audioMetrics.wpm, audioMetrics.volume, audioMetrics.fillerWords, audioMetrics.pauses, gazeStatus.isLookingAtScreen, gazeStatus.direction]);
 
   // Collect metrics every second when recording
   useEffect(() => {
@@ -139,6 +179,16 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
 
     analyticsIntervalRef.current = setInterval(() => {
       sessionAnalytics.updateMetrics(latestMetricsRef.current);
+
+      // Also feed per-second detailed metrics
+      detailedMetrics.record({
+        wpm: latestMetricsRef.current.wpm,
+        vol: latestMetricsRef.current.volume,
+        gaze: latestMetricsRef.current.isLookingAtScreen,
+        fillers: latestMetricsRef.current.fillerWords,
+        pauses: latestMetricsRef.current.pauses,
+        direction: latestMetricsRef.current.direction,
+      });
     }, 1000);
 
     return () => {
@@ -343,7 +393,7 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
       if (result.faceBlendshapes && result.faceBlendshapes.length > 0) {
         const { isLookingAtScreen } = analyzeGaze(result.faceBlendshapes);
 
-        // Audio Alert Logic
+        // Audio Alert & Debounced Display Logic
         if (isRecording && !isPaused) {
           const now = Date.now();
 
@@ -356,9 +406,14 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
 
             const durationLookingAway = now - lookAwayStartTimeRef.current;
 
-            if (durationLookingAway > ANALYSIS_CONFIG.TIMING.LOOK_AWAY_THRESHOLD_MS && !alertPlayedRef.current) {
-              playAlertSound();
-              alertPlayedRef.current = true;
+            if (durationLookingAway > ANALYSIS_CONFIG.TIMING.LOOK_AWAY_THRESHOLD_MS) {
+              // Show "distracted" in the UI after the threshold
+              setGazeDisplayDistracted(true);
+
+              if (!alertPlayedRef.current) {
+                playAlertSound();
+                alertPlayedRef.current = true;
+              }
             }
           } else {
             lookAwayStartTimeRef.current = null;
@@ -369,12 +424,14 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
 
             if (now - lookBackStartTimeRef.current > ANALYSIS_CONFIG.TIMING.LOOK_BACK_THRESHOLD_MS) {
               alertPlayedRef.current = false;
+              setGazeDisplayDistracted(false);
             }
           }
         } else {
           lookAwayStartTimeRef.current = null;
           lookBackStartTimeRef.current = null;
           alertPlayedRef.current = false;
+          setGazeDisplayDistracted(false);
         }
       }
     }
@@ -447,11 +504,21 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
       // Reset session analytics
       sessionAnalytics.resetSession();
 
+      // Reset detailed metrics
+      detailedMetrics.reset();
+
+      // Create session manifest in S3
+      manifest.create({
+        hasPresentationPdf: hasPresentationPdf ?? false,
+        hasPersonaCustomization: hasPersonaCustomization ?? false,
+      });
+
       // Start both audio analysis and vocal variety in parallel
       try {
         await Promise.all([
           startAnalysis(currentStream),
-          vocalVariety.startAnalysis(currentStream)
+          vocalVariety.startAnalysis(currentStream),
+          videoRecording.start(currentStream),
         ]);
       } catch (error) {
         console.error('[PracticeSession] Error starting analyses:', error);
@@ -465,17 +532,20 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
     setIsPaused(true);
     isPausedRef.current = true;
     pauseAnalysis();
+    videoRecording.pause();
   };
 
   const handleResumeRecording = () => {
     setIsPaused(false);
     isPausedRef.current = false;
     resumeAnalysis();
+    videoRecording.resume();
   };
 
-  const handleStopRecording = () => {
+  const handleStopRecording = async () => {
     setIsRecording(false);
     setIsPaused(false);
+    setIsProcessing(true);
     stopAnalysis();
     vocalVariety.stopAnalysis();
 
@@ -485,7 +555,53 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
     // Get session data and pass to parent
     const sessionData = sessionAnalytics.getSessionData();
 
+    // Stop video recording (completes multipart upload)
+    try {
+      await videoRecording.stop();
+    } catch (err) {
+      console.error('[PracticeSession] Error stopping video recording:', err);
+    }
+
+    // Upload all session data to S3 in parallel
+    const uploadPromises: Promise<void>[] = [];
+
+    // 1. Session analytics (30-second window summaries)
+    uploadPromises.push(
+      uploadJsonToS3('session_analytics', sessionId, sessionData).catch((err) =>
+        console.error('[PracticeSession] Failed to upload session analytics:', err),
+      ),
+    );
+
+    // 2. Transcript
+    if (transcripts.length > 0) {
+      uploadPromises.push(
+        uploadJsonToS3('transcript', sessionId, {
+          sessionId,
+          transcripts,
+        }).catch((err) =>
+          console.error('[PracticeSession] Failed to upload transcript:', err),
+        ),
+      );
+    }
+
+    // 3. Detailed per-second metrics
+    const detailedData = detailedMetrics.getData();
+    if (detailedData.snapshots.length > 0) {
+      uploadPromises.push(
+        uploadJsonToS3('detailed_metrics', sessionId, detailedData).catch((err) =>
+          console.error('[PracticeSession] Failed to upload detailed metrics:', err),
+        ),
+      );
+    }
+
+    // Wait for all uploads to finish (with error tolerance)
+    await Promise.allSettled(uploadPromises);
+
+    // Finalize session manifest (status → "completed")
+    await manifest.complete(timer);
+
     stopCamera();
+    setIsProcessing(false);
     onComplete(sessionData);
   };
 
@@ -496,6 +612,69 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
     fillerWords: audioMetrics.fillerWords,
     pauses: audioMetrics.pauses,
   };
+
+  // ─── Processing Screen ─────────────────────────────────────────────
+  if (isProcessing) {
+    return (
+      <div className="flex min-h-[70vh] items-center justify-center px-4">
+        <div className="mx-auto max-w-md text-center">
+          {/* Animated rings */}
+          <div className="relative mx-auto mb-8 h-24 w-24">
+            <div className="absolute inset-0 animate-ping rounded-full bg-maroon-200 opacity-20" />
+            <div className="absolute inset-2 animate-pulse rounded-full bg-maroon-100 opacity-40" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <svg
+                className="h-12 w-12 animate-spin text-maroon-600"
+                viewBox="0 0 48 48"
+                fill="none"
+              >
+                <circle
+                  cx="24"
+                  cy="24"
+                  r="20"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeDasharray="80 40"
+                  opacity="0.3"
+                />
+                <circle
+                  cx="24"
+                  cy="24"
+                  r="20"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeDasharray="30 90"
+                />
+              </svg>
+            </div>
+          </div>
+
+          <h2 className="text-xl font-bold text-gray-900 font-serif italic sm:text-2xl 2xl:text-3xl">
+            Processing Your Session
+          </h2>
+          <p className="mt-3 text-sm text-gray-500 font-sans leading-relaxed sm:text-base 2xl:text-lg">
+            Hold tight — we&apos;re uploading your recording and analytics data.
+            This usually takes just a few seconds.
+          </p>
+
+          {/* Progress indicators */}
+          <div className="mt-8 space-y-3 text-left">
+            <ProcessingStep label="Saving video recording" />
+            <ProcessingStep label="Uploading session analytics" />
+            <ProcessingStep label="Uploading transcript" />
+            <ProcessingStep label="Uploading detailed metrics" />
+            <ProcessingStep label="Finalizing session" />
+          </div>
+
+          <p className="mt-8 text-xs text-gray-400 font-sans 2xl:text-sm">
+            Please don&apos;t close this tab while processing.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 py-3 sm:px-6 sm:py-4 2xl:max-w-[1600px] 2xl:py-8">
@@ -543,16 +722,13 @@ export default function PracticeSession({ personaTitle, timeLimitSec, onBack, on
                 isRecording={isRecording && !isPaused}
                 soundEnabled={soundEnabled}
                 onToggleSound={() => setSoundEnabled(!soundEnabled)}
-                gazeStatus={gazeStatus}
+                isDistracted={gazeDisplayDistracted}
                 metrics={feedbackMetrics}
+                vocalVariety={vocalVariety.metrics}
               />
             )}
           </div>
 
-          {/* Vocal Variety Panel */}
-          {!isCalibrating && isRecording && (
-            <VocalVarietyPanel metrics={vocalVariety.metrics} />
-          )}
         </div>
       </div>
 

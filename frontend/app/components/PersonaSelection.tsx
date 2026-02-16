@@ -13,6 +13,7 @@ interface PersonaSelectionProps {
   onTimeLimitChange: (sec: number | undefined) => void;
   customNotes: string;
   onCustomNotesChange: (notes: string) => void;
+  sessionId: string;
   onContinue: () => void;
 }
 
@@ -59,6 +60,7 @@ export default function PersonaSelection({
   onTimeLimitChange,
   customNotes,
   onCustomNotesChange,
+  sessionId,
   onContinue,
 }: PersonaSelectionProps) {
   const [personas, setPersonas] = useState<Persona[]>([]);
@@ -130,6 +132,7 @@ export default function PersonaSelection({
         <CustomizePersona
           value={customNotes}
           onChange={onCustomNotesChange}
+          sessionId={sessionId}
           isVisible={isPersonaSelected}
         />
       </div>
