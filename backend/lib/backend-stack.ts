@@ -8,6 +8,7 @@ import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as bedrock from 'aws-cdk-lib/aws-bedrock';
+import { NagSuppressions } from 'cdk-nag';
 
 export class AIPresentationCoachStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -16,13 +17,23 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // ──────────────────────────────────────────────
     // S3 bucket for uploads
     // ──────────────────────────────────────────────
-    const presentationAndSessionUploadsBucket = new cdk.aws_s3.Bucket(this, 'AIPresentationCoach-Presentations-Videos', {
+    const accessLogsBucket = new s3.Bucket(this, 'AccessLogsBucket', {
+      enforceSSL: true,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+    });
+
+    const presentationAndSessionUploadsBucket = new s3.Bucket(this, 'AIPresentationCoach-Presentations-Videos', {
+      enforceSSL: true,
+      serverAccessLogsBucket: accessLogsBucket,
+      serverAccessLogsPrefix: 'uploads-access-logs/',
       removalPolicy: cdk.RemovalPolicy.DESTROY,
       autoDeleteObjects: true,
       cors: [
         {
           allowedOrigins: ['*'],
-          allowedMethods: [cdk.aws_s3.HttpMethods.GET, cdk.aws_s3.HttpMethods.PUT, cdk.aws_s3.HttpMethods.POST],
+          allowedMethods: [s3.HttpMethods.GET, s3.HttpMethods.PUT, s3.HttpMethods.POST],
           allowedHeaders: ['*'],
           exposedHeaders: ['ETag'],
         },
@@ -39,7 +50,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // Lambda for presigned URL generation
     // ──────────────────────────────────────────────
     const s3UrlIssuerLambda = new lambda.Function(this, 's3UrlIssuerLambda', {
-      runtime: lambda.Runtime.PYTHON_3_11,
+      runtime: lambda.Runtime.PYTHON_3_13,
       handler: 'index.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 's3-presigned-url-gen')),
       timeout: cdk.Duration.seconds(20),
@@ -79,6 +90,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
       },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
       signInCaseSensitive: false,
+      standardThreatProtectionMode: cognito.StandardThreatProtectionMode.FULL_FUNCTION,
     });
 
     // User Pool Client (needed by the Identity Pool to authenticate users)
@@ -123,7 +135,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
       description: 'Role assumed by authenticated Cognito Identity Pool users',
     });
 
-    // Grant Amazon Transcribe real-time streaming permissions
+    // Grant Amazon Transcribe real-time streaming permissions (scoped to account)
     authenticatedRole.addToPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
@@ -131,7 +143,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
           'transcribe:StartStreamTranscriptionWebSocket',
           'transcribe:StartStreamTranscription',
         ],
-        resources: ['*'],
+        resources: [`arn:aws:transcribe:${this.region}:${this.account}:*`],
       }),
     );
 
@@ -156,9 +168,27 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // ──────────────────────────────────────────────
     // API Gateway definitions
     // ──────────────────────────────────────────────
+    // API Gateway CloudWatch logging role
+    const apiGatewayLogRole = new iam.Role(this, 'ApiGatewayCloudWatchRole', {
+      assumedBy: new iam.ServicePrincipal('apigateway.amazonaws.com'),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonAPIGatewayPushToCloudWatchLogs'),
+      ],
+    });
+
+    const apiLogGroup = new cdk.aws_logs.LogGroup(this, 'ApiGatewayAccessLogs', {
+      retention: cdk.aws_logs.RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
     const apiGateway = new apigateway.LambdaRestApi(this, 'AIPresentationCoachApi', {
       handler: s3UrlIssuerLambda,
       proxy: false,
+      deployOptions: {
+        accessLogDestination: new apigateway.LogGroupLogDestination(apiLogGroup),
+        accessLogFormat: apigateway.AccessLogFormat.jsonWithStandardFields(),
+        loggingLevel: apigateway.MethodLoggingLevel.INFO,
+      },
       defaultCorsPreflightOptions: {
         allowOrigins: apigateway.Cors.ALL_ORIGINS,
         allowMethods: apigateway.Cors.ALL_METHODS,
@@ -198,7 +228,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
 
     // Persona CRUD Lambda
     const personaCrudLambda = new lambda.Function(this, 'PersonaCrudLambda', {
-      runtime: lambda.Runtime.PYTHON_3_11,
+      runtime: lambda.Runtime.PYTHON_3_13,
       handler: 'index.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'persona-crud')),
       timeout: cdk.Duration.seconds(20),
@@ -219,8 +249,11 @@ export class AIPresentationCoachStack extends cdk.Stack {
 
     // Personas resource
     let personas_resource = apiGateway.root.addResource('personas');
-    // GET /personas - list all personas (public — needed before login to show persona cards)
-    personas_resource.addMethod('GET', new apigateway.LambdaIntegration(personaCrudLambda));
+    // GET /personas - list all personas (auth required)
+    personas_resource.addMethod('GET', new apigateway.LambdaIntegration(personaCrudLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
+    });
     // POST /personas - create a new persona (auth required)
     personas_resource.addMethod('POST', new apigateway.LambdaIntegration(personaCrudLambda), {
       authorizer,
@@ -314,5 +347,54 @@ export class AIPresentationCoachStack extends cdk.Stack {
       value: this.region,
       description: 'AWS Region',
     });
+
+    // ──────────────────────────────────────────────
+    // cdk-nag suppressions
+    // ──────────────────────────────────────────────
+
+    // AwsSolutions-IAM4: AWS managed policies required for Lambda CloudWatch Logs and API Gateway logging
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/S3UrlIssuerLambdaRole/Resource', [
+      { id: 'AwsSolutions-IAM4', reason: 'AWSLambdaBasicExecutionRole is the standard AWS managed policy required for CloudWatch Logs integration.', appliesTo: ['Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'] },
+    ]);
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/PersonaCrudLambdaRole/Resource', [
+      { id: 'AwsSolutions-IAM4', reason: 'AWSLambdaBasicExecutionRole is the standard AWS managed policy required for CloudWatch Logs integration.', appliesTo: ['Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'] },
+    ]);
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/ApiGatewayCloudWatchRole/Resource', [
+      { id: 'AwsSolutions-IAM4', reason: 'AmazonAPIGatewayPushToCloudWatchLogs is the AWS-required managed policy for API Gateway to push logs to CloudWatch.', appliesTo: ['Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs'] },
+    ]);
+
+    // AwsSolutions-L1: Python 3.13 is the latest stable runtime; cdk-nag flags because 3.14 exists in CDK but is not GA
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/s3UrlIssuerLambda/Resource', [
+      { id: 'AwsSolutions-L1', reason: 'Python 3.13 is the latest stable Lambda runtime. Python 3.14 is not yet generally available.' },
+    ]);
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/PersonaCrudLambda/Resource', [
+      { id: 'AwsSolutions-L1', reason: 'Python 3.13 is the latest stable Lambda runtime. Python 3.14 is not yet generally available.' },
+    ]);
+
+    // AwsSolutions-IAM5: Wildcard S3 actions generated by CDK grantReadWrite(), scoped to the single uploads bucket
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/S3UrlIssuerLambdaRole/DefaultPolicy/Resource', [
+      { id: 'AwsSolutions-IAM5', reason: 'Wildcard actions (s3:Abort*, s3:DeleteObject*, s3:GetBucket*, s3:GetObject*, s3:List*) are generated by CDK grantReadWrite() and scoped to the uploads bucket only.', appliesTo: ['Action::s3:Abort*', 'Action::s3:DeleteObject*', 'Action::s3:GetBucket*', 'Action::s3:GetObject*', 'Action::s3:List*'] },
+      { id: 'AwsSolutions-IAM5', reason: 'Resource wildcard is scoped to objects within the uploads bucket via CDK grantReadWrite().', appliesTo: ['Resource::<AIPresentationCoachPresentationsVideos1B0D776E.Arn>/*'] },
+    ]);
+
+    // AwsSolutions-IAM5: Transcribe streaming APIs do not support resource-level permissions; wildcard is required, scoped to account/region
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/CognitoAuthenticatedRole/DefaultPolicy/Resource', [
+      { id: 'AwsSolutions-IAM5', reason: 'Transcribe streaming APIs (StartStreamTranscription*) do not support resource-level ARNs. Wildcard is required but scoped to account and region.', appliesTo: [`Resource::arn:aws:transcribe:<AWS::Region>:<AWS::AccountId>:*`] },
+    ]);
+
+    // AwsSolutions-APIG2: Request validation handled in Lambda handlers with detailed input checks
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/AIPresentationCoachApi/Resource', [
+      { id: 'AwsSolutions-APIG2', reason: 'Request validation is handled in Lambda handlers with detailed input validation and error responses.' },
+    ]);
+
+    // AwsSolutions-COG2: MFA not enforced — this is a student-facing presentation tool, MFA would add friction
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/UserPool/Resource', [
+      { id: 'AwsSolutions-COG2', reason: 'MFA not required for this student-facing presentation tool to reduce onboarding friction. Strong password policy is enforced instead.' },
+    ]);
+
+    // AwsSolutions-APIG3: WAFv2 not attached — adds significant cost for a non-production student tool
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/AIPresentationCoachApi/DeploymentStage.prod/Resource', [
+      { id: 'AwsSolutions-APIG3', reason: 'WAFv2 web ACL not attached to avoid additional cost for this non-production student-facing tool. Rate limiting handled at Cognito and API Gateway level.' },
+    ]);
   } 
 }
