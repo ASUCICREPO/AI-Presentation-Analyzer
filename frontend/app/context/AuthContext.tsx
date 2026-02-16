@@ -38,28 +38,46 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // ---------- Provider ----------
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  // Determine initial loading state — only need to verify session if a user exists
-  const [authState, setAuthState] = useState<AuthState>(() => {
-    const hasCurrentUser = typeof window !== 'undefined' && !!userPool.getCurrentUser();
-    return {
-      isAuthenticated: false,
-      isLoading: hasCurrentUser,   // only loading if we need to verify an existing session
-      user: null,
-      userEmail: null,
-    };
+  const [authState, setAuthState] = useState<AuthState>({
+    isAuthenticated: false,
+    isLoading: true,
+    user: null,
+    userEmail: null,
   });
+
+  // --- Get ID Token (for AWS credential exchange) ---
+  const getIdToken = useCallback((): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const currentUser = userPool.getCurrentUser();
+      if (!currentUser) return reject(new Error('No authenticated user'));
+
+      currentUser.getSession((err: Error | null, session: CognitoUserSession | null) => {
+        if (err || !session?.isValid()) return reject(err ?? new Error('Invalid session'));
+        resolve(session.getIdToken().getJwtToken());
+      });
+    });
+  }, []);
 
   // Check for an existing session on mount
   useEffect(() => {
     const currentUser = userPool.getCurrentUser();
-    if (!currentUser) return;   // isLoading is already false from initializer
+    if (!currentUser) {
+      // No stored session — mark as not authenticated
+      // Using callback in getSession pattern to avoid sync setState in effect
+      queueMicrotask(() => {
+        setAuthState({ isAuthenticated: false, isLoading: false, user: null, userEmail: null });
+      });
+      return;
+    }
 
     currentUser.getSession((err: Error | null, session: CognitoUserSession | null) => {
       if (err || !session?.isValid()) {
+        setAuthTokenResolver(null);
         setAuthState({ isAuthenticated: false, isLoading: false, user: null, userEmail: null });
       } else {
         const email =
           session.getIdToken().payload?.email ?? currentUser.getUsername();
+        setAuthTokenResolver(getIdToken);
         setAuthState({
           isAuthenticated: true,
           isLoading: false,
@@ -68,7 +86,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
       }
     });
-  }, []);
+  }, [getIdToken]);
 
   // --- Sign In ---
   const signIn = useCallback(async (email: string, password: string) => {
@@ -80,6 +98,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         onSuccess: (session) => {
           const userEmail =
             session.getIdToken().payload?.email ?? cognitoUser.getUsername();
+          setAuthTokenResolver(getIdToken);
           setAuthState({
             isAuthenticated: true,
             isLoading: false,
@@ -91,7 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         onFailure: (err) => reject(err),
       });
     });
-  }, []);
+  }, [getIdToken]);
 
   // --- Sign Up ---
   const signUp = useCallback(async (email: string, password: string, name: string) => {
@@ -134,30 +153,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(() => {
     const currentUser = userPool.getCurrentUser();
     if (currentUser) currentUser.signOut();
+    setAuthTokenResolver(null);
     setAuthState({ isAuthenticated: false, isLoading: false, user: null, userEmail: null });
   }, []);
-
-  // --- Get ID Token (for AWS credential exchange) ---
-  const getIdToken = useCallback((): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const currentUser = userPool.getCurrentUser();
-      if (!currentUser) return reject(new Error('No authenticated user'));
-
-      currentUser.getSession((err: Error | null, session: CognitoUserSession | null) => {
-        if (err || !session?.isValid()) return reject(err ?? new Error('Invalid session'));
-        resolve(session.getIdToken().getJwtToken());
-      });
-    });
-  }, []);
-
-  // --- Wire getIdToken into the API service so all requests include auth ---
-  useEffect(() => {
-    if (authState.isAuthenticated) {
-      setAuthTokenResolver(getIdToken);
-    } else {
-      setAuthTokenResolver(null);
-    }
-  }, [authState.isAuthenticated, getIdToken]);
 
   return (
     <AuthContext.Provider
