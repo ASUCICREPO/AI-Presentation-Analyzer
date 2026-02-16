@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { PERSONA_CUSTOMIZATION } from '../config/config';
-import { getPresignedUrl, uploadTextWithPresignedUrl } from '../services/api';
+import { savePersonaCustomization } from '../services/api';
 
 interface CustomizePersonaProps {
   value: string;
@@ -53,8 +53,7 @@ export default function CustomizePersona({
     setSaving(true);
     setError(null);
     try {
-      const presigned = await getPresignedUrl('persona_customization', sessionId);
-      await uploadTextWithPresignedUrl(value.trim(), presigned);
+      await savePersonaCustomization(sessionId, value.trim());
       setSaved(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');

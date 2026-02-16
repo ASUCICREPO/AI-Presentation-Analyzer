@@ -121,6 +121,28 @@ export async function uploadTextWithPresignedUrl(
 
 // ─── Persona Customization (read back from S3) ──────────────────────
 
+/**
+ * Save persona customization text via the guardrail-gated Lambda route.
+ * POST /s3_urls?action=upload_persona&session_id={id}
+ */
+export async function savePersonaCustomization(
+  sessionId: string,
+  text: string,
+): Promise<{ message: string; rejected?: boolean }> {
+  const headers = await authHeaders();
+  const res = await fetch(
+    `${API_BASE_URL}/s3_urls?action=upload_persona&session_id=${sessionId}`,
+    {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    },
+  );
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message ?? 'Failed to save persona customization');
+  return data;
+}
+
 interface PersonaCustomizationResponse {
   customization: string | null;
   exists: boolean;
