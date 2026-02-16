@@ -90,7 +90,6 @@ export class AIPresentationCoachStack extends cdk.Stack {
       },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
       signInCaseSensitive: false,
-      standardThreatProtectionMode: cognito.StandardThreatProtectionMode.FULL_FUNCTION,
     });
 
     // User Pool Client (needed by the Identity Pool to authenticate users)
@@ -176,6 +175,11 @@ export class AIPresentationCoachStack extends cdk.Stack {
       ],
     });
 
+    // Register the CloudWatch role at the API Gateway account level (required before any stage can log)
+    const apiGatewayAccount = new apigateway.CfnAccount(this, 'ApiGatewayAccount', {
+      cloudWatchRoleArn: apiGatewayLogRole.roleArn,
+    });
+
     const apiLogGroup = new cdk.aws_logs.LogGroup(this, 'ApiGatewayAccessLogs', {
       retention: cdk.aws_logs.RetentionDays.ONE_MONTH,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
@@ -195,6 +199,9 @@ export class AIPresentationCoachStack extends cdk.Stack {
         allowHeaders: ['Content-Type', 'Authorization'],
       },
     });
+
+    // Ensure the account-level CW role is set before the API stage deploys
+    apiGateway.deploymentStage.node.addDependency(apiGatewayAccount);
 
     // Cognito Authorizer for API Gateway
     const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'CognitoAuthorizer', {
@@ -387,9 +394,10 @@ export class AIPresentationCoachStack extends cdk.Stack {
       { id: 'AwsSolutions-APIG2', reason: 'Request validation is handled in Lambda handlers with detailed input validation and error responses.' },
     ]);
 
-    // AwsSolutions-COG2: MFA not enforced — this is a student-facing presentation tool, MFA would add friction
+    // AwsSolutions-COG2/COG3: MFA and advanced security not enforced — Cognito is on ESSENTIALS tier (PLUS required for threat protection), and MFA adds friction for students
     NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/UserPool/Resource', [
       { id: 'AwsSolutions-COG2', reason: 'MFA not required for this student-facing presentation tool to reduce onboarding friction. Strong password policy is enforced instead.' },
+      { id: 'AwsSolutions-COG3', reason: 'Cognito Threat Protection (AdvancedSecurityMode) requires the PLUS pricing tier. User Pool is on ESSENTIALS tier to minimize cost for this student-facing tool.' },
     ]);
 
     // AwsSolutions-APIG3: WAFv2 not attached — adds significant cost for a non-production student tool
