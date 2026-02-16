@@ -134,7 +134,8 @@ export class AIPresentationCoachStack extends cdk.Stack {
       description: 'Role assumed by authenticated Cognito Identity Pool users',
     });
 
-    // Grant Amazon Transcribe real-time streaming permissions (scoped to account)
+    // Grant Amazon Transcribe real-time streaming permissions
+    // Transcribe streaming APIs do not support resource-level ARNs — wildcard is required
     authenticatedRole.addToPolicy(
       new iam.PolicyStatement({
         effect: iam.Effect.ALLOW,
@@ -142,7 +143,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
           'transcribe:StartStreamTranscriptionWebSocket',
           'transcribe:StartStreamTranscription',
         ],
-        resources: [`arn:aws:transcribe:${this.region}:${this.account}:*`],
+        resources: ['*'],
       }),
     );
 
@@ -402,9 +403,9 @@ export class AIPresentationCoachStack extends cdk.Stack {
       { id: 'AwsSolutions-IAM5', reason: 'Resource wildcard is scoped to objects within the uploads bucket via CDK grantReadWrite().', appliesTo: ['Resource::<AIPresentationCoachPresentationsVideos1B0D776E.Arn>/*'] },
     ]);
 
-    // AwsSolutions-IAM5: Transcribe streaming APIs do not support resource-level permissions; wildcard is required, scoped to account/region
+    // AwsSolutions-IAM5: Transcribe streaming APIs do not support resource-level permissions; wildcard is required
     NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/CognitoAuthenticatedRole/DefaultPolicy/Resource', [
-      { id: 'AwsSolutions-IAM5', reason: 'Transcribe streaming APIs (StartStreamTranscription*) do not support resource-level ARNs. Wildcard is required but scoped to account and region.', appliesTo: [`Resource::arn:aws:transcribe:<AWS::Region>:<AWS::AccountId>:*`] },
+      { id: 'AwsSolutions-IAM5', reason: 'Transcribe streaming APIs (StartStreamTranscription*) do not support resource-level ARNs. AWS requires Resource: * for these actions.', appliesTo: ['Resource::*'] },
     ]);
 
     // AwsSolutions-APIG2: Request validation handled in Lambda handlers with detailed input checks
