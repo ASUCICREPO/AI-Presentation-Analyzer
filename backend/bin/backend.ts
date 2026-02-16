@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib';
+import { Aspects } from 'aws-cdk-lib';
+import { AwsSolutionsChecks } from 'cdk-nag';
 import { AIPresentationCoachStack } from '../lib/backend-stack';
 
 const app = new cdk.App();
@@ -19,3 +21,6 @@ new AIPresentationCoachStack(app, 'AIPresentationCoachStack', {
   /* For more information, see https://docs.aws.amazon.com/cdk/latest/guide/environments.html */
   
 });
+
+// Security scanning — validate CDK code against AWS best practices
+Aspects.of(app).add(new AwsSolutionsChecks({ verbose: true }));

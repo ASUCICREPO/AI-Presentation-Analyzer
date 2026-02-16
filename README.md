@@ -114,7 +114,7 @@ For developers looking to extend or modify this project, see the [Modification G
 
 1. **backend/** - Contains all backend infrastructure and serverless functions
    - `bin/` - CDK app entry point
-   - `lambda/` - AWS Lambda function handlers
+   - `lambda/` - AWS Lambda function handlers (kebab-case dirs, each with `index.py` entry point)
    - `lib/` - CDK stack definitions
    - `agent/` - [INSERT_AGENT_DESCRIPTION]
 

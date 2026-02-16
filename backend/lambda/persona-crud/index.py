@@ -13,7 +13,7 @@ when analyzing presentation recordings.
 
 All cutomizations made to the personas for specific user sessions are stores in that user's 
 own session-specific data in S3, and not in this Dynamo DB table. 
-Check out the s3_presigned_url_gen Lambda for more details on how session-specific data is stored in S3.
+Check out the s3-presigned-url-gen Lambda for more details on how session-specific data is stored in S3.
 '''
 
 
