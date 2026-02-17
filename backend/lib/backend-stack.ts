@@ -1,4 +1,5 @@
 import { Construct } from 'constructs';
+import * as os from 'os';
 import * as path from 'path';
 import * as cdk from 'aws-cdk-lib';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
@@ -10,6 +11,15 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as bedrock from 'aws-cdk-lib/aws-bedrock';
 import { NagSuppressions } from 'cdk-nag';
+
+// ── Detect host architecture and map to Lambda architecture ─────────
+const HOST_ARCH = os.arch(); // 'arm64' on Apple Silicon, 'x64' on Intel
+const LAMBDA_ARCHITECTURE = HOST_ARCH === 'arm64'
+  ? lambda.Architecture.ARM_64
+  : lambda.Architecture.X86_64;
+const BUNDLING_PLATFORM = HOST_ARCH === 'arm64'
+  ? 'linux/arm64'
+  : 'linux/amd64';
 
 
 export interface AIPresentationCoachStackProps extends cdk.StackProps {
@@ -59,6 +69,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // ──────────────────────────────────────────────
     const s3UrlIssuerLambda = new lambda.Function(this, `s3UrlIssuerLambda${resourceSuffix}`, {
       runtime: lambda.Runtime.PYTHON_3_13,
+      architecture: LAMBDA_ARCHITECTURE,
       handler: 'index.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 's3-presigned-url-gen')),
       timeout: cdk.Duration.seconds(20),
@@ -263,6 +274,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // Persona CRUD Lambda
     const personaCrudLambda = new lambda.Function(this, `PersonaCrudLambda${resourceSuffix}`, {
       runtime: lambda.Runtime.PYTHON_3_13,
+      architecture: LAMBDA_ARCHITECTURE,
       handler: 'index.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'persona-crud')),
       timeout: cdk.Duration.seconds(20),
@@ -350,10 +362,12 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // WebSocket Authorizer Lambda
     const wsAuthorizerLambda = new lambda.Function(this, `WsAuthorizerLambda${resourceSuffix}`, {
       runtime: lambda.Runtime.PYTHON_3_13,
+      architecture: LAMBDA_ARCHITECTURE,
       handler: 'index.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'ws-authorizer'), {
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'live-qa', 'authorizer'), {
         bundling: {
           image: lambda.Runtime.PYTHON_3_13.bundlingImage,
+          platform: BUNDLING_PLATFORM,
           command: [
             'bash', '-c',
             'pip install -r requirements.txt -t /asset-output && cp -au . /asset-output',
@@ -391,8 +405,9 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // WebSocket Connection Manager Lambda
     const wsConnectionManagerLambda = new lambda.Function(this, `WsConnectionManagerLambda${resourceSuffix}`, {
       runtime: lambda.Runtime.PYTHON_3_13,
+      architecture: LAMBDA_ARCHITECTURE,
       handler: 'index.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'ws-connection-manager')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'live-qa', 'connection-manager')),
       timeout: cdk.Duration.seconds(20),
       role: new iam.Role(this, 'WsConnectionManagerLambdaRole', {
         assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
@@ -413,9 +428,20 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // WebSocket Message Handler Lambda
     const wsMessageHandlerLambda = new lambda.Function(this, `WsMessageHandlerLambda${resourceSuffix}`, {
       runtime: lambda.Runtime.PYTHON_3_13,
+      architecture: LAMBDA_ARCHITECTURE,
       handler: 'index.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'ws-message-handler')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'live-qa', 'message-handler'), {
+        bundling: {
+          image: lambda.Runtime.PYTHON_3_13.bundlingImage,
+          platform: BUNDLING_PLATFORM,
+          command: [
+            'bash', '-c',
+            'pip install -r requirements.txt -t /asset-output && cp -au . /asset-output',
+          ],
+        },
+      }),
       timeout: cdk.Duration.seconds(900), // 15 minutes
+      memorySize: 256,
       role: new iam.Role(this, 'WsMessageHandlerLambdaRole', {
         assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
         managedPolicies: [
@@ -427,7 +453,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
         'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
         'WEBSOCKET_API_ENDPOINT': `https://${webSocketApi.ref}.execute-api.${this.region}.amazonaws.com/prod`,
         'BEDROCK_MODEL_ID': 'amazon.nova-2-sonic-v1:0',
-        'MAX_TOKENS': '2048',
+        'MAX_TOKENS': '1024',
         'DEFAULT_VOICE_ID': 'matthew',
         'MAX_QUESTIONS': '10',
         'MAX_DURATION_SECONDS': '600',
@@ -441,7 +467,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // Grant Bedrock streaming permissions
     wsMessageHandlerLambda.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
-      actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
+      actions: ['bedrock:InvokeModel'],
       resources: ['arn:aws:bedrock:*::foundation-model/amazon.nova-2-sonic-v1:0'],
     }));
 
