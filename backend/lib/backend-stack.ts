@@ -351,7 +351,15 @@ export class AIPresentationCoachStack extends cdk.Stack {
     const wsAuthorizerLambda = new lambda.Function(this, `WsAuthorizerLambda${resourceSuffix}`, {
       runtime: lambda.Runtime.PYTHON_3_13,
       handler: 'index.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'ws-authorizer')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'ws-authorizer'), {
+        bundling: {
+          image: lambda.Runtime.PYTHON_3_13.bundlingImage,
+          command: [
+            'bash', '-c',
+            'pip install -r requirements.txt -t /asset-output && cp -au . /asset-output',
+          ],
+        },
+      }),
       timeout: cdk.Duration.seconds(10),
       role: new iam.Role(this, 'WsAuthorizerLambdaRole', {
         assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
@@ -361,6 +369,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
       }),
       environment: {
         'USER_POOL_ID': userPool.userPoolId,
+        'USER_POOL_CLIENT_ID': userPoolClient.userPoolClientId,
       },
     });
 

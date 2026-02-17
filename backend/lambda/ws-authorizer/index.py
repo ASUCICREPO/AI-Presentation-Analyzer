@@ -7,6 +7,7 @@ import requests
 
 # ─── Environment variables ────────────────────────────────────────────
 USER_POOL_ID = os.environ.get('USER_POOL_ID')
+USER_POOL_CLIENT_ID = os.environ.get('USER_POOL_CLIENT_ID')
 REGION = os.environ.get('AWS_REGION', 'us-east-1')
 
 if not USER_POOL_ID:
@@ -75,7 +76,7 @@ def verify_jwt_token(token):
             token,
             rsa_key,
             algorithms=['RS256'],
-            audience=None,  # Can add client ID verification if needed
+            audience=USER_POOL_CLIENT_ID,
             issuer=issuer
         )
 
