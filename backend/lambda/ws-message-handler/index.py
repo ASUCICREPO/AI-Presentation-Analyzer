@@ -10,7 +10,7 @@ from datetime import datetime
 CONNECTIONS_TABLE_NAME = os.environ.get('CONNECTIONS_TABLE_NAME')
 UPLOADS_BUCKET = os.environ.get('UPLOADS_BUCKET')
 WEBSOCKET_API_ENDPOINT = os.environ.get('WEBSOCKET_API_ENDPOINT')
-BEDROCK_MODEL_ID = os.environ.get('BEDROCK_MODEL_ID', 'us.amazon.nova-sonic-v2:0')
+BEDROCK_MODEL_ID = os.environ.get('BEDROCK_MODEL_ID', 'amazon.nova-2-sonic-v1:0')
 MAX_TOKENS = int(os.environ.get('MAX_TOKENS', '2048'))
 DEFAULT_VOICE_ID = os.environ.get('DEFAULT_VOICE_ID', 'matthew')
 MAX_QUESTIONS = int(os.environ.get('MAX_QUESTIONS', '10'))

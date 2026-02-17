@@ -426,7 +426,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
         'CONNECTIONS_TABLE_NAME': liveQAConnectionsTable.tableName,
         'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
         'WEBSOCKET_API_ENDPOINT': `https://${webSocketApi.ref}.execute-api.${this.region}.amazonaws.com/prod`,
-        'BEDROCK_MODEL_ID': 'us.amazon.nova-sonic-v2:0',
+        'BEDROCK_MODEL_ID': 'amazon.nova-2-sonic-v1:0',
         'MAX_TOKENS': '2048',
         'DEFAULT_VOICE_ID': 'matthew',
         'MAX_QUESTIONS': '10',
@@ -442,7 +442,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     wsMessageHandlerLambda.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
-      resources: ['arn:aws:bedrock:*::foundation-model/us.amazon.nova-sonic-v2:0'],
+      resources: ['arn:aws:bedrock:*::foundation-model/amazon.nova-2-sonic-v1:0'],
     }));
 
     // Grant WebSocket ManageConnections permissions
