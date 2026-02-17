@@ -2,15 +2,16 @@
 
 import React from 'react';
 import { SessionAnalytics, WindowAnalytics } from '../hooks/useSessionAnalytics';
-import { Download, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Download, TrendingUp, TrendingDown, Minus, MessageCircle } from 'lucide-react';
 
 interface ReviewAnalyticsProps {
     sessionData: SessionAnalytics;
     onDownload: () => void;
     onBackToStart: () => void;
+    onStartQA?: () => void;
 }
 
-export default function ReviewAnalytics({ sessionData, onDownload, onBackToStart }: ReviewAnalyticsProps) {
+export default function ReviewAnalytics({ sessionData, onDownload, onBackToStart, onStartQA }: ReviewAnalyticsProps) {
     const { windows } = sessionData;
 
     // Calculate overall statistics
@@ -70,6 +71,15 @@ export default function ReviewAnalytics({ sessionData, onDownload, onBackToStart
                     </p>
                 </div>
                 <div className="flex gap-3">
+                    {onStartQA && (
+                        <button
+                            onClick={onStartQA}
+                            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 transition-colors font-medium shadow-md"
+                        >
+                            <MessageCircle className="w-4 h-4" />
+                            Start Q&A Practice
+                        </button>
+                    )}
                     <button
                         onClick={onDownload}
                         className="flex items-center gap-2 rounded-lg bg-maroon px-4 py-2 text-white hover:bg-maroon/90 transition-colors"

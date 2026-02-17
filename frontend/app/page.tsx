@@ -7,6 +7,7 @@ import PersonaSelection from './components/PersonaSelection';
 import UploadContent from './components/UploadContent';
 import PracticeSession from './components/PracticeSession';
 import ReviewAnalytics from './components/ReviewAnalytics';
+import QASession from './components/QASession';
 import ConfirmationModal from './components/ConfirmationModal';
 import LoginPage from './components/LoginPage';
 import SignUpPage from './components/SignUpPage';
@@ -18,7 +19,7 @@ import { Loader2 } from 'lucide-react';
 type AuthView = 'login' | 'signup' | 'confirm';
 
 export default function Home() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, getIdToken, user } = useAuth();
 
   // Auth page state
   const [authView, setAuthView] = useState<AuthView>('login');
@@ -37,6 +38,10 @@ export default function Home() {
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [pendingStep, setPendingStep] = useState<number | null>(null);
+
+  // Q&A Session State
+  const [showQASession, setShowQASession] = useState(false);
+  const [qaIdToken, setQaIdToken] = useState<string>('');
 
   // --- Auth navigation ---
   const handleSwitchToSignUp = () => setAuthView('signup');
@@ -137,6 +142,22 @@ export default function Home() {
     setPendingStep(null);
   };
 
+  const handleStartQA = async () => {
+    try {
+      const token = await getIdToken();
+      setQaIdToken(token);
+      setShowQASession(true);
+    } catch (error) {
+      console.error('[Home] Failed to get ID token for Q&A session:', error);
+      alert('Failed to start Q&A session. Please try again.');
+    }
+  };
+
+  const handleCloseQASession = () => {
+    setShowQASession(false);
+    setQaIdToken('');
+  };
+
   // --- Loading screen ---
   if (isLoading) {
     return (
@@ -213,6 +234,18 @@ export default function Home() {
           sessionData={sessionData}
           onDownload={handleDownloadSessionData}
           onBackToStart={handleBackToStart}
+          onStartQA={handleStartQA}
+        />
+      )}
+
+      {/* Q&A Session Modal */}
+      {showQASession && sessionData && user && (
+        <QASession
+          sessionId={sessionData.sessionId}
+          userId={user.username}
+          sessionDate={new Date(sessionData.startTime).toISOString().split('T')[0]}
+          idToken={qaIdToken}
+          onClose={handleCloseQASession}
         />
       )}
 

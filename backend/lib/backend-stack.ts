@@ -523,12 +523,12 @@ export class AIPresentationCoachStack extends cdk.Stack {
         // MEDIUM: Moderately permissive — blocks harmful content but allows edge cases
         //         (recommended if students may present on political, explicit, or sensitive topics).
         filtersConfig: [
-          { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
-          { type: 'INSULTS', inputStrength: 'HIGH', outputStrength: 'HIGH' },
-          { type: 'SEXUAL', inputStrength: 'HIGH', outputStrength: 'HIGH' },
-          { type: 'VIOLENCE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
-          { type: 'MISCONDUCT', inputStrength: 'HIGH', outputStrength: 'HIGH' },
-          { type: 'PROMPT_ATTACK', inputStrength: 'HIGH', outputStrength: 'NONE' },
+          { type: 'HATE', inputStrength: 'MEDIUM', outputStrength: 'MEDIUM' },
+          { type: 'INSULTS', inputStrength: 'MEDIUM', outputStrength: 'MEDIUM' },
+          { type: 'SEXUAL', inputStrength: 'MEDIUM', outputStrength: 'MEDIUM' },
+          { type: 'VIOLENCE', inputStrength: 'MEDIUM', outputStrength: 'MEDIUM' },
+          { type: 'MISCONDUCT', inputStrength: 'MEDIUM', outputStrength: 'MEDIUM' },
+          // { type: 'PROMPT_ATTACK', inputStrength: 'MEDIUM', outputStrength: 'NONE' },
         ],
       },
     });

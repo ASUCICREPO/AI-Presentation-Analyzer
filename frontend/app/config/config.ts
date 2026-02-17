@@ -18,6 +18,11 @@ export const cognitoConfig = {
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL!;
 
 // ---------------------------------------------------------------------------
+// WebSocket API (Live Q&A)
+// ---------------------------------------------------------------------------
+export const WEBSOCKET_API_URL = process.env.NEXT_PUBLIC_WEBSOCKET_API_URL!;
+
+// ---------------------------------------------------------------------------
 // Personas
 // ---------------------------------------------------------------------------
 export interface Persona {
@@ -228,4 +233,38 @@ export const AUDIO_ANALYSIS_CONFIG = {
     MAX_ENTRIES: 200,                // Cap stored transcript entries
     PARTIAL_EMIT_INTERVAL_MS: 150,   // Throttle partial transcript re-renders
   },
+};
+
+// ---------------------------------------------------------------------------
+// Live Q&A Session Configuration
+// ---------------------------------------------------------------------------
+export const QA_SESSION_CONFIG = {
+  // Session limits
+  MAX_QUESTIONS: 10,
+  MAX_DURATION_SEC: 600,  // 10 minutes
+
+  // Warning thresholds
+  QUESTION_WARNING_THRESHOLD: 8,  // Warn at 8 questions
+  TIME_WARNING_SEC: 540,  // Warn at 9 minutes
+
+  // Audio format (must match Bedrock Nova 2 Sonic requirements)
+  AUDIO: {
+    SAMPLE_RATE: 16000,  // Hz
+    SAMPLE_SIZE_BITS: 16,
+    CHANNELS: 1,  // Mono
+    CHUNK_SIZE_BYTES: 512,  // ~32ms chunks at 16kHz
+    ENCODING: 'base64' as const,
+  },
+
+  // Voice options (Amazon Polly voices)
+  AVAILABLE_VOICES: [
+    { id: 'matthew', label: 'Matthew (US Male)', description: 'Professional, clear US male voice' },
+    { id: 'tiffany', label: 'Tiffany (US Female)', description: 'Warm, friendly US female voice' },
+    { id: 'amy', label: 'Amy (UK Female)', description: 'British English female voice' },
+    { id: 'olivia', label: 'Olivia (US Female)', description: 'Energetic US female voice' },
+  ],
+  DEFAULT_VOICE_ID: 'matthew',
+
+  // Turn detection sensitivity
+  ENDPOINTING_SENSITIVITY: 'MEDIUM' as 'LOW' | 'MEDIUM' | 'HIGH',
 };
