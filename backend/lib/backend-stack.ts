@@ -362,8 +362,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // Grant Lambda read access to DynamoDB personas table
     personasTable.grantReadData(postMeetingAnalyticsLambda);
 
-    // Grant Lambda permission to invoke Bedrock Nova 2 Lite for feedback generation
-    // Grant Lambda permission to invoke any Bedrock model for easy switching
+    // Grant Lambda permission to invoke any Bedrock model via Converse API
     postMeetingAnalyticsLambda.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['bedrock:InvokeModel'],

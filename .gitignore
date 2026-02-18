@@ -14,7 +14,7 @@ node_modules
 .cursor
 # Testing
 /coverage
-
+response.json
 # Next.js
 .next/
 out/
