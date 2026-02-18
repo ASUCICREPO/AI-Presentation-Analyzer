@@ -307,11 +307,43 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // ──────────────────────────────────────────────
     // Post-Meeting Analytics Lambda
     // ──────────────────────────────────────────────
+
+    // Lambda layer with latest boto3 (required for Bedrock structured outputs / Converse API)
+    const boto3Layer = new lambda.LayerVersion(this, 'Boto3LatestLayer', {
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'layers', 'boto3-latest'), {
+        bundling: {
+          image: lambda.Runtime.PYTHON_3_13.bundlingImage,
+          command: [
+            'bash', '-c',
+            'pip install -r requirements.txt -t /asset-output/python && cp -au . /asset-output/',
+          ],
+          local: {
+            tryBundle(outputDir: string) {
+              try {
+                const { execSync } = require('child_process');
+                execSync('pip3 --version');
+                execSync(
+                  `pip3 install -r ${path.join(__dirname, '..', 'lambda', 'layers', 'boto3-latest', 'requirements.txt')} -t ${path.join(outputDir, 'python')}`,
+                  { stdio: 'inherit' },
+                );
+                return true;
+              } catch {
+                return false;
+              }
+            },
+          },
+        },
+      }),
+      compatibleRuntimes: [lambda.Runtime.PYTHON_3_13],
+      description: 'Latest boto3/botocore for Bedrock structured outputs support',
+    });
+
     const postMeetingAnalyticsLambda = new lambda.Function(this, 'PostMeetingAnalyticsLambda', {
       runtime: lambda.Runtime.PYTHON_3_13,
       handler: 'index.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'post-meeting-analytics')),
-      timeout: cdk.Duration.seconds(60),
+      timeout: cdk.Duration.seconds(120),
+      layers: [boto3Layer],
       role: new iam.Role(this, 'PostMeetingAnalyticsLambdaRole', {
         assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
         managedPolicies: [
