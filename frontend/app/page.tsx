@@ -12,6 +12,7 @@ import LoginPage from './components/LoginPage';
 import SignUpPage from './components/SignUpPage';
 import ConfirmSignUpPage from './components/ConfirmSignUpPage';
 import { SessionAnalytics } from './hooks/useSessionAnalytics';
+import { AIFeedbackResponse } from './services/api';
 import { generateSessionId } from './config/config';
 import { Loader2 } from 'lucide-react';
 
@@ -34,6 +35,7 @@ export default function Home() {
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string>(generateSessionId);
   const [sessionData, setSessionData] = useState<SessionAnalytics | null>(null);
+  const [aiFeedback, setAiFeedback] = useState<AIFeedbackResponse | null>(null);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -83,8 +85,9 @@ export default function Home() {
     window.scrollTo(0, 0);
   };
 
-  const handlePracticeComplete = (data: SessionAnalytics) => {
+  const handlePracticeComplete = (data: SessionAnalytics, feedback: AIFeedbackResponse | null) => {
     setSessionData(data);
+    setAiFeedback(feedback);
     setCurrentStep(4);
     window.scrollTo(0, 0);
   };
@@ -106,6 +109,7 @@ export default function Home() {
   const handleBackToStart = () => {
     setCurrentStep(1);
     setSessionData(null);
+    setAiFeedback(null);
     setSessionId(generateSessionId());
     setPdfUploaded(false);
     setUploadedFileName(null);
@@ -225,6 +229,7 @@ export default function Home() {
       {currentStep === 4 && sessionData && (
         <ReviewAnalytics
           sessionData={sessionData}
+          aiFeedback={aiFeedback}
           onDownload={handleDownloadSessionData}
           onBackToStart={handleBackToStart}
         />

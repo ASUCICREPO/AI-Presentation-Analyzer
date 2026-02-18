@@ -91,8 +91,100 @@ export function createAwsTranscribeProvider(
   let pcmCarry: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
   let callbacks: TranscriptionCallbacks | null = null;
   let lastPartialEmit = 0;
+  let mediaStream: MediaStream | null = null;
 
   const cfg = AUDIO_ANALYSIS_CONFIG.TRANSCRIPTION.AWS_TRANSCRIBE;
+
+  function teardownTranscribeSession() {
+    if (audioStream) {
+      audioStream.end();
+      audioStream = null;
+    }
+    if (workletNode) {
+      workletNode.port.postMessage('stop');
+      workletNode.disconnect();
+      workletNode = null;
+    }
+    if (audioCtx && audioCtx.state !== 'closed') {
+      audioCtx.close();
+      audioCtx = null;
+    }
+  }
+
+  async function startTranscribeSession() {
+    pcmCarry = new Uint8Array(0);
+
+    audioCtx = new AudioContext({ sampleRate: cfg.SAMPLE_RATE });
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume();
+    }
+
+    const source = audioCtx.createMediaStreamSource(mediaStream!);
+    await audioCtx.audioWorklet.addModule('/audio-capture-processor.js');
+    workletNode = new AudioWorkletNode(audioCtx, 'audio-capture-processor');
+    source.connect(workletNode);
+    workletNode.connect(audioCtx.destination);
+
+    const targetChunkBytes = Math.floor((cfg.SAMPLE_RATE * cfg.CHUNK_DURATION_MS) / 1000) * 2;
+    audioStream = createAudioStream(cfg.MAX_AUDIO_QUEUE_CHUNKS);
+
+    workletNode.port.onmessage = (e: MessageEvent<Float32Array>) => {
+      if (!active || paused) return;
+      const pcm = float32ToInt16(e.data);
+      pcmCarry = concatUint8(pcmCarry, pcm);
+
+      while (pcmCarry.length >= targetChunkBytes) {
+        const chunk = pcmCarry.slice(0, targetChunkBytes);
+        audioStream!.push(chunk);
+        pcmCarry = pcmCarry.slice(targetChunkBytes);
+      }
+    };
+
+    const idToken = await getIdToken();
+    const providerName = `cognito-idp.${cognitoConfig.region}.amazonaws.com/${cognitoConfig.userPoolId}`;
+
+    const client = new TranscribeStreamingClient({
+      region: cognitoConfig.region,
+      credentials: fromCognitoIdentityPool({
+        clientConfig: { region: cognitoConfig.region },
+        identityPoolId: cognitoConfig.identityPoolId,
+        logins: { [providerName]: idToken },
+      }),
+    });
+
+    const command = new StartStreamTranscriptionCommand({
+      LanguageCode: cfg.LANGUAGE_CODE,
+      MediaSampleRateHertz: cfg.SAMPLE_RATE,
+      MediaEncoding: cfg.MEDIA_ENCODING,
+      AudioStream: audioStream as AsyncIterable<{ AudioEvent: { AudioChunk: Uint8Array } }>,
+    });
+
+    const response = await client.send(command);
+
+    if (response.TranscriptResultStream) {
+      for await (const event of response.TranscriptResultStream) {
+        if (!active) break;
+        if (paused) continue;
+
+        const results = event.TranscriptEvent?.Transcript?.Results;
+        if (!results || results.length === 0) continue;
+
+        const result = results[0];
+        const text = result.Alternatives?.[0]?.Transcript ?? '';
+        const isFinal = !result.IsPartial;
+
+        if (isFinal && text.trim()) {
+          callbacks?.onFinalTranscript(text.trim());
+        } else {
+          const now = Date.now();
+          if (now - lastPartialEmit >= AUDIO_ANALYSIS_CONFIG.TRANSCRIPT.PARTIAL_EMIT_INTERVAL_MS) {
+            callbacks?.onPartialTranscript(text);
+            lastPartialEmit = now;
+          }
+        }
+      }
+    }
+  }
 
   return {
     name: 'AWS Transcribe',
@@ -101,124 +193,32 @@ export function createAwsTranscribeProvider(
       callbacks = cbs;
       active = true;
       paused = false;
-      pcmCarry = new Uint8Array(0);
       lastPartialEmit = 0;
+      mediaStream = stream;
 
-      // 1. AudioContext at the sample rate Transcribe requires (16 kHz)
-      audioCtx = new AudioContext({ sampleRate: cfg.SAMPLE_RATE });
-
-      // Ensure the context is running — browsers may create it in a
-      // "suspended" state, which prevents the AudioWorklet from processing.
-      if (audioCtx.state === 'suspended') {
-        await audioCtx.resume();
-      }
-
-      const source = audioCtx.createMediaStreamSource(stream);
-
-      await audioCtx.audioWorklet.addModule('/audio-capture-processor.js');
-      workletNode = new AudioWorkletNode(audioCtx, 'audio-capture-processor');
-      source.connect(workletNode);
-      workletNode.connect(audioCtx.destination);
-
-      // 2. Async iterable audio feed
-      const targetChunkBytes = Math.floor((cfg.SAMPLE_RATE * cfg.CHUNK_DURATION_MS) / 1000) * 2;
-      audioStream = createAudioStream(cfg.MAX_AUDIO_QUEUE_CHUNKS);
-
-      workletNode.port.onmessage = (e: MessageEvent<Float32Array>) => {
-        if (!active || paused) return;
-        const pcm = float32ToInt16(e.data);
-        pcmCarry = concatUint8(pcmCarry, pcm);
-
-        while (pcmCarry.length >= targetChunkBytes) {
-          const chunk = pcmCarry.slice(0, targetChunkBytes);
-          audioStream!.push(chunk);
-          pcmCarry = pcmCarry.slice(targetChunkBytes);
-        }
-      };
-
-      // 3. Obtain AWS credentials and start Transcribe
-      const idToken = await getIdToken();
-      const providerName = `cognito-idp.${cognitoConfig.region}.amazonaws.com/${cognitoConfig.userPoolId}`;
-
-      const client = new TranscribeStreamingClient({
-        region: cognitoConfig.region,
-        credentials: fromCognitoIdentityPool({
-          clientConfig: { region: cognitoConfig.region },
-          identityPoolId: cognitoConfig.identityPoolId,
-          logins: { [providerName]: idToken },
-        }),
-      });
-
-      const command = new StartStreamTranscriptionCommand({
-        LanguageCode: cfg.LANGUAGE_CODE,
-        MediaSampleRateHertz: cfg.SAMPLE_RATE,
-        MediaEncoding: cfg.MEDIA_ENCODING,
-        AudioStream: audioStream as AsyncIterable<{ AudioEvent: { AudioChunk: Uint8Array } }>,
-      });
-
-      const response = await client.send(command);
-
-      // 4. Consume transcript result stream
-      if (response.TranscriptResultStream) {
-        for await (const event of response.TranscriptResultStream) {
-          if (!active) break;
-          if (paused) continue;
-
-          const results = event.TranscriptEvent?.Transcript?.Results;
-          if (!results || results.length === 0) continue;
-
-          const result = results[0];
-          const text = result.Alternatives?.[0]?.Transcript ?? '';
-          const isFinal = !result.IsPartial;
-
-          if (isFinal && text.trim()) {
-            callbacks?.onFinalTranscript(text.trim());
-          } else {
-            const now = Date.now();
-            if (now - lastPartialEmit >= AUDIO_ANALYSIS_CONFIG.TRANSCRIPT.PARTIAL_EMIT_INTERVAL_MS) {
-              callbacks?.onPartialTranscript(text);
-              lastPartialEmit = now;
-            }
-          }
-        }
-      }
+      await startTranscribeSession();
     },
 
     pause() {
       paused = true;
-      if (audioCtx && audioCtx.state === 'running') {
-        audioCtx.suspend();
-      }
+      teardownTranscribeSession();
     },
 
     resume() {
+      if (!active || !mediaStream) return;
       paused = false;
-      if (audioCtx && audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
+      startTranscribeSession().catch((err) => {
+        console.error('Failed to restart Transcribe session on resume:', err);
+        callbacks?.onError('Failed to resume transcription');
+      });
     },
 
     stop() {
       active = false;
       paused = false;
       pcmCarry = new Uint8Array(0);
-
-      if (workletNode) {
-        workletNode.port.postMessage('stop');
-        workletNode.disconnect();
-        workletNode = null;
-      }
-
-      if (audioStream) {
-        audioStream.end();
-        audioStream = null;
-      }
-
-      if (audioCtx && audioCtx.state !== 'closed') {
-        audioCtx.close();
-        audioCtx = null;
-      }
-
+      mediaStream = null;
+      teardownTranscribeSession();
       callbacks = null;
     },
   };

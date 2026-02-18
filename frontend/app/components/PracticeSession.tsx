@@ -8,7 +8,7 @@ import { useSessionAnalytics, SessionAnalytics } from '../hooks/useSessionAnalyt
 import { useVideoRecording } from '../hooks/useVideoRecording';
 import { useDetailedMetrics } from '../hooks/useDetailedMetrics';
 import { useSessionManifest } from '../hooks/useSessionManifest';
-import { uploadJsonToS3 } from '../services/api';
+import { uploadJsonToS3, pollAnalytics, AIFeedbackResponse } from '../services/api';
 import { ANALYSIS_CONFIG, PRESENTATION_LIMITS, DEFAULT_TIME_LIMIT_SEC } from '../config/config';
 
 import { toast } from 'sonner';
@@ -20,21 +20,14 @@ import CalibrationPanel from './practice/CalibrationPanel';
 import RealTimeFeedbackPanel from './practice/RealTimeFeedbackPanel';
 import TranscriptionPanel from './practice/TranscriptionPanel';
 
-// ─── Small helper for the processing screen ──────────────────────────
-function ProcessingStep({ label }: { label: string }) {
-  return (
-    <div className="flex items-center gap-3 rounded-lg bg-gray-50 px-4 py-2.5 2xl:px-5 2xl:py-3">
-      <svg
-        className="h-4 w-4 flex-shrink-0 animate-spin text-maroon-500 2xl:h-5 2xl:w-5"
-        viewBox="0 0 16 16"
-        fill="none"
-      >
-        <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="2" strokeDasharray="10 20" />
-      </svg>
-      <span className="text-sm text-gray-600 font-sans 2xl:text-base">{label}</span>
-    </div>
-  );
-}
+// ─── Processing phase labels ──────────────────────────────────────────
+const PROCESSING_PHASES = [
+  'Uploading your session...',
+  'Analyzing your presentation...',
+  'Almost there...',
+] as const;
+
+type ProcessingPhase = 0 | 1 | 2;
 
 interface PracticeSessionProps {
   personaTitle: string;
@@ -44,7 +37,7 @@ interface PracticeSessionProps {
   hasPresentationPdf?: boolean;
   hasPersonaCustomization?: boolean;
   onBack: () => void;
-  onComplete: (sessionData: SessionAnalytics) => void;
+  onComplete: (sessionData: SessionAnalytics, aiFeedback: AIFeedbackResponse | null) => void;
   exitSessionRef?: MutableRefObject<(() => void) | null>;
 }
 
@@ -57,6 +50,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
   const [cameraActive, setCameraActive] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingPhase, setProcessingPhase] = useState<ProcessingPhase>(0);
 
   // MediaPipe & Tracking State
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -577,33 +571,27 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
     setIsRecording(false);
     setIsPaused(false);
     setIsProcessing(true);
+    setProcessingPhase(0);
     stopAnalysis();
     vocalVariety.stopAnalysis();
 
-    // Finalize the last window if there's data
     sessionAnalytics.finalizeWindow();
-
-    // Get session data and pass to parent
     const sessionData = sessionAnalytics.getSessionData();
 
-    // Stop video recording (completes multipart upload)
-    try {
-      await videoRecording.stop();
-    } catch (err) {
-      console.error('[PracticeSession] Error stopping video recording:', err);
-    }
+    // Fire-and-forget video upload — analytics don't depend on video
+    videoRecording.stop().catch((err) =>
+      console.error('[PracticeSession] Error stopping video recording:', err),
+    );
 
-    // Upload all session data to S3 in parallel
+    // Upload required JSON files in parallel
     const uploadPromises: Promise<void>[] = [];
 
-    // 1. Session analytics (30-second window summaries)
     uploadPromises.push(
       uploadJsonToS3('session_analytics', sessionId, sessionData).catch((err) =>
         console.error('[PracticeSession] Failed to upload session analytics:', err),
       ),
     );
 
-    // 2. Transcript
     if (transcripts.length > 0) {
       uploadPromises.push(
         uploadJsonToS3('transcript', sessionId, {
@@ -615,7 +603,6 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
       );
     }
 
-    // 3. Detailed per-second metrics
     const detailedData = detailedMetrics.getData();
     if (detailedData.snapshots.length > 0) {
       uploadPromises.push(
@@ -625,15 +612,26 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
       );
     }
 
-    // Wait for all uploads to finish (with error tolerance)
     await Promise.allSettled(uploadPromises);
-
-    // Finalize session manifest (status → "completed")
     await manifest.complete(timer);
+
+    // Kick off AI analytics
+    setProcessingPhase(1);
+
+    const almostThereTimer = setTimeout(() => setProcessingPhase(2), 15_000);
+
+    let aiFeedback: AIFeedbackResponse | null = null;
+    try {
+      aiFeedback = await pollAnalytics(sessionId);
+    } catch (err) {
+      console.error('[PracticeSession] AI analytics failed:', err);
+    } finally {
+      clearTimeout(almostThereTimer);
+    }
 
     stopCamera();
     setIsProcessing(false);
-    onComplete(sessionData);
+    onComplete(sessionData, aiFeedback);
   };
 
   // Map audio metrics to the shape RealTimeFeedbackPanel expects
@@ -685,18 +683,13 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
           <h2 className="text-xl font-bold text-gray-900 font-serif italic sm:text-2xl 2xl:text-3xl">
             Processing Your Session
           </h2>
-          <p className="mt-3 text-sm text-gray-500 font-sans leading-relaxed sm:text-base 2xl:text-lg">
-            Hold tight — we&apos;re uploading your recording and analytics data.
-            This usually takes just a few seconds.
-          </p>
-
-          {/* Progress indicators */}
-          <div className="mt-8 space-y-3 text-left">
-            <ProcessingStep label="Saving video recording" />
-            <ProcessingStep label="Uploading session analytics" />
-            <ProcessingStep label="Uploading transcript" />
-            <ProcessingStep label="Uploading detailed metrics" />
-            <ProcessingStep label="Finalizing session" />
+          <div className="relative mt-3 h-8 overflow-hidden">
+            <p
+              key={processingPhase}
+              className="animate-fade-in text-sm text-gray-500 font-sans leading-relaxed sm:text-base 2xl:text-lg"
+            >
+              {PROCESSING_PHASES[processingPhase]}
+            </p>
           </div>
 
           <p className="mt-8 text-xs text-gray-400 font-sans 2xl:text-sm">

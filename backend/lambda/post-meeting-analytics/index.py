@@ -19,6 +19,7 @@ STALE_THRESHOLD_SEC = 120
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type,Authorization",
+    "Access-Control-Allow-Methods": "GET,OPTIONS",
 }
 
 
@@ -42,8 +43,8 @@ def decimal_to_float(obj):
     return obj
 
 
-def s3_key(user_sub, utc_date, session_id, filename):
-    return f"{user_sub}/{utc_date}/{session_id}/{filename}"
+def s3_key(user_sub, session_id, filename):
+    return f"{user_sub}/{session_id}/{filename}"
 
 
 def read_s3_text(key):
@@ -256,15 +257,12 @@ def lambda_handler(event, context):
 
         params = event.get('queryStringParameters') or {}
         session_id = params.get('session_id')
-        utc_date = params.get('timestamp')
 
         if not session_id:
             return api_response(400, {"error": "session_id is required"})
-        if not utc_date:
-            return api_response(400, {"error": "timestamp (YYYY-MM-DD) is required"})
 
-        feedback_key = s3_key(user_sub, utc_date, session_id, FEEDBACK_FILE)
-        status_key = s3_key(user_sub, utc_date, session_id, STATUS_FILE)
+        feedback_key = s3_key(user_sub, session_id, FEEDBACK_FILE)
+        status_key = s3_key(user_sub, session_id, STATUS_FILE)
 
         # ── 1. Cache hit — return immediately ────────────────────────────
         cached = read_s3_text(feedback_key)
@@ -305,7 +303,7 @@ def lambda_handler(event, context):
         print(f"Generating AI feedback for session {session_id}")
 
         try:
-            prefix = s3_key(user_sub, utc_date, session_id, '')
+            prefix = s3_key(user_sub, session_id, '')
 
             # Manifest
             manifest_str = read_s3_text(f"{prefix}manifest.json")
