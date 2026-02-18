@@ -12,7 +12,7 @@ bedrock_runtime = boto3.client('bedrock-runtime')
 # Configuration
 BUCKET_NAME = os.environ.get('UPLOADS_BUCKET')
 PERSONA_TABLE_NAME = os.environ.get('PERSONA_TABLE_NAME')
-BEDROCK_MODEL_ID = 'us.amazon.nova-lite-v1:0'
+BEDROCK_MODEL_ID = 'global.anthropic.claude-sonnet-4-6'
 
 
 def get_user_sub_from_token(event):
@@ -103,26 +103,26 @@ def get_persona_from_dynamodb(persona_identifier):
     return None
 
 
-def generate_feedback_with_bedrock(persona, transcript, persona_customization=None, pdf_bytes=None):
-    """Generate personalized feedback using Amazon Bedrock Nova 2 Lite."""
-    
+
+def generate_feedback_with_bedrock(persona, transcript, persona_customization=None, pdf_bytes=None, session_analytics=None):
+    """Generate personalized feedback using Amazon Bedrock with structured outputs."""
+
     # Extract persona details from DynamoDB
     persona_name = persona.get('name', persona.get('title', 'a professional evaluator'))
     description = persona.get('description', '')
     communication_style = persona.get('communicationStyle', '')
     attention_span = persona.get('attentionSpan', '')
     expertise = persona.get('expertise', '')
-    
+
     # Handle keyPriorities - could be a list or DynamoDB list format
     key_priorities = persona.get('keyPriorities', [])
     if isinstance(key_priorities, list):
         if key_priorities and isinstance(key_priorities[0], dict) and 'S' in key_priorities[0]:
-            # DynamoDB format: [{"S": "value"}]
             key_priorities = [item['S'] for item in key_priorities]
         priorities_text = ', '.join(key_priorities)
     else:
         priorities_text = str(key_priorities)
-    
+
     # Build the prompt with all available context
     prompt_parts = [
         f"You are providing post-presentation feedback as a {persona_name}.",
@@ -135,97 +135,187 @@ def generate_feedback_with_bedrock(persona, transcript, persona_customization=No
         f"- Expertise: {expertise}",
         f"- Key Priorities: {priorities_text}",
     ]
-    
-    # Add custom persona instructions if available
+
     if persona_customization:
         prompt_parts.extend([
             "",
             "Additional Custom Instructions:",
             persona_customization,
         ])
-    
+
     prompt_parts.extend([
         "",
         "Presentation Transcript (with timestamps):",
         transcript if transcript else 'No transcript available',
     ])
-    
+
+    # Add session analytics metrics if available
+    if session_analytics:
+        final_avg = session_analytics.get('finalAverage', {})
+        windows = session_analytics.get('windows', [])
+
+        prompt_parts.extend([
+            "",
+            "Session Delivery Metrics (captured in 30-second windows):",
+            f"- Overall Speaking Pace: {final_avg.get('speakingPace', 'N/A')} words per minute",
+            f"- Overall Volume Level: {final_avg.get('volumeLevel', 'N/A')}%",
+            f"- Overall Eye Contact Score: {final_avg.get('eyeContactScore', 'N/A')}%",
+            f"- Total Filler Words: {final_avg.get('totalFillerWords', 'N/A')}",
+            f"- Total Pauses: {final_avg.get('totalPauses', 'N/A')}",
+            f"- Number of 30-second Windows: {final_avg.get('totalWindows', len(windows))}",
+        ])
+
+        if windows:
+            prompt_parts.append("")
+            prompt_parts.append("Per-Window Breakdown:")
+            for w in windows:
+                pace = w.get('speakingPace', {})
+                volume = w.get('volumeLevel', {})
+                prompt_parts.append(
+                    f"  Window {w.get('windowNumber', '?')} ({w.get('timestamp', '')}):"
+                    f" Pace={pace.get('average', 'N/A')}wpm (SD:{pace.get('standardDeviation', 'N/A')}),"
+                    f" Volume={volume.get('average', 'N/A')}% (SD:{volume.get('standardDeviation', 'N/A')}),"
+                    f" Eye Contact={w.get('eyeContactScore', 'N/A')}%,"
+                    f" Fillers={w.get('fillerWords', 0)}, Pauses={w.get('pauses', 0)}"
+                )
+
     prompt_parts.extend([
         "",
-        f"Based on your role as {persona_name}, the transcript, and the presentation materials (if PDF is provided), provide detailed improvement feedback with:",
+        f"Based on your role as {persona_name}, the transcript, the delivery metrics, and the presentation materials (if PDF is provided), provide structured feedback.",
         "",
-        "1. Overall Performance Assessment (2-3 sentences)",
-        f"   - Evaluate based on your communication style: {communication_style}",
+        "For keyRecommendations: provide 4-6 specific, actionable recommendations covering content, delivery, and persona-specific improvements. Each recommendation should have a short title and a detailed description with concrete examples from the transcript.",
         "",
-        "2. Content Strengths (2-3 specific points)",
-        "   - Reference specific parts of the transcript",
-        "   - Highlight what worked well for this audience",
-        "",
-        f"3. Areas for Improvement (3-4 specific actionable points focused on: {priorities_text})",
-        "   - Provide concrete examples from the transcript",
-        "   - Give specific recommendations",
-        "",
-        "4. Persona-Specific Feedback",
-        f"   - How well did they address your expertise in {expertise}?",
-        f"   - Did they match your attention span of {attention_span}?",
-        f"   - Were your key priorities ({priorities_text}) addressed?",
+        "For performanceSummary: provide an overall assessment (2-3 sentences), list 2-3 content strengths with transcript references, and give delivery feedback on pace, volume, eye contact, filler words, and pauses based on the session metrics.",
         "",
         f"Use a {communication_style} tone throughout your feedback.",
         "Be constructive and encouraging while being honest about areas needing work."
     ])
-    
+
     prompt = "\n".join(prompt_parts)
-    
+
+    # Define the structured output schema
+    feedback_schema = {
+        "type": "object",
+        "properties": {
+            "keyRecommendations": {
+                "type": "array",
+                "description": "Specific, actionable recommendations for improvement",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {
+                            "type": "string",
+                            "description": "Short title for the recommendation"
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Detailed recommendation with concrete examples"
+                        }
+                    },
+                    "required": ["title", "description"],
+                    "additionalProperties": False
+                }
+            },
+            "performanceSummary": {
+                "type": "object",
+                "description": "Overall performance assessment and delivery feedback",
+                "properties": {
+                    "overallAssessment": {
+                        "type": "string",
+                        "description": "2-3 sentence overall performance assessment"
+                    },
+                    "contentStrengths": {
+                        "type": "array",
+                        "description": "Key content strengths observed",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "deliveryFeedback": {
+                        "type": "object",
+                        "description": "Feedback on delivery metrics",
+                        "properties": {
+                            "speakingPace": {"type": "string", "description": "Assessment of speaking pace"},
+                            "volume": {"type": "string", "description": "Assessment of volume consistency"},
+                            "eyeContact": {"type": "string", "description": "Assessment of eye contact"},
+                            "fillerWords": {"type": "string", "description": "Assessment of filler word usage"},
+                            "pauses": {"type": "string", "description": "Assessment of pause usage"}
+                        },
+                        "required": ["speakingPace", "volume", "eyeContact", "fillerWords", "pauses"],
+                        "additionalProperties": False
+                    }
+                },
+                "required": ["overallAssessment", "contentStrengths", "deliveryFeedback"],
+                "additionalProperties": False
+            }
+        },
+        "required": ["keyRecommendations", "performanceSummary"],
+        "additionalProperties": False
+    }
+
     try:
         # Prepare the message content
         message_content = [{'text': prompt}]
-        
+
         # Add PDF as document if available
         if pdf_bytes:
             try:
                 import base64
-                pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
                 message_content.append({
                     'document': {
                         'format': 'pdf',
-                        'name': 'presentation.pdf',
+                        'name': 'presentation',
                         'source': {
-                            'bytes': pdf_base64
+                            'bytes': pdf_bytes
                         }
                     }
                 })
                 print("PDF document added to Bedrock request")
             except Exception as e:
                 print(f"Warning: Could not add PDF to request: {str(e)}")
-        
-        # Call Bedrock Nova 2 Lite
-        request_body = {
-            'messages': [
+
+        print(f"Calling Bedrock with {len(message_content)} content items (structured output)")
+
+        response = bedrock_runtime.converse(
+            modelId=BEDROCK_MODEL_ID,
+            messages=[
                 {
                     'role': 'user',
                     'content': message_content
                 }
-            ]
-        }
-        
-        print(f"Calling Bedrock with {len(message_content)} content items")
-        
-        response = bedrock_runtime.invoke_model(
-            modelId=BEDROCK_MODEL_ID,
-            contentType='application/json',
-            accept='application/json',
-            body=json.dumps(request_body)
+            ],
+            inferenceConfig={
+                'maxTokens': 4096,
+            },
+            outputConfig={
+                'textFormat': {
+                    'type': 'json_schema',
+                    'structure': {
+                        'jsonSchema': {
+                            'schema': json.dumps(feedback_schema),
+                            'name': 'presentation_feedback',
+                            'description': 'Structured presentation feedback with recommendations and performance summary'
+                        }
+                    }
+                }
+            }
         )
-        
-        response_body = json.loads(response['body'].read())
-        feedback_text = response_body['output']['message']['content'][0]['text']
-        
-        return feedback_text
+
+        # Check stop reason for potential issues
+        stop_reason = response.get('stopReason', '')
+        if stop_reason == 'max_tokens':
+            print("Warning: Response was truncated due to max_tokens limit")
+
+        response_text = response['output']['message']['content'][0]['text']
+        feedback = json.loads(response_text)
+
+        return feedback
     except Exception as e:
         print(f"Error generating feedback with Bedrock: {str(e)}")
         import traceback
         traceback.print_exc()
-        return f"Error generating feedback: {str(e)}"
+        return {"keyRecommendations": [], "performanceSummary": {"overallAssessment": f"Error generating feedback: {str(e)}", "contentStrengths": [], "deliveryFeedback": {"speakingPace": "N/A", "volume": "N/A", "eyeContact": "N/A", "fillerWords": "N/A", "pauses": "N/A"}}}
+
 
 
 CORS_HEADERS = {
@@ -311,9 +401,19 @@ def lambda_handler(event, context):
         if manifest.get('hasPresentationPdf', False):
             pdf_bytes = get_s3_object_bytes(user_sub, utc_timestamp, session_id, 'presentation.pdf')
         
+        # 4b. Fetch session analytics (30-sec window metrics)
+        session_analytics = None
+        session_analytics_str = get_s3_object(user_sub, utc_timestamp, session_id, 'session_analytics.json')
+        if session_analytics_str:
+            try:
+                session_analytics = json.loads(session_analytics_str)
+                print(f"Session analytics loaded: {len(session_analytics.get('windows', []))} windows")
+            except json.JSONDecodeError:
+                print("Warning: Could not parse session_analytics.json")
+        
         # 5. Generate feedback using Bedrock
         print("Generating feedback with Bedrock Nova 2 Lite...")
-        feedback = generate_feedback_with_bedrock(persona, transcript, persona_customization, pdf_bytes)
+        feedback = generate_feedback_with_bedrock(persona, transcript, persona_customization, pdf_bytes, session_analytics)
         
         # 6. Build and save result
         analytics_result = {
@@ -323,12 +423,14 @@ def lambda_handler(event, context):
                 'title': persona.get('name'),
                 'description': persona.get('description')
             },
-            'feedback': feedback,
+            'keyRecommendations': feedback.get('keyRecommendations', []),
+            'performanceSummary': feedback.get('performanceSummary', {}),
             'generatedAt': manifest.get('endTime') or manifest.get('lastUpdated'),
             'includedFiles': {
                 'transcript': True,
                 'presentationPdf': pdf_bytes is not None,
-                'personaCustomization': persona_customization is not None
+                'personaCustomization': persona_customization is not None,
+                'sessionAnalytics': session_analytics is not None
             }
         }
         
