@@ -482,19 +482,32 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
   };
 
   const stopCamera = useCallback(() => {
+    // Stop all tracks via the ref (survives React unmount)
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+    // Also clear the video element's srcObject
     if (videoRef.current?.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream;
       stream.getTracks().forEach(track => track.stop());
       videoRef.current.srcObject = null;
     }
-    mediaStreamRef.current = null;
     setCameraActive(false);
     if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
   }, []);
 
+  // Full cleanup on unmount — stops camera, audio analysis, vocal variety,
+  // video recording, and aborts manifest so no media streams leak.
   useEffect(() => {
-    return () => stopCamera();
-  }, [stopCamera]);
+    return () => {
+      stopAnalysis();
+      vocalVariety.stopAnalysis();
+      videoRecording.abort();
+      stopCamera();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Start processing loop when camera and model are ready
   useEffect(() => {

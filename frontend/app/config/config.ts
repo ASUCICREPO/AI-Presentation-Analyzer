@@ -122,7 +122,7 @@ export const ANALYSIS_CONFIG = {
   // Toggle real-time feedback panel during practice sessions.
   // When false, the right-hand metrics panel is hidden and the camera
   // view expands to full width — analytics are still collected for S3.
-  SHOW_REALTIME_FEEDBACK: false,
+  SHOW_REALTIME_FEEDBACK: true,
 
   // Blendshape thresholds for gaze detection
   // Higher values require more extreme head/eye movement to trigger "looking away"
