@@ -9,6 +9,7 @@ interface CameraViewProps {
   isPaused: boolean;
   isCalibrating: boolean;
   permissionDenied: boolean;
+  showCalibrationControls?: boolean;
   onStartCamera: () => void;
   onStartRecording: () => void;
   onPauseRecording: () => void;
@@ -25,6 +26,7 @@ export default function CameraView({
   isPaused,
   isCalibrating,
   permissionDenied,
+  showCalibrationControls = true,
   onStartCamera,
   onStartRecording,
   onPauseRecording,
@@ -83,13 +85,15 @@ export default function CameraView({
             </svg>
             <h3 className="text-xl font-semibold text-white mb-2 font-serif">Ready to Practice?</h3>
             <p className="text-sm text-gray-400 mb-6 max-w-md text-center font-sans">
-              Enable your camera to start the calibration process. We&apos;ll check your lighting and positioning before recording.
+              {showCalibrationControls
+                ? "Enable your camera to start the calibration process. We'll check your lighting and positioning before recording."
+                : "Enable your camera and microphone to begin your practice session."}
             </p>
             <button 
               onClick={onStartCamera}
               className="rounded-full bg-maroon px-8 py-3 text-base font-medium text-white shadow-lg hover:bg-maroon-dark active:scale-95 transition-all font-sans"
             >
-              Turn On Camera & Calibrate
+              {showCalibrationControls ? 'Turn On Camera & Calibrate' : 'Turn On Camera'}
             </button>
             {permissionDenied && (
               <p className="mt-4 text-sm text-red-400 font-sans">
@@ -147,7 +151,7 @@ export default function CameraView({
       )}
       
       {/* Recalibrate Button */}
-      {cameraActive && !isCalibrating && !isRecording && (
+      {showCalibrationControls && cameraActive && !isCalibrating && !isRecording && (
          <div className="flex justify-center mt-2">
            <button 
              onClick={onReEnterCalibration}

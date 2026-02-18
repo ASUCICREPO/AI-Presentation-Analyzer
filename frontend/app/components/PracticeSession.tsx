@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, MutableRefObject } from 'react';
 import { useFaceLandmarker } from '../hooks/useFaceLandmarker';
 import { useAudioAnalysis } from '../hooks/useAudioAnalysis';
 import { useVocalVariety } from '../hooks/useVocalVariety';
@@ -38,15 +38,17 @@ function ProcessingStep({ label }: { label: string }) {
 
 interface PracticeSessionProps {
   personaTitle: string;
+  personaId: string;
   sessionId: string;
   timeLimitSec?: number;
   hasPresentationPdf?: boolean;
   hasPersonaCustomization?: boolean;
   onBack: () => void;
   onComplete: (sessionData: SessionAnalytics) => void;
+  exitSessionRef?: MutableRefObject<(() => void) | null>;
 }
 
-export default function PracticeSession({ personaTitle, sessionId, timeLimitSec, hasPresentationPdf, hasPersonaCustomization, onBack, onComplete }: PracticeSessionProps) {
+export default function PracticeSession({ personaTitle, personaId, sessionId, timeLimitSec, hasPresentationPdf, hasPersonaCustomization, onBack, onComplete, exitSessionRef }: PracticeSessionProps) {
   // Resolve the effective time cap for this session
   const maxDuration = timeLimitSec ?? DEFAULT_TIME_LIMIT_SEC;
   const [isRecording, setIsRecording] = useState(false);
@@ -111,7 +113,7 @@ export default function PracticeSession({ personaTitle, sessionId, timeLimitSec,
   const isPausedRef = useRef(false);
 
   // Session Manifest Hook (lightweight coordination file in S3)
-  const manifest = useSessionManifest(sessionId, personaTitle);
+  const manifest = useSessionManifest(sessionId, personaId);
 
   // Video Recording Hook (multipart upload) — updates manifest after each chunk
   const videoRecording = useVideoRecording(sessionId, {
@@ -122,6 +124,22 @@ export default function PracticeSession({ personaTitle, sessionId, timeLimitSec,
 
   // Detailed Metrics Hook (per-second snapshots)
   const detailedMetrics = useDetailedMetrics(sessionId);
+
+  // Register exit handler so parent can cleanly stop the session on exit
+  useEffect(() => {
+    if (exitSessionRef) {
+      exitSessionRef.current = () => {
+        stopAnalysis();
+        vocalVariety.stopAnalysis();
+        videoRecording.abort();
+        manifest.abort(timer);
+        stopCamera();
+      };
+    }
+    return () => {
+      if (exitSessionRef) exitSessionRef.current = null;
+    };
+  });
 
   // Refs to store latest metric values
   const latestMetricsRef = useRef({
@@ -454,7 +472,7 @@ export default function PracticeSession({ personaTitle, sessionId, timeLimitSec,
         videoRef.current.onloadeddata = () => {
           setCameraActive(true);
           setPermissionDenied(false);
-          setIsCalibrating(true);
+          setIsCalibrating(ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK);
         };
       }
     } catch (err) {
@@ -686,9 +704,9 @@ export default function PracticeSession({ personaTitle, sessionId, timeLimitSec,
         personaTitle={personaTitle}
       />
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 2xl:gap-6">
+      <div className={`grid grid-cols-1 gap-4 ${ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK ? 'lg:grid-cols-3' : ''} 2xl:gap-6`}>
         {/* 2. Left Column: Camera View & Controls */}
-        <div className="lg:col-span-2 space-y-3">
+        <div className={`${ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK ? 'lg:col-span-2' : ''} space-y-3`}>
           <CameraView
             videoRef={videoRef}
             canvasRef={canvasRef}
@@ -697,6 +715,7 @@ export default function PracticeSession({ personaTitle, sessionId, timeLimitSec,
             isPaused={isPaused}
             isCalibrating={isCalibrating}
             permissionDenied={permissionDenied}
+            showCalibrationControls={ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK}
             onStartCamera={startCamera}
             onStartRecording={handleStartRecording}
             onPauseRecording={handlePauseRecording}
@@ -707,6 +726,7 @@ export default function PracticeSession({ personaTitle, sessionId, timeLimitSec,
         </div>
 
         {/* 3. Right Column: Dynamic Panel (Feedback OR Calibration) */}
+        {ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK && (
         <div className="lg:col-span-1 space-y-4">
           <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm 2xl:p-6 relative overflow-hidden">
 
@@ -730,6 +750,7 @@ export default function PracticeSession({ personaTitle, sessionId, timeLimitSec,
           </div>
 
         </div>
+        )}
       </div>
 
       {/* 4. Live Transcription — hidden during calibration */}

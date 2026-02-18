@@ -41,7 +41,7 @@ export interface SessionManifest {
  *   await manifest.update({ videoParts: 3 });    // after each video chunk
  *   await manifest.complete(timer);              // on session end
  */
-export function useSessionManifest(sessionId: string, persona: string) {
+export function useSessionManifest(sessionId: string, personaId: string) {
   const manifestRef = useRef<SessionManifest | null>(null);
   const flushingRef = useRef(false);
 
@@ -51,7 +51,7 @@ export function useSessionManifest(sessionId: string, persona: string) {
       const now = new Date().toISOString();
       const m: SessionManifest = {
         sessionId,
-        persona,
+        persona: personaId,
         startTime: now,
         status: 'in_progress',
         videoParts: 0,
@@ -68,7 +68,7 @@ export function useSessionManifest(sessionId: string, persona: string) {
         console.error('[useSessionManifest] Failed to create manifest:', err);
       }
     },
-    [sessionId, persona],
+    [sessionId, personaId],
   );
 
   // ─── Update — merge partial fields and flush to S3 ─────────────────

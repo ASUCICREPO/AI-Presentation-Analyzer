@@ -47,7 +47,7 @@ export function generateSessionId(): string {
 // Persona Customization
 // ---------------------------------------------------------------------------
 export const PERSONA_CUSTOMIZATION = {
-  MAX_WORDS: 100,                         // Max words allowed in custom notes
+  MAX_WORDS: 500,                         // Max words allowed in custom notes
   MAX_BYTES: 10 * 1024,                   // 10 KB backend limit
   S3_FILENAME: 'CUSTOM_PERSONA_INSTRUCTION.txt',
 };
@@ -119,6 +119,11 @@ export const PRESENTATION_LIMITS = {
 // Presentation Analysis
 // ---------------------------------------------------------------------------
 export const ANALYSIS_CONFIG = {
+  // Toggle real-time feedback panel during practice sessions.
+  // When false, the right-hand metrics panel is hidden and the camera
+  // view expands to full width — analytics are still collected for S3.
+  SHOW_REALTIME_FEEDBACK: false,
+
   // Blendshape thresholds for gaze detection
   // Higher values require more extreme head/eye movement to trigger "looking away"
   GAZE_THRESHOLDS: {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useAuth } from './context/AuthContext';
 import Header from './components/Header';
 import PersonaSelection from './components/PersonaSelection';
@@ -31,12 +31,16 @@ export default function Home() {
   const [selectedPersonaTimeLimit, setSelectedPersonaTimeLimit] = useState<number | undefined>(undefined);
   const [customNotes, setCustomNotes] = useState('');
   const [pdfUploaded, setPdfUploaded] = useState(false);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string>(generateSessionId);
   const [sessionData, setSessionData] = useState<SessionAnalytics | null>(null);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [pendingStep, setPendingStep] = useState<number | null>(null);
+
+  // Ref for PracticeSession exit cleanup
+  const exitSessionRef = useRef<(() => void) | null>(null);
 
   // --- Auth navigation ---
   const handleSwitchToSignUp = () => setAuthView('signup');
@@ -104,6 +108,7 @@ export default function Home() {
     setSessionData(null);
     setSessionId(generateSessionId());
     setPdfUploaded(false);
+    setUploadedFileName(null);
     window.scrollTo(0, 0);
   };
 
@@ -124,6 +129,8 @@ export default function Home() {
   };
 
   const handleConfirmNavigation = () => {
+    exitSessionRef.current?.();
+    exitSessionRef.current = null;
     if (pendingStep !== null) {
       setCurrentStep(pendingStep);
       window.scrollTo(0, 0);
@@ -190,21 +197,28 @@ export default function Home() {
         <UploadContent
           personaName={selectedPersonaName}
           sessionId={sessionId}
+          initialFileName={uploadedFileName}
+          initialUploaded={pdfUploaded}
           onBack={handleBackToPersona}
           onContinue={handleContinueFromUpload}
-          onPdfUploaded={() => setPdfUploaded(true)}
+          onPdfUploaded={(fileName) => {
+            setPdfUploaded(true);
+            setUploadedFileName(fileName);
+          }}
         />
       )}
 
       {currentStep === 3 && (
         <PracticeSession
           personaTitle={selectedPersonaName}
+          personaId={selectedPersona ?? ''}
           sessionId={sessionId}
           timeLimitSec={selectedPersonaTimeLimit}
           hasPresentationPdf={pdfUploaded}
           hasPersonaCustomization={customNotes.trim().length > 0}
           onBack={handleBackToUpload}
           onComplete={handlePracticeComplete}
+          exitSessionRef={exitSessionRef}
         />
       )}
 
