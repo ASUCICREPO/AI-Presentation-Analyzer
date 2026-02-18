@@ -342,7 +342,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
       runtime: lambda.Runtime.PYTHON_3_13,
       handler: 'index.lambda_handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'post-meeting-analytics')),
-      timeout: cdk.Duration.seconds(120),
+      timeout: cdk.Duration.seconds(60),
       layers: [boto3Layer],
       role: new iam.Role(this, 'PostMeetingAnalyticsLambdaRole', {
         assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
