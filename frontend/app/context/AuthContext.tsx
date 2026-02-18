@@ -23,6 +23,7 @@ interface AuthState {
   isLoading: boolean;
   user: CognitoUser | null;
   userEmail: string | null;
+  userId: string | null;
 }
 
 interface AuthContextType extends AuthState {
@@ -43,6 +44,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isLoading: true,
     user: null,
     userEmail: null,
+    userId: null,
   });
 
   // --- Get ID Token (for AWS credential exchange) ---
@@ -65,7 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // No stored session — mark as not authenticated
       // Using callback in getSession pattern to avoid sync setState in effect
       queueMicrotask(() => {
-        setAuthState({ isAuthenticated: false, isLoading: false, user: null, userEmail: null });
+        setAuthState({ isAuthenticated: false, isLoading: false, user: null, userEmail: null, userId: null });
       });
       return;
     }
@@ -73,16 +75,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     currentUser.getSession((err: Error | null, session: CognitoUserSession | null) => {
       if (err || !session?.isValid()) {
         setAuthTokenResolver(null);
-        setAuthState({ isAuthenticated: false, isLoading: false, user: null, userEmail: null });
+        setAuthState({ isAuthenticated: false, isLoading: false, user: null, userEmail: null, userId: null });
       } else {
-        const email =
-          session.getIdToken().payload?.email ?? currentUser.getUsername();
+        const payload = session.getIdToken().payload;
+        const email = payload?.email ?? currentUser.getUsername();
+        const sub = payload?.sub ?? null;
         setAuthTokenResolver(getIdToken);
         setAuthState({
           isAuthenticated: true,
           isLoading: false,
           user: currentUser,
           userEmail: email as string,
+          userId: sub as string | null,
         });
       }
     });
@@ -96,14 +100,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return new Promise<void>((resolve, reject) => {
       cognitoUser.authenticateUser(authDetails, {
         onSuccess: (session) => {
-          const userEmail =
-            session.getIdToken().payload?.email ?? cognitoUser.getUsername();
+          const payload = session.getIdToken().payload;
+          const userEmail = payload?.email ?? cognitoUser.getUsername();
+          const sub = payload?.sub ?? null;
           setAuthTokenResolver(getIdToken);
           setAuthState({
             isAuthenticated: true,
             isLoading: false,
             user: cognitoUser,
             userEmail: userEmail as string,
+            userId: sub as string | null,
           });
           resolve();
         },
@@ -154,7 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const currentUser = userPool.getCurrentUser();
     if (currentUser) currentUser.signOut();
     setAuthTokenResolver(null);
-    setAuthState({ isAuthenticated: false, isLoading: false, user: null, userEmail: null });
+    setAuthState({ isAuthenticated: false, isLoading: false, user: null, userEmail: null, userId: null });
   }, []);
 
   return (

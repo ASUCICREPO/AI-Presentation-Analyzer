@@ -5,6 +5,8 @@ import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
+import * as apigatewayv2 from 'aws-cdk-lib/aws-apigatewayv2';
+import * as apigatewayv2_integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as bedrock from 'aws-cdk-lib/aws-bedrock';
@@ -352,6 +354,99 @@ export class AIPresentationCoachStack extends cdk.Stack {
     }));
 
     // ──────────────────────────────────────────────
+    // WebSocket API for Live Q&A Session
+    // ──────────────────────────────────────────────
+
+    // Lambda for WebSocket Q&A handler
+    const liveQALambda = new lambda.Function(this, 'LiveQALambda', {
+      runtime: lambda.Runtime.PYTHON_3_13,
+      handler: 'index.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'live-qa')),
+      timeout: cdk.Duration.minutes(10), // 10 minutes to handle 5-min sessions
+      memorySize: 1024,
+      role: new iam.Role(this, 'LiveQALambdaRole', {
+        assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+        managedPolicies: [
+          iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+        ],
+      }),
+      environment: {
+        'MODEL_ID': 'amazon.nova-2-sonic-v1:0',
+        'SESSION_DURATION_SEC': '300', // 5 minutes
+        'PERSONA_TABLE_NAME': personasTable.tableName,
+        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
+        'DEFAULT_VOICE_ID': 'matthew',
+      },
+    });
+
+    // Grant Lambda permissions for DynamoDB and S3
+    personasTable.grantReadData(liveQALambda);
+    presentationAndSessionUploadsBucket.grantReadWrite(liveQALambda);
+
+    // Grant Lambda permission to invoke Bedrock models
+    liveQALambda.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'bedrock:InvokeModel',
+        'bedrock:InvokeModelWithResponseStream',
+        'bedrock-runtime:InvokeModel',
+        'bedrock-runtime:InvokeModelWithResponseStream',
+        'bedrock-runtime:StartAsyncInvoke',
+        'bedrock-runtime:RetrieveAndGenerate',
+      ],
+      resources: ['*'], // Bedrock models don't support resource-level permissions
+    }));
+
+    // Create WebSocket API
+    const webSocketApi = new apigatewayv2.WebSocketApi(this, 'LiveQAWebSocketApi', {
+      description: 'WebSocket API for live Q&A sessions',
+      connectRouteOptions: {
+        integration: new apigatewayv2_integrations.WebSocketLambdaIntegration('ConnectIntegration', liveQALambda),
+      },
+      disconnectRouteOptions: {
+        integration: new apigatewayv2_integrations.WebSocketLambdaIntegration('DisconnectIntegration', liveQALambda),
+      },
+      defaultRouteOptions: {
+        integration: new apigatewayv2_integrations.WebSocketLambdaIntegration('DefaultIntegration', liveQALambda),
+      },
+    });
+
+    // Create WebSocket API Stage
+    const webSocketStage = new apigatewayv2.WebSocketStage(this, 'LiveQAWebSocketStage', {
+      webSocketApi,
+      stageName: 'prod',
+      autoDeploy: true,
+    });
+
+    // Grant Lambda permission to manage WebSocket connections
+    liveQALambda.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'execute-api:ManageConnections',
+        'execute-api:Invoke',
+      ],
+      resources: [
+        `arn:aws:execute-api:${this.region}:${this.account}:${webSocketApi.apiId}/*`,
+      ],
+    }));
+
+    // Add WebSocket connection permissions to the authenticated role
+    authenticatedRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'execute-api:Invoke',
+        ],
+        resources: [
+          `arn:aws:execute-api:${this.region}:${this.account}:${webSocketApi.apiId}/${webSocketStage.stageName}/*`,
+        ],
+      }),
+    );
+
+    // Pass WebSocket API endpoint to Lambda
+    liveQALambda.addEnvironment('WEBSOCKET_API_ENDPOINT', webSocketStage.url);
+
+    // ──────────────────────────────────────────────
     // Stack Outputs (useful for frontend configuration)
     // ──────────────────────────────────────────────
     new cdk.CfnOutput(this, 'UserPoolId', {
@@ -372,6 +467,11 @@ export class AIPresentationCoachStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'Region', {
       value: this.region,
       description: 'AWS Region',
+    });
+
+    new cdk.CfnOutput(this, 'WebSocketApiUrl', {
+      value: webSocketStage.url,
+      description: 'WebSocket API URL for Live Q&A',
     });
 
     // ──────────────────────────────────────────────
@@ -423,5 +523,43 @@ export class AIPresentationCoachStack extends cdk.Stack {
     NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/AIPresentationCoachApi/DeploymentStage.prod/Resource', [
       { id: 'AwsSolutions-APIG3', reason: 'WAFv2 web ACL not attached to avoid additional cost for this non-production student-facing tool. Rate limiting handled at Cognito and API Gateway level.' },
     ]);
-  } 
+
+    // Resolve the CFN logical ID of the WebSocket API so suppressions match the cdk-nag token format
+    const wsApiLogicalId = cdk.Stack.of(this).getLogicalId(webSocketApi.node.defaultChild as cdk.CfnElement);
+
+    // LiveQA Lambda cdk-nag suppressions
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/LiveQALambdaRole/Resource', [
+      { id: 'AwsSolutions-IAM4', reason: 'AWSLambdaBasicExecutionRole is the standard AWS managed policy required for CloudWatch Logs integration.', appliesTo: ['Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'] },
+    ]);
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/LiveQALambda/Resource', [
+      { id: 'AwsSolutions-L1', reason: 'Python 3.13 is the latest stable Lambda runtime. Python 3.14 is not yet generally available.' },
+    ]);
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/LiveQALambdaRole/DefaultPolicy/Resource', [
+      { id: 'AwsSolutions-IAM5', reason: 'Bedrock runtime APIs do not support resource-level ARNs. Wildcard is required for model invocation.', appliesTo: ['Resource::*'] },
+      { id: 'AwsSolutions-IAM5', reason: 'Wildcard S3 actions generated by CDK grantReadWrite(), scoped to the uploads bucket only.', appliesTo: ['Action::s3:Abort*', 'Action::s3:DeleteObject*', 'Action::s3:GetBucket*', 'Action::s3:GetObject*', 'Action::s3:List*'] },
+      { id: 'AwsSolutions-IAM5', reason: 'Resource wildcard is scoped to objects within the uploads bucket via CDK grantReadWrite().', appliesTo: ['Resource::<AIPresentationCoachPresentationsVideos1B0D776E.Arn>/*'] },
+      { id: 'AwsSolutions-IAM5', reason: 'WebSocket ManageConnections requires wildcard on connection IDs within the API.', appliesTo: [`Resource::arn:aws:execute-api:<AWS::Region>:<AWS::AccountId>:<${wsApiLogicalId}>/*`] },
+    ]);
+
+    // AwsSolutions-IAM5: WebSocket invoke permission for authenticated Cognito users (scoped to specific API + stage)
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/CognitoAuthenticatedRole/DefaultPolicy/Resource', [
+      { id: 'AwsSolutions-IAM5', reason: 'WebSocket API invoke permission requires wildcard for route keys. Scoped to the specific WebSocket API and stage.', appliesTo: [`Resource::arn:aws:execute-api:<AWS::Region>:<AWS::AccountId>:<${wsApiLogicalId}>/prod/*`] },
+    ], true);
+
+    // AwsSolutions-APIG4: WebSocket APIs use Lambda-level session validation on $connect; native Cognito authorizers are not supported for WebSocket APIs
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/LiveQAWebSocketApi/$connect-Route/Resource', [
+      { id: 'AwsSolutions-APIG4', reason: 'WebSocket API $connect route validates session via Lambda handler. Native Cognito authorizers are not supported for WebSocket APIs in API Gateway v2.' },
+    ]);
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/LiveQAWebSocketApi/$disconnect-Route/Resource', [
+      { id: 'AwsSolutions-APIG4', reason: 'WebSocket API $disconnect is a cleanup-only route; authorization is enforced on $connect.' },
+    ]);
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/LiveQAWebSocketApi/$default-Route/Resource', [
+      { id: 'AwsSolutions-APIG4', reason: 'WebSocket API $default route only processes messages from already-connected (authorized) clients; authorization is enforced on $connect.' },
+    ]);
+
+    // AwsSolutions-APIG1: WebSocket stage access logging
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/LiveQAWebSocketStage/Resource', [
+      { id: 'AwsSolutions-APIG1', reason: 'WebSocket API access logging is handled by Lambda CloudWatch Logs. The CDK L2 WebSocketStage construct does not expose access log configuration directly.' },
+    ]);
+  }
 }

@@ -18,6 +18,11 @@ export const cognitoConfig = {
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL!;
 
 // ---------------------------------------------------------------------------
+// WebSocket (Live Q&A)
+// ---------------------------------------------------------------------------
+export const WEBSOCKET_URL = process.env.NEXT_PUBLIC_WEBSOCKET_API_URL!;
+
+// ---------------------------------------------------------------------------
 // Personas
 // ---------------------------------------------------------------------------
 export interface Persona {
@@ -64,6 +69,7 @@ export const S3_FILENAMES = {
   SESSION_ANALYTICS: 'session_analytics.json',
   DETAILED_METRICS: 'detailed_metrics.json',
   MANIFEST: 'manifest.json',
+  QA_SESSION: 'qa_session.json',
 };
 
 /** Valid request types for the presigned URL endpoint */
@@ -98,6 +104,24 @@ export const VIDEO_RECORDING_CONFIG = {
   MIN_PART_SIZE_BYTES: 5 * 1024 * 1024,
 };
 
+
+// ---------------------------------------------------------------------------
+// QA Session
+// ---------------------------------------------------------------------------
+export const QA_SESSION_CONFIG = {
+  DURATION_SEC: 300, // 5 minutes
+  AUDIO_SAMPLE_RATE: 16000,
+  AUDIO_CHANNELS: 1,
+  AUDIO_FORMAT: 'pcm',
+  /** Interval (ms) to send audio chunks to WebSocket */
+  AUDIO_CHUNK_INTERVAL_MS: 100,
+  /** Reconnection settings */
+  RECONNECT_MAX_ATTEMPTS: 3,
+  RECONNECT_BASE_DELAY_MS: 1000,
+  /** Warning thresholds (seconds remaining) */
+  WARNING_AT_SEC: 60,
+  FINAL_WARNING_AT_SEC: 10,
+};
 
 // ---------------------------------------------------------------------------
 // Presentation Time Limits (seconds)
