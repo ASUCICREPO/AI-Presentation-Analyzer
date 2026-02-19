@@ -9,6 +9,7 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as amplify from 'aws-cdk-lib/aws-amplify';
 import * as bedrock from 'aws-cdk-lib/aws-bedrock';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { NagSuppressions } from 'cdk-nag';
 import * as agentcore from '@aws-cdk/aws-bedrock-agentcore-alpha';
 
@@ -445,7 +446,10 @@ export class AIPresentationCoachStack extends cdk.Stack {
       runtimeName: 'live_qa_agent',
       description: 'Bidirectional voice agent for live Q&A sessions with WebSocket support',
       agentRuntimeArtifact: agentcore.AgentRuntimeArtifact.fromAsset(
-        path.join(__dirname, '..', 'agentcore')
+        path.join(__dirname, '..', 'agentcore'),
+        {
+          platform: Platform.LINUX_ARM64
+        }
       ),
       authorizerConfiguration: agentcore.RuntimeAuthorizerConfiguration.usingCognito(
         userPool,
