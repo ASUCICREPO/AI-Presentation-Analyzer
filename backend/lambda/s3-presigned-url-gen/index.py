@@ -3,7 +3,6 @@ from botocore.exceptions import ClientError
 from typing import Optional
 import json
 import os
-from datetime import date
 
 # ─── Environment variables ────────────────────────────────────────────
 PRESENTATION_TIMEOUT: int = int(os.environ.get("PRESENTATION_TIMEOUT", 1200))
@@ -93,15 +92,11 @@ def _response(status_code: int, body: dict) -> dict:
     }
 
 
-def _today() -> str:
-    return date.today().isoformat()
-
-
 def _build_s3_key(user_id: str, session_id: str, request_type: str) -> str:
     filename = S3_FILENAMES.get(request_type)
     if not filename:
         raise ValueError(f"Unknown request_type: {request_type}")
-    return f"{user_id}/{_today()}/{session_id}/{filename}"
+    return f"{user_id}/{session_id}/{filename}"
 
 
 # ─── Presigned POST URL generation ───────────────────────────────────
@@ -109,7 +104,7 @@ def get_upload_url(request_type: str, user_id: str, session_id: str) -> Optional
     """Generate a presigned POST URL for uploading to S3.
 
     S3 key structure (fixed filenames — re-uploads overwrite):
-        {user_id}/{date}/{session_id}/{filename}
+        {user_id}/{session_id}/{filename}
     """
     key = _build_s3_key(user_id, session_id, request_type)
 

@@ -1,5 +1,35 @@
 import { API_BASE_URL, Persona, S3RequestType } from '../config/config';
 
+// ─── AI Feedback Types ───────────────────────────────────────────────
+
+export interface AIFeedbackResponse {
+  status: string;
+  sessionId: string;
+  persona: { id: string; title: string; description: string };
+  keyRecommendations: { title: string; description: string }[];
+  performanceSummary: {
+    overallAssessment: string;
+    contentStrengths: string[];
+    deliveryFeedback: {
+      speakingPace: string;
+      volume: string;
+      eyeContact: string;
+      fillerWords: string;
+      pauses: string;
+    };
+  };
+  generatedAt: string;
+  model: string;
+  includedFiles: Record<string, boolean>;
+}
+
+export class AnalyticsProcessingError extends Error {
+  constructor() {
+    super('Analytics still processing');
+    this.name = 'AnalyticsProcessingError';
+  }
+}
+
 // ─── Helper: get auth headers if available ───────────────────────────
 // The Cognito authorizer on API Gateway requires an Authorization header.
 // We attempt to resolve the ID token lazily; callers that don't need auth
@@ -307,4 +337,55 @@ export async function uploadJsonToS3(
   if (!res.ok && res.status >= 300) {
     throw new Error(`Failed to upload ${requestType} JSON to S3`);
   }
+}
+
+// ─── Analytics API ────────────────────────────────────────────────────
+
+/**
+ * Single call to GET /analytics. Returns the AI feedback on 200,
+ * throws AnalyticsProcessingError on 202, and a generic Error on failure.
+ */
+export async function fetchAnalytics(
+  sessionId: string,
+): Promise<AIFeedbackResponse> {
+  const headers = await authHeaders();
+  const res = await fetch(
+    `${API_BASE_URL}/analytics?session_id=${encodeURIComponent(sessionId)}`,
+    { headers },
+  );
+
+  if (res.status === 202) {
+    throw new AnalyticsProcessingError();
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `Analytics request failed (${res.status})`);
+  }
+
+  return res.json();
+}
+
+const POLL_INTERVAL_MS = 3_000;
+const POLL_MAX_ATTEMPTS = 40; // ~120 seconds
+
+/**
+ * Polls GET /analytics until the backend returns a completed response.
+ * Retries on 202 (processing) up to POLL_MAX_ATTEMPTS times.
+ */
+export async function pollAnalytics(
+  sessionId: string,
+): Promise<AIFeedbackResponse> {
+  for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await fetchAnalytics(sessionId);
+    } catch (err) {
+      if (err instanceof AnalyticsProcessingError) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('Analytics timed out — the AI analysis is taking longer than expected');
 }

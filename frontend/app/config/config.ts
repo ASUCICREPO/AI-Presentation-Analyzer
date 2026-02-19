@@ -20,6 +20,20 @@ export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL!;
 // ---------------------------------------------------------------------------
 // Personas
 // ---------------------------------------------------------------------------
+export interface PersonaBestPractices {
+  wpm: { min: number; max: number; label?: string };
+  eyeContact: { min: number; label?: string };
+  fillerWords: { max: number; label?: string };
+  pauses: { min: number; label?: string };
+}
+
+export interface PersonaScoringWeights {
+  pace: number;
+  eyeContact: number;
+  fillerWords: number;
+  pauses: number;
+}
+
 export interface Persona {
   personaID: string;
   name: string;
@@ -29,11 +43,44 @@ export interface Persona {
   keyPriorities: string[];
   attentionSpan: string;
   communicationStyle: string;
-  timeLimitSec?: number; // Per-persona presentation time limit (seconds)
+  timeLimitSec?: number;
+  bestPractices?: PersonaBestPractices;
+  scoringWeights?: PersonaScoringWeights;
 }
 
 /** Fallback when a persona has no timeLimitSec set */
 export const DEFAULT_TIME_LIMIT_SEC = 15 * 60; // 15 minutes
+
+/** Generic defaults used when a persona has no bestPractices set.
+ *
+ * Sources:
+ *  - WPM: 140-160 is the recommended range for professional presentations
+ *    (Quantified Communications; The Speaker Lab). Research shows comprehension
+ *    is unaffected within 130-190 wpm (Presentation Rate in Comprehension,
+ *    Perceptual & Motor Skills, 2001).
+ *  - Eye contact: 3.2s average preferred gaze duration per person (Vision
+ *    Sciences Society, 2015). For a seated audience, maintaining gaze toward
+ *    the camera/audience ~60-70% of the time is considered engaged delivery.
+ *  - Filler words: Average speakers use ~5 fillers/min; optimal is ≤1/min
+ *    (Quantified Communications). Per 30-second window ≤3 is a strong target.
+ *  - Pauses: Deliberate 2-3s pauses after major points increased recall from
+ *    42% to 71% (Maptive/SpeakingTimeCalculator). Avg speaker uses ~3.5
+ *    pauses/min; great speakers use more. ≥4 per 30s window ≈ 8/min.
+ */
+export const DEFAULT_BEST_PRACTICES: PersonaBestPractices = {
+  wpm: { min: 140, max: 160 },
+  eyeContact: { min: 60 },
+  fillerWords: { max: 3 },
+  pauses: { min: 4 },
+};
+
+/** Generic scoring weights (must sum to 1.0) */
+export const DEFAULT_SCORING_WEIGHTS: PersonaScoringWeights = {
+  pace: 0.25,
+  eyeContact: 0.30,
+  fillerWords: 0.20,
+  pauses: 0.25,
+};
 
 // ---------------------------------------------------------------------------
 // Session
@@ -47,7 +94,7 @@ export function generateSessionId(): string {
 // Persona Customization
 // ---------------------------------------------------------------------------
 export const PERSONA_CUSTOMIZATION = {
-  MAX_WORDS: 100,                         // Max words allowed in custom notes
+  MAX_WORDS: 500,                         // Max words allowed in custom notes
   MAX_BYTES: 10 * 1024,                   // 10 KB backend limit
   S3_FILENAME: 'CUSTOM_PERSONA_INSTRUCTION.txt',
 };
@@ -119,6 +166,11 @@ export const PRESENTATION_LIMITS = {
 // Presentation Analysis
 // ---------------------------------------------------------------------------
 export const ANALYSIS_CONFIG = {
+  // Toggle real-time feedback panel during practice sessions.
+  // When false, the right-hand metrics panel is hidden and the camera
+  // view expands to full width — analytics are still collected for S3.
+  SHOW_REALTIME_FEEDBACK: true,
+
   // Blendshape thresholds for gaze detection
   // Higher values require more extreme head/eye movement to trigger "looking away"
   GAZE_THRESHOLDS: {
