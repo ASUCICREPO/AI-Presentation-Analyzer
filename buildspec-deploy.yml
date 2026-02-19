@@ -1,0 +1,26 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo "Starting CDK deployment process..."
+      - echo "Branch: $BRANCH_NAME"
+      - echo "Stack Name: $STACK_NAME"
+      - echo "Running CDK bootstrap to ensure environment is ready..."
+      - cd backend
+      - npm install
+      - npx cdk bootstrap
+
+  build:
+    commands:
+      - echo "Deploying CDK stack..."
+      - npx cdk deploy $STACK_NAME --require-approval never
+
+  post_build:
+    commands:
+      - echo "Deployment completed successfully!"
+      - echo "Stack Name: $STACK_NAME"
+
+artifacts:
+  files:
+    - "**/*"

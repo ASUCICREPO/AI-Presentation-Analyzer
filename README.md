@@ -14,17 +14,17 @@
 
 ## Table of Contents
 
-| Index                                               | Description                                              |
-| :-------------------------------------------------- | :------------------------------------------------------- |
-| [High Level Architecture](#high-level-architecture) | High level overview illustrating component interactions  |
-| [Deployment Guide](#deployment-guide)               | How to deploy the project                                |
-| [User Guide](#user-guide)                           | End-user instructions and walkthrough                    |
-| [API Documentation](#api-documentation)             | Documentation on the APIs the project uses               |
-| [Directories](#directories)                         | General project directory structure                      |
-| [Modification Guide](#modification-guide)           | Guide for developers extending the project               |
-| [Credits](#credits)                                 | Contributors and acknowledgments                         |
-| [Disclaimers](#disclaimers)                         | Important disclaimers and legal notices                   |
-| [License](#license)                                 | License information                                      |
+| Index                                               | Description                                             |
+| :-------------------------------------------------- | :------------------------------------------------------ |
+| [High Level Architecture](#high-level-architecture) | High level overview illustrating component interactions |
+| [Deployment Guide](#deployment-guide)               | How to deploy the project                               |
+| [User Guide](#user-guide)                           | End-user instructions and walkthrough                   |
+| [API Documentation](#api-documentation)             | Documentation on the APIs the project uses              |
+| [Directories](#directories)                         | General project directory structure                     |
+| [Modification Guide](#modification-guide)           | Guide for developers extending the project              |
+| [Credits](#credits)                                 | Contributors and acknowledgments                        |
+| [Disclaimers](#disclaimers)                         | Important disclaimers and legal notices                 |
+| [License](#license)                                 | License information                                     |
 
 ---
 
@@ -48,12 +48,41 @@ For a detailed explanation of the architecture, see the [Architecture Deep Dive]
 
 ## Deployment Guide
 
-For complete deployment instructions, see the [Deployment Guide](./docs/deploymentGuide.md).
+### Automated Deployment from GitHub
 
-**Quick Start:**
-1. [INSERT_QUICK_START_STEP_1]
-2. [INSERT_QUICK_START_STEP_2]
-3. [INSERT_QUICK_START_STEP_3]
+The easiest way to deploy is using the automated deployment script:
+
+```bash
+# Make the script executable
+chmod +x deploy.sh
+
+# Run the deployment
+./deploy.sh
+```
+
+The script will prompt you for:
+- GitHub repository (format: `owner/repo`)
+- Branch name (e.g., `main`, `develop`)
+- GitHub token (optional, only for private repos)
+
+The deployment runs on AWS CodeBuild with ARM64 compute and takes 10-15 minutes.
+
+For detailed instructions, see [DEPLOYMENT.md](./DEPLOYMENT.md).
+
+### Manual Local Deployment
+
+If you prefer to deploy locally:
+
+```bash
+cd backend
+npm install
+npx cdk bootstrap  # First time only
+npx cdk deploy
+```
+
+**Note:** Local deployment requires Docker with ARM64 support (Docker Desktop with Buildx or running on ARM64 hardware).
+
+For complete deployment instructions, see the [Deployment Guide](./docs/deploymentGuide.md).
 
 ---
 
