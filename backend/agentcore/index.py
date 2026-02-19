@@ -1,3 +1,4 @@
+from starlette.websockets import WebSocket
 from strands.experimental.bidi import BidiAgent, BidiAudioIO, BidiTextIO
 from strands.experimental.bidi.types.events import BidiAudioInputEvent
 from strands.experimental.bidi.models import BidiNovaSonicModel
@@ -8,6 +9,7 @@ from strands.experimental.bidi.hooks.events import (
     BidiAfterInvocationEvent,
     BidiMessageAddedEvent
 )
+from bedrock_agentcore import BedrockAgentCoreApp
 from typing import Literal
 import asyncio
 import boto3
@@ -110,12 +112,6 @@ class ConversationLogger:
         print(f"QA session ended for conversation with ID: {event.conversation_id}")
 
 
-# Default agent for local CLI usage
-model = create_nova_sonic_model()
-agent = BidiAgent(
-    model=model,
-    tools=[stop_conversation]
-)
 audio_io = BidiAudioIO()
 text_io = BidiTextIO()
 
@@ -141,6 +137,29 @@ async def main():
         )
     except asyncio.CancelledError:
         print("Agent run cancelled, shutting down...")
+
+app = BedrockAgentCoreApp()
+
+@app.websocket
+async def websocket_handler(websocket, context):
+
+    model = create_nova_sonic_model()
+    agent = BidiAgent(
+        model=model,
+        tools=[stop_conversation]
+    )
+
+    try:
+        await websocket.accept()
+        await agent.run(inputs=[websocket.receive_json], outputs=[websocket.send_json])
+    except WebSocketDisconnect:
+        print("Client WebSocket disconnected, stopping agent...")
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        await agent.stop()
+        await websocket.close()
+
 
 
 if __name__ == "__main__":
