@@ -16,19 +16,56 @@ import {
   X,
 } from 'lucide-react';
 
+import {
+  Persona,
+  PersonaBestPractices,
+  PersonaScoringWeights,
+  DEFAULT_BEST_PRACTICES,
+  DEFAULT_SCORING_WEIGHTS,
+} from '../config/config';
+
 interface ReviewAnalyticsProps {
   sessionData: SessionAnalytics;
   aiFeedback: AIFeedbackResponse | null;
+  persona: Persona | null;
   onDownload: () => void;
   onBackToStart: () => void;
 }
 
-const BEST_PRACTICES: Record<string, { label: string; range: string; check: (v: number) => boolean }> = {
-  wpm: { label: 'Speaking Pace', range: '130-160 wpm', check: (v) => v >= 130 && v <= 160 },
-  eyeContact: { label: 'Eye Contact', range: '70%+', check: (v) => v >= 70 },
-  fillers: { label: 'Filler Words', range: '5 or fewer', check: (v) => v <= 5 },
-  pauses: { label: 'Strategic Pauses', range: '5+ pauses', check: (v) => v >= 5 },
-};
+function resolveBestPractices(persona: Persona | null): PersonaBestPractices {
+  if (!persona?.bestPractices) return DEFAULT_BEST_PRACTICES;
+  return { ...DEFAULT_BEST_PRACTICES, ...persona.bestPractices };
+}
+
+function resolveScoringWeights(persona: Persona | null): PersonaScoringWeights {
+  if (!persona?.scoringWeights) return DEFAULT_SCORING_WEIGHTS;
+  return { ...DEFAULT_SCORING_WEIGHTS, ...persona.scoringWeights };
+}
+
+function buildBestPracticeChecks(bp: PersonaBestPractices) {
+  return {
+    wpm: {
+      label: bp.wpm.label ?? 'Speaking Pace',
+      range: `${bp.wpm.min}-${bp.wpm.max} wpm`,
+      check: (v: number) => v >= bp.wpm.min && v <= bp.wpm.max,
+    },
+    eyeContact: {
+      label: bp.eyeContact.label ?? 'Eye Contact',
+      range: `${bp.eyeContact.min}%+`,
+      check: (v: number) => v >= bp.eyeContact.min,
+    },
+    fillers: {
+      label: bp.fillerWords.label ?? 'Filler Words',
+      range: `${bp.fillerWords.max} or fewer`,
+      check: (v: number) => v <= bp.fillerWords.max,
+    },
+    pauses: {
+      label: bp.pauses.label ?? 'Strategic Pauses',
+      range: `${bp.pauses.min}+ pauses`,
+      check: (v: number) => v >= bp.pauses.min,
+    },
+  };
+}
 
 function ScoreRing({ score }: { score: number }) {
   const radius = 54;
@@ -69,10 +106,14 @@ function MetricBar({ value, max, color }: { value: number; max: number; color: s
   );
 }
 
-export default function ReviewAnalytics({ sessionData, aiFeedback, onDownload, onBackToStart }: ReviewAnalyticsProps) {
+export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDownload, onBackToStart }: ReviewAnalyticsProps) {
   const { windows } = sessionData;
   const [showWindows, setShowWindows] = useState(false);
   const [dismissedBanner, setDismissedBanner] = useState(false);
+
+  const bp = resolveBestPractices(persona);
+  const weights = resolveScoringWeights(persona);
+  const BEST_PRACTICES = buildBestPracticeChecks(bp);
 
   const stats = (() => {
     if (windows.length === 0) return null;
@@ -86,17 +127,30 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, onDownload, o
 
   const overallScore = (() => {
     if (!stats) return 0;
-    const paceScore = stats.avgWpm >= 130 && stats.avgWpm <= 160 ? 100 : stats.avgWpm >= 110 && stats.avgWpm <= 180 ? 70 : 40;
+    const wpmOuter = bp.wpm.max - bp.wpm.min;
+    const paceScore = BEST_PRACTICES.wpm.check(stats.avgWpm) ? 100
+      : stats.avgWpm >= bp.wpm.min - wpmOuter && stats.avgWpm <= bp.wpm.max + wpmOuter ? 70 : 40;
     const eyeScore = Math.min(stats.avgEyeContact, 100);
-    const fillerScore = stats.totalFillers <= 5 ? 100 : stats.totalFillers <= 10 ? 70 : 40;
-    const pauseScore = stats.totalPauses >= 5 ? 100 : stats.totalPauses >= 2 ? 70 : 40;
-    return Math.round(paceScore * 0.25 + eyeScore * 0.35 + fillerScore * 0.2 + pauseScore * 0.2);
+    const fillerScore = stats.totalFillers <= bp.fillerWords.max ? 100
+      : stats.totalFillers <= bp.fillerWords.max * 2 ? 70 : 40;
+    const pauseScore = stats.totalPauses >= bp.pauses.min ? 100
+      : stats.totalPauses >= Math.floor(bp.pauses.min / 2) ? 70 : 40;
+    return Math.round(
+      paceScore * weights.pace +
+      eyeScore * weights.eyeContact +
+      fillerScore * weights.fillerWords +
+      pauseScore * weights.pauses
+    );
   })();
 
   const getBarColor = (score: number, type: 'wpm' | 'volume' | 'eyeContact') => {
-    if (type === 'wpm') return score >= 130 && score <= 160 ? 'bg-green-500' : score >= 110 && score <= 180 ? 'bg-yellow-500' : 'bg-red-500';
+    if (type === 'wpm') {
+      const wpmOuter = bp.wpm.max - bp.wpm.min;
+      return BEST_PRACTICES.wpm.check(score) ? 'bg-green-500'
+        : score >= bp.wpm.min - wpmOuter && score <= bp.wpm.max + wpmOuter ? 'bg-yellow-500' : 'bg-red-500';
+    }
     if (type === 'volume') return score >= 40 && score <= 80 ? 'bg-green-500' : score >= 20 ? 'bg-yellow-500' : 'bg-red-500';
-    return score >= 70 ? 'bg-green-500' : score >= 50 ? 'bg-yellow-500' : 'bg-red-500';
+    return score >= bp.eyeContact.min ? 'bg-green-500' : score >= bp.eyeContact.min - 20 ? 'bg-yellow-500' : 'bg-red-500';
   };
 
   const getTrendIcon = (current: number, previous: number) => {
@@ -106,12 +160,16 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, onDownload, o
   };
 
   const getScoreColor = (score: number, type: 'wpm' | 'volume' | 'eyeContact') => {
-    if (type === 'wpm') return score >= 120 && score <= 150 ? 'text-green-600' : score >= 100 && score <= 170 ? 'text-yellow-600' : 'text-red-600';
+    if (type === 'wpm') {
+      const wpmOuter = bp.wpm.max - bp.wpm.min;
+      return BEST_PRACTICES.wpm.check(score) ? 'text-green-600'
+        : score >= bp.wpm.min - wpmOuter && score <= bp.wpm.max + wpmOuter ? 'text-yellow-600' : 'text-red-600';
+    }
     if (type === 'volume') return score >= 40 && score <= 80 ? 'text-green-600' : score >= 20 ? 'text-yellow-600' : 'text-red-600';
-    return score >= 80 ? 'text-green-600' : score >= 60 ? 'text-yellow-600' : 'text-red-600';
+    return score >= bp.eyeContact.min ? 'text-green-600' : score >= bp.eyeContact.min - 20 ? 'text-yellow-600' : 'text-red-600';
   };
 
-  const persona = aiFeedback?.persona;
+  const feedbackPersona = aiFeedback?.persona;
 
   return (
     <div className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6">
@@ -134,12 +192,12 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, onDownload, o
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Presentation Analysis</h1>
-          {persona && (
+          {feedbackPersona && (
             <p className="mt-1 text-sm text-gray-600">
-              Feedback tailored for: <span className="font-semibold text-maroon">{persona.title}</span>
+              Feedback tailored for: <span className="font-semibold text-maroon">{feedbackPersona.title}</span>
             </p>
           )}
-          {!persona && (
+          {!feedbackPersona && (
             <p className="mt-1 text-sm text-gray-600">
               {sessionData.personaTitle} &middot; {windows.length} windows recorded
             </p>
@@ -254,7 +312,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, onDownload, o
               <div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="font-medium text-gray-700">Filler Words</span>
-                  <span className={`font-bold ${stats.totalFillers <= 5 ? 'text-green-600' : stats.totalFillers <= 10 ? 'text-yellow-600' : 'text-red-600'}`}>
+                  <span className={`font-bold ${stats.totalFillers <= bp.fillerWords.max ? 'text-green-600' : stats.totalFillers <= bp.fillerWords.max * 2 ? 'text-yellow-600' : 'text-red-600'}`}>
                     {stats.totalFillers} detected
                   </span>
                 </div>
@@ -281,7 +339,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, onDownload, o
         {aiFeedback && aiFeedback.keyRecommendations.length > 0 && (
           <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
             <h2 className="mb-5 text-lg font-semibold text-gray-900">
-              Key Recommendations{persona ? ` for ${persona.title}` : ''}
+              Key Recommendations{feedbackPersona ? ` for ${feedbackPersona.title}` : ''}
             </h2>
             <div className="space-y-4">
               {aiFeedback.keyRecommendations.map((rec, i) => (

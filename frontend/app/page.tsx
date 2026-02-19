@@ -13,7 +13,7 @@ import SignUpPage from './components/SignUpPage';
 import ConfirmSignUpPage from './components/ConfirmSignUpPage';
 import { SessionAnalytics } from './hooks/useSessionAnalytics';
 import { AIFeedbackResponse } from './services/api';
-import { generateSessionId } from './config/config';
+import { generateSessionId, Persona } from './config/config';
 import { Loader2 } from 'lucide-react';
 
 type AuthView = 'login' | 'signup' | 'confirm';
@@ -30,6 +30,7 @@ export default function Home() {
   const [selectedPersona, setSelectedPersona] = useState<string | null>(null);
   const [selectedPersonaName, setSelectedPersonaName] = useState<string>('');
   const [selectedPersonaTimeLimit, setSelectedPersonaTimeLimit] = useState<number | undefined>(undefined);
+  const [selectedPersonaData, setSelectedPersonaData] = useState<Persona | null>(null);
   const [customNotes, setCustomNotes] = useState('');
   const [pdfUploaded, setPdfUploaded] = useState(false);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
@@ -190,6 +191,7 @@ export default function Home() {
           onSelectPersona={handlePersonaSelect}
           onPersonaNameChange={setSelectedPersonaName}
           onTimeLimitChange={setSelectedPersonaTimeLimit}
+          onPersonaDataChange={setSelectedPersonaData}
           customNotes={customNotes}
           onCustomNotesChange={setCustomNotes}
           sessionId={sessionId}
@@ -230,6 +232,7 @@ export default function Home() {
         <ReviewAnalytics
           sessionData={sessionData}
           aiFeedback={aiFeedback}
+          persona={selectedPersonaData}
           onDownload={handleDownloadSessionData}
           onBackToStart={handleBackToStart}
         />

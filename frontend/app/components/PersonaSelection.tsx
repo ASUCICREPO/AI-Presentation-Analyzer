@@ -11,6 +11,7 @@ interface PersonaSelectionProps {
   onSelectPersona: (id: string | null) => void;
   onPersonaNameChange: (name: string) => void;
   onTimeLimitChange: (sec: number | undefined) => void;
+  onPersonaDataChange: (persona: Persona | null) => void;
   customNotes: string;
   onCustomNotesChange: (notes: string) => void;
   sessionId: string;
@@ -58,6 +59,7 @@ export default function PersonaSelection({
   onSelectPersona,
   onPersonaNameChange,
   onTimeLimitChange,
+  onPersonaDataChange,
   customNotes,
   onCustomNotesChange,
   sessionId,
@@ -113,6 +115,7 @@ export default function PersonaSelection({
                 onSelectPersona(isDeselecting ? null : persona.personaID);
                 onPersonaNameChange(isDeselecting ? '' : persona.name);
                 onTimeLimitChange(isDeselecting ? undefined : persona.timeLimitSec);
+                onPersonaDataChange(isDeselecting ? null : persona);
               }}
             />
           ))
