@@ -11,7 +11,6 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as bedrock from 'aws-cdk-lib/aws-bedrock';
 import { NagSuppressions } from 'cdk-nag';
-import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
 import * as agentcore from '@aws-cdk/aws-bedrock-agentcore-alpha';
 
 export class AIPresentationCoachStack extends cdk.Stack {
