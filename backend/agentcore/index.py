@@ -1,4 +1,4 @@
-from starlette.websockets import WebSocket
+from starlette.websockets import WebSocket, WebSocketDisconnect
 from strands.experimental.bidi import BidiAgent, BidiAudioIO, BidiTextIO
 from strands.experimental.bidi.types.events import BidiAudioInputEvent
 from strands.experimental.bidi.models import BidiNovaSonicModel
@@ -13,7 +13,9 @@ from bedrock_agentcore import BedrockAgentCoreApp
 from typing import Literal
 import asyncio
 import boto3
+import aioboto3
 import os
+import json
 
 '''
 A quick note on voice selection:
@@ -112,6 +114,67 @@ class ConversationLogger:
         print(f"QA session ended for conversation with ID: {event.conversation_id}")
 
 
+async def load_persona(persona_id: str) -> dict:
+    """Load persona configuration from DynamoDB."""
+    table_name = os.getenv('PERSONA_TABLE_NAME')
+    if not table_name:
+        print("[Error] PERSONA_TABLE_NAME environment variable not set")
+        return {}
+    
+    try:
+        session = aioboto3.Session()
+        async with session.resource('dynamodb', region_name=REGION) as dynamodb:
+            table = await dynamodb.Table(table_name)
+            response = await table.get_item(Key={'personaID': persona_id})
+            
+            if 'Item' not in response:
+                print(f"[Error] Persona {persona_id} not found in DynamoDB")
+                return {}
+            
+            return response['Item']
+    except Exception as e:
+        print(f"[Error] Failed to load persona {persona_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return {}
+
+
+async def load_transcript(user_id: str, date_str: str, session_id: str) -> str:
+    """Load presentation transcript from S3."""
+    bucket_name = os.getenv('UPLOADS_BUCKET')
+    if not bucket_name:
+        print("[Error] UPLOADS_BUCKET environment variable not set")
+        return ""
+    
+    # S3 key format: {userId}/{dateStr}/{sessionId}/transcript.json
+    s3_key = f"{user_id}/{date_str}/{session_id}/transcript.json"
+    
+    try:
+        session = aioboto3.Session()
+        async with session.client('s3', region_name=REGION) as s3:
+            response = await s3.get_object(Bucket=bucket_name, Key=s3_key)
+            content = await response['Body'].read()
+            
+            # Parse transcript JSON
+            transcript_data = json.loads(content)
+            
+            # Extract text from transcript entries
+            if isinstance(transcript_data, list):
+                # Format: [{"text": "...", "timestamp": ...}, ...]
+                transcript_text = " ".join([entry.get('text', '') for entry in transcript_data])
+            elif isinstance(transcript_data, dict) and 'entries' in transcript_data:
+                # Format: {"entries": [...]}
+                transcript_text = " ".join([entry.get('text', '') for entry in transcript_data['entries']])
+            else:
+                transcript_text = str(transcript_data)
+            
+            return transcript_text.strip()
+            
+    except Exception as e:
+        print(f"[Warning] Failed to load transcript from s3://{bucket_name}/{s3_key}: {e}")
+        return ""
+
+
 audio_io = BidiAudioIO()
 text_io = BidiTextIO()
 
@@ -142,23 +205,109 @@ app = BedrockAgentCoreApp()
 
 @app.websocket
 async def websocket_handler(websocket, context):
-
-    model = create_nova_sonic_model()
-    agent = BidiAgent(
-        model=model,
-        tools=[stop_conversation]
-    )
-
+    """
+    WebSocket handler for Q&A sessions.
+    
+    Custom headers are passed as query parameters with prefix:
+    X-Amzn-Bedrock-AgentCore-Runtime-Custom-
+    
+    Expected headers:
+    - PersonaId: DynamoDB persona ID
+    - UserId: User identifier
+    - DateStr: Session date string
+    - VoiceId: Voice selection (optional)
+    """
+    
+    # Extract custom headers from context
+    # AgentCore passes custom headers in context['headers']
+    headers = context.get('headers', {})
+    
+    persona_id = headers.get('x-amzn-bedrock-agentcore-runtime-custom-personaid', '')
+    user_id = headers.get('x-amzn-bedrock-agentcore-runtime-custom-userid', '')
+    date_str = headers.get('x-amzn-bedrock-agentcore-runtime-custom-datestr', '')
+    voice_id = headers.get('x-amzn-bedrock-agentcore-runtime-custom-voiceid', DEFAULT_VOICE_ID)
+    
+    # Session ID is in standard header
+    session_id = headers.get('x-amzn-bedrock-agentcore-runtime-session-id', '')
+    
+    print(f"[WebSocket] Connection from user={user_id}, persona={persona_id}, session={session_id}")
+    
+    agent = None
+    
     try:
+        # Load persona configuration from DynamoDB
+        persona_data = await load_persona(persona_id)
+        if not persona_data:
+            await websocket.accept()
+            await websocket.send_json({
+                "type": "error",
+                "message": f"Persona {persona_id} not found"
+            })
+            await websocket.close()
+            return
+        
+        # Load presentation transcript from S3
+        transcript_text = await load_transcript(user_id, date_str, session_id)
+        if not transcript_text:
+            print(f"[Warning] No transcript found for session {session_id}, using empty transcript")
+            transcript_text = "No presentation transcript available."
+        
+        # Build QA system prompt
+        system_prompt = build_qa_system_prompt(
+            persona_name=persona_data.get('name', 'Interviewer'),
+            persona_prompt=persona_data.get('personaPrompt', ''),
+            custom_instructions=persona_data.get('description', ''),
+            transcript_text=transcript_text
+        )
+        
+        # Create agent with configuration
+        model = create_nova_sonic_model(voice_id)
+        agent = BidiAgent(
+            model=model,
+            tools=[stop_conversation],
+            system_prompt=system_prompt,
+        )
+        
+        # Accept connection and start agent
         await websocket.accept()
-        await agent.run(inputs=[websocket.receive_json], outputs=[websocket.send_json])
+        
+        # Send session started event
+        await websocket.send_json({
+            "type": "session_started",
+            "persona_name": persona_data.get('name', 'Interviewer'),
+            "session_id": session_id
+        })
+        
+        # Run agent with bidirectional streaming
+        await agent.start()
+        await agent.run(
+            inputs=[websocket.receive_json],
+            outputs=[websocket.send_json]
+        )
+        
     except WebSocketDisconnect:
-        print("Client WebSocket disconnected, stopping agent...")
+        print("[WebSocket] Client disconnected")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"[Error] WebSocket handler error: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": str(e)
+            })
+        except:
+            pass
     finally:
-        await agent.stop()
-        await websocket.close()
+        if agent:
+            try:
+                await agent.stop()
+            except:
+                pass
+        try:
+            await websocket.close()
+        except:
+            pass
 
 
 
