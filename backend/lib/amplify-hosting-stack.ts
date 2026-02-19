@@ -28,7 +28,6 @@ export class AmplifyHostingStack extends cdk.Stack {
 
     if (useGitHub) {
       const githubTokenSecret = new secretsmanager.Secret(this, 'GitHubToken', {
-        secretName: 'github-token',
         description: 'GitHub Personal Access Token for Amplify',
         secretStringValue: cdk.SecretValue.unsafePlainText(githubToken!),
       });
