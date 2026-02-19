@@ -102,6 +102,16 @@ export class AIPresentationCoachStack extends cdk.Stack {
         userPassword: true,
       },
       generateSecret: false, // false for browser-based / public clients
+      oAuth: {
+        flows: {
+          implicitCodeGrant: true,
+        },
+        scopes: [
+          cognito.OAuthScope.OPENID,
+          cognito.OAuthScope.EMAIL,
+          cognito.OAuthScope.PROFILE,
+        ],
+      },
     });
 
     // ──────────────────────────────────────────────
@@ -440,8 +450,8 @@ export class AIPresentationCoachStack extends cdk.Stack {
       authorizerConfiguration: agentcore.RuntimeAuthorizerConfiguration.usingCognito(
         userPool,
         [userPoolClient],
-        [], // audiences - empty for basic setup
-        []  // scopes - empty for basic setup
+        [userPoolClient.userPoolClientId], // audiences - client ID for token validation
+        ['openid', 'email', 'profile']  // scopes - standard OpenID Connect scopes
       ),
       environmentVariables: {
         'VOICE_ID': 'matthew',
