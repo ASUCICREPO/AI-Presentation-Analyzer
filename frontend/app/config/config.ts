@@ -1,9 +1,21 @@
 // =============================================================================
 // Centralized application configuration
 // =============================================================================
+//
+// IMPORTANT: When deployed to AWS Amplify, the following environment variables
+// are automatically injected at build time by the CDK stack (backend/lib/backend-stack.ts):
+//   - NEXT_PUBLIC_COGNITO_REGION
+//   - NEXT_PUBLIC_COGNITO_USER_POOL_ID
+//   - NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID
+//   - NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID
+//   - NEXT_PUBLIC_API_BASE_URL
+//   - NEXT_PUBLIC_WEBSOCKET_API_URL
+//
+// For local development, these values are loaded from frontend/.env.local
+// =============================================================================
 
 // ---------------------------------------------------------------------------
-// AWS Cognito — loaded from environment variables (.env.local)
+// AWS Cognito — loaded from environment variables (.env.local or Amplify)
 // ---------------------------------------------------------------------------
 export const cognitoConfig = {
   region: process.env.NEXT_PUBLIC_COGNITO_REGION!,
