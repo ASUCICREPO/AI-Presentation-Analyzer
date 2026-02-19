@@ -306,6 +306,81 @@ export class AIPresentationCoachStack extends cdk.Stack {
       authorizationType: apigateway.AuthorizationType.COGNITO,
     });
 
+    // ──────────────────────────────────────────────
+    // Post-Meeting Analytics Lambda
+    // ──────────────────────────────────────────────
+
+    // Lambda layer with latest boto3 (required for Bedrock structured outputs / Converse API)
+    const boto3Layer = new lambda.LayerVersion(this, 'Boto3LatestLayer', {
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'layers', 'boto3-latest'), {
+        bundling: {
+          image: lambda.Runtime.PYTHON_3_13.bundlingImage,
+          command: [
+            'bash', '-c',
+            'pip install -r requirements.txt -t /asset-output/python && cp -au . /asset-output/',
+          ],
+          local: {
+            tryBundle(outputDir: string) {
+              try {
+                const { execSync } = require('child_process');
+                execSync('pip3 --version');
+                execSync(
+                  `pip3 install -r ${path.join(__dirname, '..', 'lambda', 'layers', 'boto3-latest', 'requirements.txt')} -t ${path.join(outputDir, 'python')}`,
+                  { stdio: 'inherit' },
+                );
+                return true;
+              } catch {
+                return false;
+              }
+            },
+          },
+        },
+      }),
+      compatibleRuntimes: [lambda.Runtime.PYTHON_3_13],
+      description: 'Latest boto3/botocore for Bedrock structured outputs support',
+    });
+
+    const postMeetingAnalyticsLambda = new lambda.Function(this, 'PostMeetingAnalyticsLambda', {
+      runtime: lambda.Runtime.PYTHON_3_13,
+      handler: 'index.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'post-meeting-analytics')),
+      timeout: cdk.Duration.seconds(120),
+      layers: [boto3Layer],
+      role: new iam.Role(this, 'PostMeetingAnalyticsLambdaRole', {
+        assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+        managedPolicies: [
+          iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+        ],
+      }),
+      environment: {
+        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
+        'PERSONA_TABLE_NAME': personasTable.tableName,
+      },
+    });
+
+    // Grant Lambda access to S3 (read/write for fetching files and saving analytics)
+    presentationAndSessionUploadsBucket.grantReadWrite(postMeetingAnalyticsLambda);
+
+    // Grant Lambda read access to DynamoDB personas table
+    personasTable.grantReadData(postMeetingAnalyticsLambda);
+
+    // Grant Lambda permission to invoke any Bedrock model via Converse API
+    postMeetingAnalyticsLambda.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['bedrock:InvokeModel'],
+      resources: [
+        'arn:aws:bedrock:*::foundation-model/*',
+        `arn:aws:bedrock:*:${this.account}:inference-profile/*`,
+      ],
+    }));
+
+    // Analytics resource
+    let analytics_resource = apiGateway.root.addResource('analytics');
+    // GET /analytics - generate post-meeting analytics (auth required)
+    analytics_resource.addMethod('GET', new apigateway.LambdaIntegration(postMeetingAnalyticsLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
+    });
 
     // ──────────────────────────────────────────────
     // Bedrock Guardrail for Persona Customization
@@ -493,6 +568,9 @@ export class AIPresentationCoachStack extends cdk.Stack {
     NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/PersonaCrudLambdaRole/Resource', [
       { id: 'AwsSolutions-IAM4', reason: 'AWSLambdaBasicExecutionRole is the standard AWS managed policy required for CloudWatch Logs integration.', appliesTo: ['Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'] },
     ]);
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/PostMeetingAnalyticsLambdaRole/Resource', [
+      { id: 'AwsSolutions-IAM4', reason: 'AWSLambdaBasicExecutionRole is the standard AWS managed policy required for CloudWatch Logs integration.', appliesTo: ['Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'] },
+    ]);
     NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/ApiGatewayCloudWatchRole/Resource', [
       { id: 'AwsSolutions-IAM4', reason: 'AmazonAPIGatewayPushToCloudWatchLogs is the AWS-required managed policy for API Gateway to push logs to CloudWatch.', appliesTo: ['Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs'] },
     ]);
@@ -504,11 +582,20 @@ export class AIPresentationCoachStack extends cdk.Stack {
     NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/PersonaCrudLambda/Resource', [
       { id: 'AwsSolutions-L1', reason: 'Python 3.13 is the latest stable Lambda runtime. Python 3.14 is not yet generally available.' },
     ]);
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/PostMeetingAnalyticsLambda/Resource', [
+      { id: 'AwsSolutions-L1', reason: 'Python 3.13 is the latest stable Lambda runtime. Python 3.14 is not yet generally available.' },
+    ]);
 
     // AwsSolutions-IAM5: Wildcard S3 actions generated by CDK grantReadWrite(), scoped to the single uploads bucket
     NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/S3UrlIssuerLambdaRole/DefaultPolicy/Resource', [
       { id: 'AwsSolutions-IAM5', reason: 'Wildcard actions (s3:Abort*, s3:DeleteObject*, s3:GetBucket*, s3:GetObject*, s3:List*) are generated by CDK grantReadWrite() and scoped to the uploads bucket only.', appliesTo: ['Action::s3:Abort*', 'Action::s3:DeleteObject*', 'Action::s3:GetBucket*', 'Action::s3:GetObject*', 'Action::s3:List*'] },
       { id: 'AwsSolutions-IAM5', reason: 'Resource wildcard is scoped to objects within the uploads bucket via CDK grantReadWrite().', appliesTo: ['Resource::<AIPresentationCoachPresentationsVideos1B0D776E.Arn>/*'] },
+    ]);
+    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/PostMeetingAnalyticsLambdaRole/DefaultPolicy/Resource', [
+      { id: 'AwsSolutions-IAM5', reason: 'Wildcard actions (s3:GetObject*, s3:List*) are generated by CDK grantRead() and scoped to the uploads bucket only.', appliesTo: ['Action::s3:GetObject*', 'Action::s3:GetBucket*', 'Action::s3:List*', 'Action::s3:Abort*', 'Action::s3:DeleteObject*'] },
+      { id: 'AwsSolutions-IAM5', reason: 'Resource wildcard is scoped to objects within the uploads bucket via CDK grantReadWrite().', appliesTo: ['Resource::<AIPresentationCoachPresentationsVideos1B0D776E.Arn>/*'] },
+      { id: 'AwsSolutions-IAM5', reason: 'DynamoDB read actions require wildcard for table indexes.', appliesTo: ['Action::dynamodb:BatchGet*', 'Action::dynamodb:DescribeStream', 'Action::dynamodb:DescribeTable', 'Action::dynamodb:Get*', 'Action::dynamodb:Query', 'Action::dynamodb:Scan'] },
+      { id: 'AwsSolutions-IAM5', reason: 'Bedrock InvokeModel wildcard allows easy model switching for analytics feedback generation. Cross-region inference profiles route to multiple regions.', appliesTo: ['Resource::arn:aws:bedrock:*::foundation-model/*', `Resource::arn:aws:bedrock:*:<AWS::AccountId>:inference-profile/*`] },
     ]);
 
     // AwsSolutions-IAM5: Transcribe streaming APIs do not support resource-level permissions; wildcard is required
@@ -530,44 +617,6 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // AwsSolutions-APIG3: WAFv2 not attached — adds significant cost for a non-production student tool
     NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/AIPresentationCoachApi/DeploymentStage.prod/Resource', [
       { id: 'AwsSolutions-APIG3', reason: 'WAFv2 web ACL not attached to avoid additional cost for this non-production student-facing tool. Rate limiting handled at Cognito and API Gateway level.' },
-    ]);
-
-    // Resolve the CFN logical ID of the WebSocket API so suppressions match the cdk-nag token format
-    const wsApiLogicalId = cdk.Stack.of(this).getLogicalId(webSocketApi.node.defaultChild as cdk.CfnElement);
-
-    // LiveQA Lambda cdk-nag suppressions
-    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/LiveQALambdaRole/Resource', [
-      { id: 'AwsSolutions-IAM4', reason: 'AWSLambdaBasicExecutionRole is the standard AWS managed policy required for CloudWatch Logs integration.', appliesTo: ['Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'] },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/LiveQALambda/Resource', [
-      { id: 'AwsSolutions-L1', reason: 'Python 3.13 is the latest stable Lambda runtime. Python 3.14 is not yet generally available.' },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/LiveQALambdaRole/DefaultPolicy/Resource', [
-      { id: 'AwsSolutions-IAM5', reason: 'Bedrock runtime APIs do not support resource-level ARNs. Wildcard is required for model invocation.', appliesTo: ['Resource::*'] },
-      { id: 'AwsSolutions-IAM5', reason: 'Wildcard S3 actions generated by CDK grantReadWrite(), scoped to the uploads bucket only.', appliesTo: ['Action::s3:Abort*', 'Action::s3:DeleteObject*', 'Action::s3:GetBucket*', 'Action::s3:GetObject*', 'Action::s3:List*'] },
-      { id: 'AwsSolutions-IAM5', reason: 'Resource wildcard is scoped to objects within the uploads bucket via CDK grantReadWrite().', appliesTo: ['Resource::<AIPresentationCoachPresentationsVideos1B0D776E.Arn>/*'] },
-      { id: 'AwsSolutions-IAM5', reason: 'WebSocket ManageConnections requires wildcard on connection IDs within the API.', appliesTo: [`Resource::arn:aws:execute-api:<AWS::Region>:<AWS::AccountId>:<${wsApiLogicalId}>/*`] },
-    ]);
-
-    // AwsSolutions-IAM5: WebSocket invoke permission for authenticated Cognito users (scoped to specific API + stage)
-    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/CognitoAuthenticatedRole/DefaultPolicy/Resource', [
-      { id: 'AwsSolutions-IAM5', reason: 'WebSocket API invoke permission requires wildcard for route keys. Scoped to the specific WebSocket API and stage.', appliesTo: [`Resource::arn:aws:execute-api:<AWS::Region>:<AWS::AccountId>:<${wsApiLogicalId}>/prod/*`] },
-    ], true);
-
-    // AwsSolutions-APIG4: WebSocket APIs use Lambda-level session validation on $connect; native Cognito authorizers are not supported for WebSocket APIs
-    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/LiveQAWebSocketApi/$connect-Route/Resource', [
-      { id: 'AwsSolutions-APIG4', reason: 'WebSocket API $connect route validates session via Lambda handler. Native Cognito authorizers are not supported for WebSocket APIs in API Gateway v2.' },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/LiveQAWebSocketApi/$disconnect-Route/Resource', [
-      { id: 'AwsSolutions-APIG4', reason: 'WebSocket API $disconnect is a cleanup-only route; authorization is enforced on $connect.' },
-    ]);
-    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/LiveQAWebSocketApi/$default-Route/Resource', [
-      { id: 'AwsSolutions-APIG4', reason: 'WebSocket API $default route only processes messages from already-connected (authorized) clients; authorization is enforced on $connect.' },
-    ]);
-
-    // AwsSolutions-APIG1: WebSocket stage access logging
-    NagSuppressions.addResourceSuppressionsByPath(this, '/AIPresentationCoachStack/LiveQAWebSocketStage/Resource', [
-      { id: 'AwsSolutions-APIG1', reason: 'WebSocket API access logging is handled by Lambda CloudWatch Logs. The CDK L2 WebSocketStage construct does not expose access log configuration directly.' },
     ]);
   }
 }

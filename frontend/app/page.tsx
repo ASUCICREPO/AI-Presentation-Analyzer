@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useAuth } from './context/AuthContext';
 import Header from './components/Header';
 import PersonaSelection from './components/PersonaSelection';
@@ -13,7 +13,8 @@ import LoginPage from './components/LoginPage';
 import SignUpPage from './components/SignUpPage';
 import ConfirmSignUpPage from './components/ConfirmSignUpPage';
 import { SessionAnalytics } from './hooks/useSessionAnalytics';
-import { generateSessionId } from './config/config';
+import { AIFeedbackResponse } from './services/api';
+import { generateSessionId, Persona } from './config/config';
 import { Loader2 } from 'lucide-react';
 
 type AuthView = 'login' | 'signup' | 'confirm';
@@ -30,14 +31,20 @@ export default function Home() {
   const [selectedPersona, setSelectedPersona] = useState<string | null>(null);
   const [selectedPersonaName, setSelectedPersonaName] = useState<string>('');
   const [selectedPersonaTimeLimit, setSelectedPersonaTimeLimit] = useState<number | undefined>(undefined);
+  const [selectedPersonaData, setSelectedPersonaData] = useState<Persona | null>(null);
   const [customNotes, setCustomNotes] = useState('');
   const [pdfUploaded, setPdfUploaded] = useState(false);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string>(generateSessionId);
   const [sessionData, setSessionData] = useState<SessionAnalytics | null>(null);
+  const [aiFeedback, setAiFeedback] = useState<AIFeedbackResponse | null>(null);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [pendingStep, setPendingStep] = useState<number | null>(null);
+
+  // Ref for PracticeSession exit cleanup
+  const exitSessionRef = useRef<(() => void) | null>(null);
 
   // --- Auth navigation ---
   const handleSwitchToSignUp = () => setAuthView('signup');
@@ -80,19 +87,10 @@ export default function Home() {
     window.scrollTo(0, 0);
   };
 
-  const handlePracticeComplete = (data: SessionAnalytics) => {
+  const handlePracticeComplete = (data: SessionAnalytics, feedback: AIFeedbackResponse | null) => {
     setSessionData(data);
-    setCurrentStep(4); // Go to QA Session (Step 4)
-    window.scrollTo(0, 0);
-  };
-
-  const handleQAComplete = () => {
-    setCurrentStep(5); // Go to Review Analytics (Step 5)
-    window.scrollTo(0, 0);
-  };
-
-  const handleQASkip = () => {
-    setCurrentStep(5); // Skip QA, go directly to Analytics
+    setAiFeedback(feedback);
+    setCurrentStep(4);
     window.scrollTo(0, 0);
   };
 
@@ -119,8 +117,10 @@ export default function Home() {
   const handleBackToStart = () => {
     setCurrentStep(1);
     setSessionData(null);
+    setAiFeedback(null);
     setSessionId(generateSessionId());
     setPdfUploaded(false);
+    setUploadedFileName(null);
     window.scrollTo(0, 0);
   };
 
@@ -141,6 +141,8 @@ export default function Home() {
   };
 
   const handleConfirmNavigation = () => {
+    exitSessionRef.current?.();
+    exitSessionRef.current = null;
     if (pendingStep !== null) {
       setCurrentStep(pendingStep);
       window.scrollTo(0, 0);
@@ -196,6 +198,7 @@ export default function Home() {
           onSelectPersona={handlePersonaSelect}
           onPersonaNameChange={setSelectedPersonaName}
           onTimeLimitChange={setSelectedPersonaTimeLimit}
+          onPersonaDataChange={setSelectedPersonaData}
           customNotes={customNotes}
           onCustomNotesChange={setCustomNotes}
           sessionId={sessionId}
@@ -207,21 +210,28 @@ export default function Home() {
         <UploadContent
           personaName={selectedPersonaName}
           sessionId={sessionId}
+          initialFileName={uploadedFileName}
+          initialUploaded={pdfUploaded}
           onBack={handleBackToPersona}
           onContinue={handleContinueFromUpload}
-          onPdfUploaded={() => setPdfUploaded(true)}
+          onPdfUploaded={(fileName) => {
+            setPdfUploaded(true);
+            setUploadedFileName(fileName);
+          }}
         />
       )}
 
       {currentStep === 3 && (
         <PracticeSession
           personaTitle={selectedPersonaName}
+          personaId={selectedPersona ?? ''}
           sessionId={sessionId}
           timeLimitSec={selectedPersonaTimeLimit}
           hasPresentationPdf={pdfUploaded}
           hasPersonaCustomization={customNotes.trim().length > 0}
           onBack={handleBackToUpload}
           onComplete={handlePracticeComplete}
+          exitSessionRef={exitSessionRef}
         />
       )}
 
@@ -240,6 +250,8 @@ export default function Home() {
       {currentStep === 5 && sessionData && (
         <ReviewAnalytics
           sessionData={sessionData}
+          aiFeedback={aiFeedback}
+          persona={selectedPersonaData}
           onDownload={handleDownloadSessionData}
           onBackToStart={handleBackToStart}
         />

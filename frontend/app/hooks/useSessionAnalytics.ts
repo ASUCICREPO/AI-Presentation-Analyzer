@@ -18,12 +18,22 @@ export interface WindowAnalytics {
     pauses: number;
 }
 
+export interface FinalAverage {
+    speakingPace: number;
+    volumeLevel: number;
+    eyeContactScore: number;
+    totalFillerWords: number;
+    totalPauses: number;
+    totalWindows: number;
+}
+
 export interface SessionAnalytics {
     sessionId: string;
     startTime: string;
     endTime?: string;
     personaTitle: string;
     windows: WindowAnalytics[];
+    finalAverage?: FinalAverage;
 }
 
 function calculateStdDev(values: number[]): number {
@@ -139,10 +149,24 @@ export function useSessionAnalytics(personaTitle: string, sessionId: string) {
 
     // Get the complete session data
     const getSessionData = useCallback((): SessionAnalytics => {
-        return {
+        const data = {
             ...sessionDataRef.current,
             endTime: new Date().toISOString(),
         };
+
+        const { windows } = data;
+        if (windows.length > 0) {
+            data.finalAverage = {
+                speakingPace: Math.round(windows.reduce((sum, w) => sum + w.speakingPace.average, 0) / windows.length),
+                volumeLevel: Math.round(windows.reduce((sum, w) => sum + w.volumeLevel.average, 0) / windows.length),
+                eyeContactScore: Math.round(windows.reduce((sum, w) => sum + w.eyeContactScore, 0) / windows.length),
+                totalFillerWords: windows.reduce((sum, w) => sum + w.fillerWords, 0),
+                totalPauses: windows.reduce((sum, w) => sum + w.pauses, 0),
+                totalWindows: windows.length,
+            };
+        }
+
+        return data;
     }, []);
 
     // Download session data as JSON

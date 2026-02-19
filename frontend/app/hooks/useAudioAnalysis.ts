@@ -134,15 +134,6 @@ export function useAudioAnalysis(): AudioAnalysisReturn {
     }
     const volume = displayVolumeRef.current;
 
-    // 3. Real-time pause check for current interval
-    if (inSilenceRef.current && !pauseAlreadyCountedRef.current && silenceStartRef.current > 0) {
-      const silenceDur = now - silenceStartRef.current;
-      if (silenceDur > PAUSE_DURATION_MS) {
-        currentIntervalPausesRef.current++;
-        pauseAlreadyCountedRef.current = true;
-      }
-    }
-
     setMetrics({
       wpm,
       volume,
@@ -292,8 +283,11 @@ export function useAudioAnalysis(): AudioAnalysisReturn {
         const rms = Math.sqrt(sum / float32.length);
         emaVolumeRef.current = EMA_ALPHA * rms + (1 - EMA_ALPHA) * emaVolumeRef.current;
 
-        // Pause detection
-        if (rms < SILENCE_THRESHOLD) {
+        // Pause detection — use EMA-smoothed volume instead of raw per-buffer
+        // RMS. Raw RMS resets the silence timer on any transient noise spike,
+        // making pauses virtually undetectable.
+        const smoothedRms = emaVolumeRef.current;
+        if (smoothedRms < SILENCE_THRESHOLD) {
           if (!inSilenceRef.current) {
             inSilenceRef.current = true;
             silenceStartRef.current = Date.now();

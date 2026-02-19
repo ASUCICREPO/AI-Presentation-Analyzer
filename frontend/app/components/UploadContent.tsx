@@ -6,18 +6,21 @@ import { getPresignedUrl, uploadFileWithPresignedUrl } from '../services/api';
 interface UploadContentProps {
   personaName: string;
   sessionId: string;
+  initialFileName?: string | null;
+  initialUploaded?: boolean;
   onBack: () => void;
   onContinue: () => void;
-  onPdfUploaded?: () => void;
+  onPdfUploaded?: (fileName: string) => void;
 }
 
-export default function UploadContent({ personaName, sessionId, onBack, onContinue, onPdfUploaded }: UploadContentProps) {
+export default function UploadContent({ personaName, sessionId, initialFileName, initialUploaded, onBack, onContinue, onPdfUploaded }: UploadContentProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [uploaded, setUploaded] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [uploaded, setUploaded] = useState(initialUploaded ?? false);
+  const [progress, setProgress] = useState(initialUploaded ? 100 : 0);
   const [error, setError] = useState<string | null>(null);
+  const [displayFileName, setDisplayFileName] = useState<string | null>(initialFileName ?? null);
 
   const handleBrowseClick = () => {
     fileInputRef.current?.click();
@@ -32,7 +35,8 @@ export default function UploadContent({ personaName, sessionId, onBack, onContin
       await uploadFileWithPresignedUrl(file, presigned, (pct) => setProgress(pct));
       setProgress(100);
       setUploaded(true);
-      onPdfUploaded?.();
+      setDisplayFileName(file.name);
+      onPdfUploaded?.(file.name);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
@@ -55,6 +59,7 @@ export default function UploadContent({ personaName, sessionId, onBack, onContin
     setUploaded(false);
     setProgress(0);
     setError(null);
+    setDisplayFileName(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -83,7 +88,7 @@ export default function UploadContent({ personaName, sessionId, onBack, onContin
       </div>
 
       {/* File Upload Dropzone / Selected File */}
-      {!selectedFile ? (
+      {!selectedFile && !displayFileName ? (
         <div className="mb-8 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50/50 p-10 text-center transition-colors hover:border-maroon-300 hover:bg-maroon-50/10 2xl:p-16 2xl:mb-12">
           <div className="flex flex-col items-center justify-center">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100 2xl:h-16 2xl:w-16 2xl:mb-6">
@@ -130,10 +135,12 @@ export default function UploadContent({ personaName, sessionId, onBack, onContin
                 </svg>
               </div>
               <div>
-                <p className="text-sm font-medium text-gray-900 font-sans 2xl:text-lg">{selectedFile.name}</p>
-                <p className="text-xs text-gray-500 font-sans 2xl:text-sm">
-                  {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                </p>
+                <p className="text-sm font-medium text-gray-900 font-sans 2xl:text-lg">{selectedFile?.name ?? displayFileName}</p>
+                {selectedFile && (
+                  <p className="text-xs text-gray-500 font-sans 2xl:text-sm">
+                    {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                  </p>
+                )}
               </div>
             </div>
 
