@@ -432,7 +432,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // AgentCore Runtime for Live Q&A WebSocket Agent
     // ──────────────────────────────────────────────
     const agentCoreRuntime = new agentcore.Runtime(this, 'LiveQAAgentRuntime', {
-      runtimeName: 'liveQaAgent',
+      runtimeName: 'live_qa_agent',
       description: 'Bidirectional voice agent for live Q&A sessions with WebSocket support',
       agentRuntimeArtifact: agentcore.AgentRuntimeArtifact.fromAsset(
         path.join(__dirname, '..', 'agentcore')
