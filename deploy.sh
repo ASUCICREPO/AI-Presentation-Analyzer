@@ -1,5 +1,4 @@
 #!/bin/bash
-set -e
 
 # Colors for output
 RED='\033[0;31m'
@@ -18,8 +17,12 @@ echo -e "${BLUE}║   AI Presentation Coach - GitHub Deployment Script        �
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════╗${NC}"
 echo ""
 
-# Get AWS region from CLI config
-AWS_REGION=$(aws configure get region)
+# Get AWS region from CLI config or environment
+AWS_REGION=$(aws configure get region 2>/dev/null || echo "$AWS_DEFAULT_REGION")
+if [ -z "$AWS_REGION" ]; then
+    # Try to get from EC2 metadata (CloudShell)
+    AWS_REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null || echo "")
+fi
 if [ -z "$AWS_REGION" ]; then
     echo -e "${RED}Error: AWS region not configured. Please run 'aws configure' first.${NC}"
     exit 1
