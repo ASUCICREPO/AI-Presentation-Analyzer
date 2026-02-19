@@ -30,7 +30,6 @@ opentelemetry-sdk==1.39.1
 opentelemetry-semantic-conventions==0.60b1
 packaging==26.0
 prompt-toolkit==3.0.52
-pyaudio==0.2.14
 pycparser==3.0
 pydantic==2.12.5
 pydantic-core==2.41.5
@@ -39,7 +38,6 @@ pyjwt==2.11.0
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
 python-multipart==0.0.22
-pywin32==311
 referencing==0.37.0
 rpds-py==0.30.0
 s3transfer==0.16.0

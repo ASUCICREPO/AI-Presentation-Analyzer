@@ -12,8 +12,6 @@ from typing import Literal
 import asyncio
 import boto3
 import os
-import json
-import time
 
 '''
 A quick note on voice selection:
@@ -136,6 +134,7 @@ async def main():
     loop.add_signal_handler(signal.SIGTERM, signal_handler)
 
     try:
+        await agent.start()
         await agent.run(
             inputs=[audio_io.input()],
             outputs=[audio_io.output(), text_io.output()]

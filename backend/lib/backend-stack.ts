@@ -356,7 +356,14 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // ──────────────────────────────────────────────
     // WebSocket API for Live Q&A Session
     // ──────────────────────────────────────────────
-
+    
+    //Create a Lambda layer to manage dependencies
+    const agentcore_layer = new lambda.LayerVersion(this, 'MyLayer', {
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'agentcore')),
+      compatibleArchitectures: [lambda.Architecture.ARM_64],
+    })
+    
     // Lambda for WebSocket Q&A handler
     const liveQALambda = new lambda.Function(this, 'LiveQALambda', {
       runtime: lambda.Runtime.PYTHON_3_13,
@@ -377,6 +384,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
         'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
         'DEFAULT_VOICE_ID': 'matthew',
       },
+      layers: [agentcore_layer], // Add the layer to the Lambda function
     });
 
     // Grant Lambda permissions for DynamoDB and S3
