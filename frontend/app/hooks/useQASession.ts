@@ -213,8 +213,14 @@ export function useQASession(
     setPartialAssistantText('');
 
     try {
-      const token = getToken ? await getToken() : undefined;
-      const client = new QAWebSocketClient({ ...config, token }, handleEvent);
+      if (!getToken) {
+        throw new Error('getToken function is required for authentication');
+      }
+      
+      const client = new QAWebSocketClient(
+        { ...config, getIdToken: getToken },
+        handleEvent
+      );
       wsClientRef.current = client;
       await client.connect();
       await startAudioCapture();

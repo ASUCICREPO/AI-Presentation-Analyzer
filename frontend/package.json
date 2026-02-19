@@ -9,9 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@aws-crypto/sha256-js": "^5.2.0",
     "@aws-sdk/client-cognito-identity": "^3.985.0",
     "@aws-sdk/client-transcribe-streaming": "^3.985.0",
-    "@aws-sdk/credential-providers": "^3.985.0",
+    "@aws-sdk/credential-providers": "^3.994.0",
+    "@aws-sdk/protocol-http": "^3.370.0",
+    "@aws-sdk/signature-v4": "^3.370.0",
     "@mediapipe/tasks-vision": "^0.10.32",
     "amazon-cognito-identity-js": "^6.3.16",
     "fix-webm-duration": "^1.0.6",

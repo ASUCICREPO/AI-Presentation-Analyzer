@@ -472,6 +472,17 @@ export class AIPresentationCoachStack extends cdk.Stack {
       ],
     }));
 
+    // Grant Cognito Identity Pool users permission to connect to AgentCore WebSocket
+    authenticatedRole.addToPolicy(
+      new iam.PolicyStatement({
+        effect: iam.Effect.ALLOW,
+        actions: [
+          'bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream',
+        ],
+        resources: [agentCoreRuntime.agentRuntimeArn],
+      }),
+    );
+
     // ──────────────────────────────────────────────
     // Amplify Hosting for Frontend (Next.js)
     // ──────────────────────────────────────────────

@@ -1,4 +1,6 @@
-import { WEBSOCKET_URL, QA_SESSION_CONFIG } from '../config/config';
+import { WEBSOCKET_URL, QA_SESSION_CONFIG, cognitoConfig } from '../config/config';
+import { signWebSocketUrl } from './websocketSigner';
+import { getAwsCredentials } from './awsCredentials';
 
 export interface QAWebSocketConfig {
   personaId: string;
@@ -6,7 +8,7 @@ export interface QAWebSocketConfig {
   userId: string;
   dateStr: string;
   voiceId?: string;
-  token?: string;
+  getIdToken: () => Promise<string>;
 }
 
 export interface QATranscriptEntry {
@@ -47,19 +49,38 @@ export class QAWebSocketClient {
     return this._isConnected && this.ws?.readyState === WebSocket.OPEN;
   }
 
-  connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const params = new URLSearchParams({
-        personaId: this.config.personaId,
-        sessionId: this.config.sessionId,
-        userId: this.config.userId,
-        dateStr: this.config.dateStr,
-        ...(this.config.voiceId && { voiceId: this.config.voiceId }),
-        ...(this.config.token && { token: this.config.token }),
-      });
-
-      const url = `${WEBSOCKET_URL}?${params.toString()}`;
-      this.ws = new WebSocket(url);
+  async connect(): Promise<void> {
+    try {
+      // Get temporary AWS credentials from Cognito Identity Pool
+      const credentials = await getAwsCredentials(this.config.getIdToken);
+      
+      // Build base URL with custom headers as query parameters
+      // AgentCore accepts custom headers with prefix: X-Amzn-Bedrock-AgentCore-Runtime-Custom-
+      const baseUrl = new URL(WEBSOCKET_URL);
+      
+      // Session ID (standard header, not custom)
+      baseUrl.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id', this.config.sessionId);
+      
+      // Custom headers for persona configuration
+      baseUrl.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Custom-PersonaId', this.config.personaId);
+      baseUrl.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Custom-UserId', this.config.userId);
+      baseUrl.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Custom-DateStr', this.config.dateStr);
+      
+      if (this.config.voiceId) {
+        baseUrl.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Custom-VoiceId', this.config.voiceId);
+      }
+      
+      // Sign the URL with SigV4 (adds AWS signature query parameters)
+      const signedUrl = await signWebSocketUrl(
+        baseUrl.toString(),
+        credentials,
+        cognitoConfig.region
+      );
+      
+      console.log('[QA WebSocket] Connecting with SigV4 authentication...');
+      
+      return new Promise((resolve, reject) => {
+        this.ws = new WebSocket(signedUrl);
 
       this.ws.onopen = () => {
         console.log('[QA WebSocket] Connected');
@@ -88,7 +109,11 @@ export class QAWebSocketClient {
         this._isConnected = false;
         reject(error);
       };
-    });
+      });
+    } catch (error) {
+      console.error('[QA WebSocket] Failed to establish connection:', error);
+      throw error;
+    }
   }
 
   startSession(): void {
