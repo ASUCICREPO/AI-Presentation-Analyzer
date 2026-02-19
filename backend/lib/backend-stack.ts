@@ -11,6 +11,8 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as bedrock from 'aws-cdk-lib/aws-bedrock';
 import { NagSuppressions } from 'cdk-nag';
+import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
+import * as agentcore from '@aws-cdk/aws-bedrock-agentcore-alpha';
 
 export class AIPresentationCoachStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -429,105 +431,48 @@ export class AIPresentationCoachStack extends cdk.Stack {
     }));
 
     // ──────────────────────────────────────────────
-    // WebSocket API for Live Q&A Session
+    // AgentCore Runtime for Live Q&A WebSocket Agent
     // ──────────────────────────────────────────────
-    
-    //Create a Lambda layer to manage dependencies
-    const agentcore_layer = new lambda.LayerVersion(this, 'MyLayer', {
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'agentcore')),
-      compatibleArchitectures: [lambda.Architecture.ARM_64],
-    })
-    
-    // Lambda for WebSocket Q&A handler
-    const liveQALambda = new lambda.Function(this, 'LiveQALambda', {
-      runtime: lambda.Runtime.PYTHON_3_13,
-      handler: 'index.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'live-qa')),
-      timeout: cdk.Duration.minutes(10), // 10 minutes to handle 5-min sessions
-      memorySize: 1024,
-      role: new iam.Role(this, 'LiveQALambdaRole', {
-        assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-        managedPolicies: [
-          iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
-        ],
-      }),
-      environment: {
+    const agentCoreRuntime = new agentcore.Runtime(this, 'LiveQAAgentRuntime', {
+      runtimeName: 'live-qa-agent',
+      description: 'Bidirectional voice agent for live Q&A sessions with WebSocket support',
+      agentRuntimeArtifact: agentcore.AgentRuntimeArtifact.fromAsset(
+        path.join(__dirname, '..', 'agentcore')
+      ),
+      authorizerConfiguration: agentcore.RuntimeAuthorizerConfiguration.usingCognito(
+        userPool,
+        [userPoolClient],
+        [], // audiences - empty for basic setup
+        []  // scopes - empty for basic setup
+      ),
+      environmentVariables: {
+        'VOICE_ID': 'matthew',
         'MODEL_ID': 'amazon.nova-2-sonic-v1:0',
-        'SESSION_DURATION_SEC': '300', // 5 minutes
+        'SESSION_DURATION_SEC': '300',
         'PERSONA_TABLE_NAME': personasTable.tableName,
         'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
-        'DEFAULT_VOICE_ID': 'matthew',
       },
-      layers: [agentcore_layer], // Add the layer to the Lambda function
+      lifecycleConfiguration: {
+        idleRuntimeSessionTimeout: cdk.Duration.minutes(10),
+        maxLifetime: cdk.Duration.hours(1),
+      },
     });
 
-    // Grant Lambda permissions for DynamoDB and S3
-    personasTable.grantReadData(liveQALambda);
-    presentationAndSessionUploadsBucket.grantReadWrite(liveQALambda);
+    // Grant DynamoDB read permissions
+    personasTable.grantReadData(agentCoreRuntime);
 
-    // Grant Lambda permission to invoke Bedrock models
-    liveQALambda.addToRolePolicy(new iam.PolicyStatement({
+    // Grant S3 read permissions
+    presentationAndSessionUploadsBucket.grantRead(agentCoreRuntime);
+
+    // Grant Bedrock model invocation permissions
+    agentCoreRuntime.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
-      actions: [
-        'bedrock:InvokeModel',
-        'bedrock:InvokeModelWithResponseStream',
-        'bedrock-runtime:InvokeModel',
-        'bedrock-runtime:InvokeModelWithResponseStream',
-        'bedrock-runtime:StartAsyncInvoke',
-        'bedrock-runtime:RetrieveAndGenerate',
-      ],
-      resources: ['*'], // Bedrock models don't support resource-level permissions
-    }));
-
-    // Create WebSocket API
-    const webSocketApi = new apigatewayv2.WebSocketApi(this, 'LiveQAWebSocketApi', {
-      description: 'WebSocket API for live Q&A sessions',
-      connectRouteOptions: {
-        integration: new apigatewayv2_integrations.WebSocketLambdaIntegration('ConnectIntegration', liveQALambda),
-      },
-      disconnectRouteOptions: {
-        integration: new apigatewayv2_integrations.WebSocketLambdaIntegration('DisconnectIntegration', liveQALambda),
-      },
-      defaultRouteOptions: {
-        integration: new apigatewayv2_integrations.WebSocketLambdaIntegration('DefaultIntegration', liveQALambda),
-      },
-    });
-
-    // Create WebSocket API Stage
-    const webSocketStage = new apigatewayv2.WebSocketStage(this, 'LiveQAWebSocketStage', {
-      webSocketApi,
-      stageName: 'prod',
-      autoDeploy: true,
-    });
-
-    // Grant Lambda permission to manage WebSocket connections
-    liveQALambda.addToRolePolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: [
-        'execute-api:ManageConnections',
-        'execute-api:Invoke',
-      ],
+      actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
       resources: [
-        `arn:aws:execute-api:${this.region}:${this.account}:${webSocketApi.apiId}/*`,
+        'arn:aws:bedrock:*::foundation-model/amazon.nova-2-sonic-v1:0',
+        `arn:aws:bedrock:*:${this.account}:inference-profile/*`,
       ],
     }));
-
-    // Add WebSocket connection permissions to the authenticated role
-    authenticatedRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: [
-          'execute-api:Invoke',
-        ],
-        resources: [
-          `arn:aws:execute-api:${this.region}:${this.account}:${webSocketApi.apiId}/${webSocketStage.stageName}/*`,
-        ],
-      }),
-    );
-
-    // Pass WebSocket API endpoint to Lambda
-    liveQALambda.addEnvironment('WEBSOCKET_API_ENDPOINT', webSocketStage.url);
 
     // ──────────────────────────────────────────────
     // Stack Outputs (useful for frontend configuration)
@@ -552,9 +497,14 @@ export class AIPresentationCoachStack extends cdk.Stack {
       description: 'AWS Region',
     });
 
-    new cdk.CfnOutput(this, 'WebSocketApiUrl', {
-      value: webSocketStage.url,
-      description: 'WebSocket API URL for Live Q&A',
+    new cdk.CfnOutput(this, 'AgentCoreRuntimeArn', {
+      value: agentCoreRuntime.agentRuntimeArn,
+      description: 'AgentCore Runtime ARN for Live Q&A',
+    });
+
+    new cdk.CfnOutput(this, 'AgentCoreWebSocketUrl', {
+      value: `wss://bedrock-agentcore.${this.region}.amazonaws.com/runtimes/${agentCoreRuntime.agentRuntimeArn}/ws`,
+      description: 'WebSocket URL for Live Q&A (authenticate with Cognito ID token)',
     });
 
     // ──────────────────────────────────────────────
