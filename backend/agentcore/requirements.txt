@@ -1,6 +1,5 @@
 aws-sdk-bedrock-runtime>=0.3.0,
 prompt-toolkit>=3.0.52,
-pyaudio>=0.2.14
 strands-agents>=1.26.0
 bedrock-agentcore>=1.0.3
 
