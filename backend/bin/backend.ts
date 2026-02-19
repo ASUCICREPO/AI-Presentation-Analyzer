@@ -2,25 +2,86 @@
 import * as cdk from 'aws-cdk-lib';
 import { Aspects } from 'aws-cdk-lib';
 import { AwsSolutionsChecks } from 'cdk-nag';
+import { AmplifyHostingStack } from '../lib/amplify-hosting-stack';
 import { AIPresentationCoachStack } from '../lib/backend-stack';
+import { FrontendConfigStack } from '../lib/frontend-config-stack';
 
 const app = new cdk.App();
-new AIPresentationCoachStack(app, 'AIPresentationCoachStack', {
-  /* If you don't specify 'env', this stack will be environment-agnostic.
-   * Account/Region-dependent features and context lookups will not work,
-   * but a single synthesized template can be deployed anywhere. */
 
-  /* Uncomment the next line to specialize this stack for the AWS Account
-   * and Region that are implied by the current CLI configuration. */
-  // env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },
+// ──────────────────────────────────────────────────────────
+// All configuration lives here — one place to change.
+//
+// Deploy order (handled automatically by `cdk deploy --all`):
+//   1. AmplifyHostingStack  → creates Amplify App, gets appId + domain
+//   2. BackendStack         → uses Amplify URL for CORS
+//   3. FrontendConfigStack  → adds branch (+ env vars in GitHub mode)
+//
+// GitHub mode (Amplify builds from source on push):
+//   cdk deploy --all -c branchName=master \
+//     -c githubOwner=my-org -c githubRepo=my-repo -c githubToken=ghp_xxx
+//
+// Bare mode (deploy script pushes built artifacts to Amplify):
+//   cdk deploy --all -c branchName=master
+// ──────────────────────────────────────────────────────────
 
-  /* Uncomment the next line if you know exactly what Account and Region you
-   * want to deploy the stack to. */
-  // env: { account: '123456789012', region: 'us-east-1' },
+function requireContext(key: string): string {
+  const value = app.node.tryGetContext(key);
+  if (!value) {
+    throw new Error(`Missing required context: -c ${key}=<value>`);
+  }
+  return value as string;
+}
 
-  /* For more information, see https://docs.aws.amazon.com/cdk/latest/guide/environments.html */
-  
+const config = {
+  branchName:  requireContext('branchName'),
+
+  // Optional — provide all three for GitHub CI/CD mode, omit for bare/script mode
+  githubOwner: app.node.tryGetContext('githubOwner') as string | undefined,
+  githubRepo:  app.node.tryGetContext('githubRepo')  as string | undefined,
+  githubToken: app.node.tryGetContext('githubToken') as string | undefined,
+};
+
+const useGitHub = !!(config.githubOwner && config.githubRepo && config.githubToken);
+
+// ──────────────────────────────────────────────
+// 1. Amplify App shell (with or without GitHub source)
+// ──────────────────────────────────────────────
+const amplifyHosting = new AmplifyHostingStack(app, `AmplifyHostingStack-${config.branchName}`, {
+  description: `Amplify App for ${config.branchName}`,
+  branchName:  config.branchName,
+  githubOwner: config.githubOwner,
+  githubRepo:  config.githubRepo,
+  githubToken: config.githubToken,
 });
 
-// Security scanning — validate CDK code against AWS best practices
+// ──────────────────────────────────────────────
+// 2. Backend — CORS locked to localhost + Amplify URL
+// ──────────────────────────────────────────────
+const amplifyAppUrl = cdk.Fn.join('', [
+  'https://',
+  config.branchName,
+  '.',
+  amplifyHosting.defaultDomain,
+]);
+
+const backend = new AIPresentationCoachStack(app, 'AIPresentationCoachStack', {
+  allowedOrigins: ['http://localhost:3000', amplifyAppUrl],
+});
+
+// ──────────────────────────────────────────────
+// 3. Frontend config — adds branch to the Amplify App
+// ──────────────────────────────────────────────
+new FrontendConfigStack(app, `FrontendConfigStack-${config.branchName}`, {
+  description: `Frontend branch config for ${config.branchName}`,
+  amplifyAppId:         amplifyHosting.appId,
+  amplifyDefaultDomain: amplifyHosting.defaultDomain,
+  branchName:           config.branchName,
+  useGitHub,
+  apiUrl:               backend.apiUrl,
+  userPoolId:           backend.userPoolId,
+  userPoolClientId:     backend.userPoolClientId,
+  identityPoolId:       backend.identityPoolId,
+});
+
+// Security scanning
 Aspects.of(app).add(new AwsSolutionsChecks({ verbose: true }));

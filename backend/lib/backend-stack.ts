@@ -10,9 +10,21 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as bedrock from 'aws-cdk-lib/aws-bedrock';
 import { NagSuppressions } from 'cdk-nag';
 
+export interface AIPresentationCoachStackProps extends cdk.StackProps {
+  /** CORS origins for S3 and API Gateway. Defaults to ['*'] when not provided. */
+  allowedOrigins?: string[];
+}
+
 export class AIPresentationCoachStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+  public readonly userPoolId: string;
+  public readonly userPoolClientId: string;
+  public readonly identityPoolId: string;
+  public readonly apiUrl: string;
+
+  constructor(scope: Construct, id: string, props?: AIPresentationCoachStackProps) {
     super(scope, id, props);
+
+    const allowedOrigins = props?.allowedOrigins ?? ['*'];
 
     // ──────────────────────────────────────────────
     // S3 bucket for uploads
@@ -32,7 +44,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
       autoDeleteObjects: true,
       cors: [
         {
-          allowedOrigins: ['*'],
+          allowedOrigins: allowedOrigins,
           allowedMethods: [s3.HttpMethods.GET, s3.HttpMethods.PUT, s3.HttpMethods.POST],
           allowedHeaders: ['*'],
           exposedHeaders: ['ETag'],
@@ -195,7 +207,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
         loggingLevel: apigateway.MethodLoggingLevel.INFO,
       },
       defaultCorsPreflightOptions: {
-        allowOrigins: apigateway.Cors.ALL_ORIGINS,
+        allowOrigins: allowedOrigins,
         allowMethods: apigateway.Cors.ALL_METHODS,
         allowHeaders: ['Content-Type', 'Authorization'],
       },
@@ -427,6 +439,14 @@ export class AIPresentationCoachStack extends cdk.Stack {
     }));
 
     // ──────────────────────────────────────────────
+    // Expose values for cross-stack references
+    // ──────────────────────────────────────────────
+    this.userPoolId = userPool.userPoolId;
+    this.userPoolClientId = userPoolClient.userPoolClientId;
+    this.identityPoolId = identityPool.ref;
+    this.apiUrl = apiGateway.url;
+
+    // ──────────────────────────────────────────────
     // Stack Outputs (useful for frontend configuration)
     // ──────────────────────────────────────────────
     new cdk.CfnOutput(this, 'UserPoolId', {
@@ -447,6 +467,11 @@ export class AIPresentationCoachStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'Region', {
       value: this.region,
       description: 'AWS Region',
+    });
+
+    new cdk.CfnOutput(this, 'ApiUrl', {
+      value: apiGateway.url,
+      description: 'API Gateway base URL',
     });
 
     // ──────────────────────────────────────────────
