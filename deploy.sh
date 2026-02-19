@@ -152,6 +152,32 @@ EOF
         echo -e "${GREEN}✓ Using existing IAM role: $ROLE_ARN${NC}"
     fi
     
+    # Prepare source auth if GitHub token is provided
+    SOURCE_AUTH_PARAM=""
+    if [ -n "$GITHUB_TOKEN" ]; then
+        # Import GitHub token as source credential
+        echo -e "${BLUE}Configuring GitHub authentication...${NC}"
+        
+        # Check if credential already exists
+        EXISTING_CRED=$(aws codebuild list-source-credentials \
+            --region "$AWS_REGION" \
+            --query 'sourceCredentialsInfos[?serverType==`GITHUB`].arn' \
+            --output text 2>/dev/null || echo "")
+        
+        if [ -z "$EXISTING_CRED" ]; then
+            CRED_ARN=$(aws codebuild import-source-credentials \
+                --server-type GITHUB \
+                --auth-type PERSONAL_ACCESS_TOKEN \
+                --token "$GITHUB_TOKEN" \
+                --region "$AWS_REGION" \
+                --query 'arn' \
+                --output text)
+            echo -e "${GREEN}✓ GitHub credentials imported${NC}"
+        else
+            echo -e "${GREEN}✓ Using existing GitHub credentials${NC}"
+        fi
+    fi
+    
     # Create CodeBuild project
     aws codebuild create-project \
         --name "$PROJECT_NAME" \
@@ -166,6 +192,29 @@ EOF
     echo -e "${GREEN}✓ CodeBuild project created: $PROJECT_NAME${NC}"
 else
     echo -e "${GREEN}✓ Using existing CodeBuild project: $PROJECT_NAME${NC}"
+    
+    # If token is provided and project exists, update source credentials
+    if [ -n "$GITHUB_TOKEN" ]; then
+        echo -e "${BLUE}Checking GitHub authentication...${NC}"
+        
+        EXISTING_CRED=$(aws codebuild list-source-credentials \
+            --region "$AWS_REGION" \
+            --query 'sourceCredentialsInfos[?serverType==`GITHUB`].arn' \
+            --output text 2>/dev/null || echo "")
+        
+        if [ -z "$EXISTING_CRED" ]; then
+            aws codebuild import-source-credentials \
+                --server-type GITHUB \
+                --auth-type PERSONAL_ACCESS_TOKEN \
+                --token "$GITHUB_TOKEN" \
+                --region "$AWS_REGION" \
+                --query 'arn' \
+                --output text > /dev/null
+            echo -e "${GREEN}✓ GitHub credentials imported${NC}"
+        else
+            echo -e "${GREEN}✓ GitHub credentials already configured${NC}"
+        fi
+    fi
 fi
 echo ""
 
