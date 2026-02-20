@@ -240,7 +240,7 @@ export function useQASession(
       }
       
       const client = new QAWebSocketClient(
-        { ...config, getIdToken: getToken },
+        config,
         handleEvent
       );
       wsClientRef.current = client;

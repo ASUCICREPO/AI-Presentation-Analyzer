@@ -33,6 +33,7 @@ interface AuthContextType extends AuthState {
   resendConfirmation: (email: string) => Promise<void>;
   signOut: () => void;
   getIdToken: () => Promise<string>;
+  getAccessToken: () => Promise<string>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -56,6 +57,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       currentUser.getSession((err: Error | null, session: CognitoUserSession | null) => {
         if (err || !session?.isValid()) return reject(err ?? new Error('Invalid session'));
         resolve(session.getIdToken().getJwtToken());
+      });
+    });
+  }, []);
+
+  const getAccessToken = useCallback((): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const currentUser = userPool.getCurrentUser();
+      if (!currentUser) return reject(new Error('No authenticated user'));
+
+      currentUser.getSession((err: Error | null, session: CognitoUserSession | null) => {
+        if (err || !session?.isValid()) return reject(err ?? new Error('Invalid session'));
+        resolve(session.getAccessToken().getJwtToken());
       });
     });
   }, []);
@@ -165,7 +178,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ ...authState, signIn, signUp, confirmSignUp, resendConfirmation, signOut, getIdToken }}
+      value={{ ...authState, signIn, signUp, confirmSignUp, resendConfirmation, signOut, getIdToken, getAccessToken }}
     >
       {children}
     </AuthContext.Provider>

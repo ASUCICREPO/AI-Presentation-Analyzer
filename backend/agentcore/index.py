@@ -1,15 +1,16 @@
 from starlette.websockets import WebSocket, WebSocketDisconnect
-from strands.experimental.bidi import BidiAgent, BidiTextIO
+from strands.experimental.bidi import BidiAgent
+from strands.experimental.bidi.io.text import BidiTextIO
 from strands.experimental.bidi.types.events import BidiAudioInputEvent
 from strands.experimental.bidi.models import BidiNovaSonicModel
 from strands.experimental.bidi.tools import stop_conversation
-from strands.experimental.bidi.hooks.events import (
+from strands.experimental.hooks.events import (
     BidiAgentInitializedEvent,
     BidiBeforeInvocationEvent,
     BidiAfterInvocationEvent,
     BidiMessageAddedEvent
 )
-from bedrock_agentcore import BedrockAgentCoreApp
+from bedrock_agentcore import BedrockAgentCoreApp, RequestContext
 from typing import Literal
 import asyncio
 import boto3
@@ -175,9 +176,6 @@ async def load_transcript(user_id: str, date_str: str, session_id: str) -> str:
         return ""
 
 
-text_io = BidiTextIO()
-
-
 async def main():
     # Persistent connection with continuous streaming
     # BidiAudioIO uses pyaudio (local mic) — only import when running locally
@@ -185,6 +183,7 @@ async def main():
     import signal
 
     audio_io = BidiAudioIO()
+    text_io = None  # BidiTextIO removed in newer strands SDK
     loop = asyncio.get_event_loop()
 
     def signal_handler():
@@ -198,7 +197,7 @@ async def main():
         await agent.start()
         await agent.run(
             inputs=[audio_io.input()],
-            outputs=[audio_io.output(), text_io.output()]
+            outputs=[audio_io.output()]
         )
     except asyncio.CancelledError:
         print("Agent run cancelled, shutting down...")
@@ -206,7 +205,7 @@ async def main():
 app = BedrockAgentCoreApp()
 
 @app.websocket
-async def websocket_handler(websocket, context):
+async def websocket_handler(websocket, context: RequestContext):
     """
     WebSocket handler for Q&A sessions.
     
@@ -221,18 +220,22 @@ async def websocket_handler(websocket, context):
     """
     
     # Extract custom headers from context
-    # AgentCore passes custom headers in context['headers']
-    headers = context.get('headers', {})
+    headers = getattr(context, 'request_headers', None) or {}
     
     persona_id = headers.get('x-amzn-bedrock-agentcore-runtime-custom-personaid', '')
     user_id = headers.get('x-amzn-bedrock-agentcore-runtime-custom-userid', '')
     date_str = headers.get('x-amzn-bedrock-agentcore-runtime-custom-datestr', '')
     voice_id = headers.get('x-amzn-bedrock-agentcore-runtime-custom-voiceid', DEFAULT_VOICE_ID)
     
-    # Session ID is in standard header
     session_id = headers.get('x-amzn-bedrock-agentcore-runtime-session-id', '')
     
     print(f"[WebSocket] Connection from user={user_id}, persona={persona_id}, session={session_id}")
+    
+    if not persona_id or not user_id or not session_id:
+        await websocket.accept()
+        await websocket.send_json({"type": "error", "message": "Missing required session parameters"})
+        await websocket.close()
+        return
     
     agent = None
     
@@ -311,7 +314,5 @@ async def websocket_handler(websocket, context):
         except:
             pass
 
-
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    app.run()
