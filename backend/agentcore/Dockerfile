@@ -1,8 +1,13 @@
 FROM public.ecr.aws/docker/library/python:3.12-slim
 WORKDIR /app
 
+# portaudio19-dev is required by pyaudio, which strands.experimental.bidi
+# imports unconditionally at module level even in server (non-audio) contexts
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    portaudio19-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt requirements.txt
-# Install from requirements file
 RUN pip install -r requirements.txt
 
 RUN pip install aws-opentelemetry-distro>=0.10.1

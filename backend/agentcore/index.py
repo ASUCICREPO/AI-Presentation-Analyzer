@@ -175,7 +175,6 @@ async def load_transcript(user_id: str, date_str: str, session_id: str) -> str:
         return ""
 
 
-audio_io = None  # Initialized only in local main() — not available in cloud container
 text_io = BidiTextIO()
 
 
