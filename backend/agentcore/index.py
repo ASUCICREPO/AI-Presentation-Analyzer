@@ -10,7 +10,7 @@ from strands.experimental.hooks.events import (
     BidiAfterInvocationEvent,
     BidiMessageAddedEvent
 )
-from bedrock_agentcore import BedrockAgentCoreApp
+from bedrock_agentcore import BedrockAgentCoreApp, RequestContext
 from typing import Literal
 import asyncio
 import boto3
@@ -205,7 +205,7 @@ async def main():
 app = BedrockAgentCoreApp()
 
 @app.websocket
-async def websocket_handler(websocket, context):
+async def websocket_handler(websocket, context: RequestContext):
     """
     WebSocket handler for Q&A sessions.
     
@@ -220,15 +220,13 @@ async def websocket_handler(websocket, context):
     """
     
     # Extract custom headers from context
-    # AgentCore passes custom headers in context['headers']
-    headers = context.get('headers', {})
+    headers = context.request_headers if hasattr(context, 'request_headers') else {}
     
     persona_id = headers.get('x-amzn-bedrock-agentcore-runtime-custom-personaid', '')
     user_id = headers.get('x-amzn-bedrock-agentcore-runtime-custom-userid', '')
     date_str = headers.get('x-amzn-bedrock-agentcore-runtime-custom-datestr', '')
     voice_id = headers.get('x-amzn-bedrock-agentcore-runtime-custom-voiceid', DEFAULT_VOICE_ID)
     
-    # Session ID is in standard header
     session_id = headers.get('x-amzn-bedrock-agentcore-runtime-session-id', '')
     
     print(f"[WebSocket] Connection from user={user_id}, persona={persona_id}, session={session_id}")
@@ -309,8 +307,6 @@ async def websocket_handler(websocket, context):
             await websocket.close()
         except:
             pass
-
-
 
 if __name__ == "__main__":
     app.run()
