@@ -64,7 +64,7 @@ const amplifyAppUrl = cdk.Fn.join('', [
   amplifyHosting.defaultDomain,
 ]);
 
-const backend = new AIPresentationCoachStack(app, 'AIPresentationCoachStack', {
+const backend = new AIPresentationCoachStack(app, `AIPresentationCoachStack-${config.branchName}`, {
   allowedOrigins: ['http://localhost:3000', amplifyAppUrl],
 });
 
