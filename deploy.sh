@@ -186,6 +186,8 @@ EOF
         --artifacts type=NO_ARTIFACTS \
         --environment type=ARM_CONTAINER,image="$BUILD_IMAGE",computeType="$COMPUTE_TYPE",privilegedMode=true \
         --service-role "$ROLE_ARN" \
+        --timeout-in-minutes 60 \
+        --logs-config cloudWatchLogs={status=ENABLED} \
         --region "$AWS_REGION" \
         > /dev/null
     
@@ -244,6 +246,11 @@ BUILD_ARN=$(echo "$BUILD_OUTPUT" | grep -o '"arn": "[^"]*"' | head -1 | cut -d'"
 
 if [ -z "$BUILD_ID" ]; then
     echo -e "${RED}Error: Failed to start build${NC}"
+    echo -e "${YELLOW}Possible causes:${NC}"
+    echo -e "${YELLOW}  - Check CodeBuild project configuration${NC}"
+    echo -e "${YELLOW}  - Verify IAM permissions for the service role${NC}"
+    echo -e "${YELLOW}  - Ensure GitHub repository is accessible${NC}"
+    echo -e "${YELLOW}  - Check buildspec-deploy.yml syntax${NC}"
     exit 1
 fi
 
