@@ -9,13 +9,29 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as amplify from 'aws-cdk-lib/aws-amplify';
 import * as bedrock from 'aws-cdk-lib/aws-bedrock';
-import * as ecrAssets from 'aws-cdk-lib/aws-ecr-assets';
 import { NagSuppressions } from 'cdk-nag';
-import * as agentcore from '@aws-cdk/aws-bedrock-agentcore-alpha';
+
+export interface AIPresentationCoachStackProps extends cdk.StackProps {
+  /** CORS origins for S3 and API Gateway. Defaults to ['*'] when not provided. */
+  allowedOrigins?: string[];
+}
 
 export class AIPresentationCoachStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+  public readonly userPoolId: string;
+  public readonly userPoolClientId: string;
+  public readonly identityPoolId: string;
+  public readonly apiUrl: string;
+
+  public readonly userPool: cognito.UserPool;
+  public readonly userPoolClient: cognito.UserPoolClient;
+  public readonly authenticatedRole: iam.Role;
+  public readonly personasTable: dynamodb.TableV2;
+  public readonly uploadsBucket: s3.Bucket;
+
+  constructor(scope: Construct, id: string, props?: AIPresentationCoachStackProps) {
     super(scope, id, props);
+
+    const allowedOrigins = props?.allowedOrigins ?? ['*'];
 
     // ──────────────────────────────────────────────
     // S3 bucket for uploads
@@ -35,7 +51,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
       autoDeleteObjects: true,
       cors: [
         {
-          allowedOrigins: ['*'],
+          allowedOrigins: allowedOrigins,
           allowedMethods: [s3.HttpMethods.GET, s3.HttpMethods.PUT, s3.HttpMethods.POST],
           allowedHeaders: ['*'],
           exposedHeaders: ['ETag'],
@@ -208,7 +224,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
         loggingLevel: apigateway.MethodLoggingLevel.INFO,
       },
       defaultCorsPreflightOptions: {
-        allowOrigins: apigateway.Cors.ALL_ORIGINS,
+        allowOrigins: allowedOrigins,
         allowMethods: apigateway.Cors.ALL_METHODS,
         allowHeaders: ['Content-Type', 'Authorization'],
       },
@@ -440,67 +456,18 @@ export class AIPresentationCoachStack extends cdk.Stack {
     }));
 
     // ──────────────────────────────────────────────
-    // AgentCore Runtime for Live Q&A WebSocket Agent
+    // Expose values for cross-stack references
     // ──────────────────────────────────────────────
-    
-    // Build ARM64 Docker image and push to CDK-managed ECR repository
-    const agentCoreImage = new ecrAssets.DockerImageAsset(this, 'AgentCoreImage', {
-      directory: path.join(__dirname, '..', 'agentcore'),
-      platform: ecrAssets.Platform.LINUX_ARM64,
-    });
+    this.userPoolId = userPool.userPoolId;
+    this.userPoolClientId = userPoolClient.userPoolClientId;
+    this.identityPoolId = identityPool.ref;
+    this.apiUrl = apiGateway.url;
 
-    const agentCoreRuntime = new agentcore.Runtime(this, 'LiveQAAgentRuntime', {
-      runtimeName: 'live_qa_agent',
-      description: 'Bidirectional voice agent for live Q&A sessions with WebSocket support',
-      agentRuntimeArtifact: agentcore.AgentRuntimeArtifact.fromEcrRepository(
-        agentCoreImage.repository,
-        agentCoreImage.imageTag
-      ),
-      authorizerConfiguration: agentcore.RuntimeAuthorizerConfiguration.usingCognito(
-        userPool,
-        [userPoolClient],
-        [userPoolClient.userPoolClientId], // audiences - client ID for token validation
-        ['openid', 'email', 'profile']  // scopes - standard OpenID Connect scopes
-      ),
-      environmentVariables: {
-        'VOICE_ID': 'matthew',
-        'MODEL_ID': 'amazon.nova-2-sonic-v1:0',
-        'SESSION_DURATION_SEC': '300',
-        'PERSONA_TABLE_NAME': personasTable.tableName,
-        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
-      },
-      lifecycleConfiguration: {
-        idleRuntimeSessionTimeout: cdk.Duration.minutes(10),
-        maxLifetime: cdk.Duration.hours(1),
-      },
-    });
-
-    // Grant DynamoDB read permissions
-    personasTable.grantReadData(agentCoreRuntime);
-
-    // Grant S3 read permissions
-    presentationAndSessionUploadsBucket.grantRead(agentCoreRuntime);
-
-    // Grant Bedrock model invocation permissions
-    agentCoreRuntime.addToRolePolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
-      resources: [
-        'arn:aws:bedrock:*::foundation-model/amazon.nova-2-sonic-v1:0',
-        `arn:aws:bedrock:*:${this.account}:inference-profile/*`,
-      ],
-    }));
-
-    // Grant Cognito Identity Pool users permission to connect to AgentCore WebSocket
-    authenticatedRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: [
-          'bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream',
-        ],
-        resources: [agentCoreRuntime.agentRuntimeArn],
-      }),
-    );
+    this.userPool = userPool;
+    this.userPoolClient = userPoolClient;
+    this.authenticatedRole = authenticatedRole;
+    this.personasTable = personasTable;
+    this.uploadsBucket = presentationAndSessionUploadsBucket;
 
     // ──────────────────────────────────────────────
     // Stack Outputs (useful for frontend configuration)
@@ -525,14 +492,9 @@ export class AIPresentationCoachStack extends cdk.Stack {
       description: 'AWS Region',
     });
 
-    new cdk.CfnOutput(this, 'AgentCoreRuntimeArn', {
-      value: agentCoreRuntime.agentRuntimeArn,
-      description: 'AgentCore Runtime ARN for Live Q&A',
-    });
-
-    new cdk.CfnOutput(this, 'AgentCoreWebSocketUrl', {
-      value: `wss://bedrock-agentcore.${this.region}.amazonaws.com/runtimes/${agentCoreRuntime.agentRuntimeArn}/ws`,
-      description: 'WebSocket URL for Live Q&A (authenticate with Cognito ID token)',
+    new cdk.CfnOutput(this, 'ApiUrl', {
+      value: apiGateway.url,
+      description: 'API Gateway base URL',
     });
 
     // ──────────────────────────────────────────────
@@ -597,29 +559,5 @@ export class AIPresentationCoachStack extends cdk.Stack {
       { id: 'AwsSolutions-APIG3', reason: 'WAFv2 web ACL not attached to avoid additional cost for this non-production student-facing tool. Rate limiting handled at Cognito and API Gateway level.' },
     ]);
 
-    // AwsSolutions-IAM5: AgentCore Runtime execution role requires wildcards for CloudWatch Logs, ECR, and service integration
-    NagSuppressions.addResourceSuppressions(agentCoreRuntime.role, [
-      // CloudWatch Logs wildcards - AgentCore creates log groups dynamically per runtime
-      { id: 'AwsSolutions-IAM5', reason: 'AgentCore Runtime creates CloudWatch log groups dynamically at /aws/bedrock-agentcore/runtimes/*. Wildcard required for runtime-managed logging.', appliesTo: ['Resource::arn:<AWS::Partition>:logs:<AWS::Region>:<AWS::AccountId>:log-group:/aws/bedrock-agentcore/runtimes/*'] },
-      { id: 'AwsSolutions-IAM5', reason: 'AgentCore Runtime requires wildcard for log group discovery and creation. This is a service-managed pattern.', appliesTo: ['Resource::arn:<AWS::Partition>:logs:<AWS::Region>:<AWS::AccountId>:log-group:*'] },
-      { id: 'AwsSolutions-IAM5', reason: 'AgentCore Runtime writes to log streams dynamically. Wildcard required for runtime-managed log streaming.', appliesTo: ['Resource::arn:<AWS::Partition>:logs:<AWS::Region>:<AWS::AccountId>:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*'] },
-      
-      // ECR and service integration wildcards
-      { id: 'AwsSolutions-IAM5', reason: 'AgentCore Runtime requires wildcard ECR permissions to pull container images from service-managed repositories. This is required for container runtime execution.', appliesTo: ['Resource::*'] },
-      
-      // Workload identity wildcards - AgentCore service integration
-      { id: 'AwsSolutions-IAM5', reason: 'AgentCore Runtime uses workload identity for secure service-to-service authentication. Wildcard required for dynamic identity management.', appliesTo: ['Resource::arn:<AWS::Partition>:bedrock-agentcore:<AWS::Region>:<AWS::AccountId>:workload-identity-directory/default/workload-identity/*'] },
-      
-      // S3 wildcards - generated by CDK grantRead()
-      { id: 'AwsSolutions-IAM5', reason: 'S3 wildcard actions (GetBucket*, GetObject*, List*) are generated by CDK grantRead() and scoped to the uploads bucket only.', appliesTo: ['Action::s3:GetBucket*', 'Action::s3:GetObject*', 'Action::s3:List*'] },
-      { id: 'AwsSolutions-IAM5', reason: 'S3 resource wildcard is scoped to objects within the uploads bucket via CDK grantRead().', appliesTo: ['Resource::<AIPresentationCoachPresentationsVideos1B0D776E.Arn>/*'] },
-      
-      // DynamoDB wildcards - generated by CDK grantReadData()
-      { id: 'AwsSolutions-IAM5', reason: 'DynamoDB read actions (BatchGet*, Get*, Query, Scan) are generated by CDK grantReadData() and scoped to the personas table only.', appliesTo: ['Action::dynamodb:BatchGet*', 'Action::dynamodb:DescribeStream', 'Action::dynamodb:DescribeTable', 'Action::dynamodb:Get*', 'Action::dynamodb:Query', 'Action::dynamodb:Scan'] },
-      
-      // Bedrock model wildcards - cross-region inference
-      { id: 'AwsSolutions-IAM5', reason: 'Bedrock foundation models are region-agnostic resources. Wildcard region required for Nova Sonic model access.', appliesTo: ['Resource::arn:aws:bedrock:*::foundation-model/amazon.nova-2-sonic-v1:0'] },
-      { id: 'AwsSolutions-IAM5', reason: 'Bedrock inference profiles route to multiple regions for availability. Wildcard required for cross-region inference routing.', appliesTo: ['Resource::arn:aws:bedrock:*:<AWS::AccountId>:inference-profile/*'] },
-    ], true);
   }
 }
