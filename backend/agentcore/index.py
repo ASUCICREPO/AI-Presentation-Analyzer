@@ -220,7 +220,7 @@ async def websocket_handler(websocket, context: RequestContext):
     """
     
     # Extract custom headers from context
-    headers = context.request_headers if hasattr(context, 'request_headers') else {}
+    headers = getattr(context, 'request_headers', None) or {}
     
     persona_id = headers.get('x-amzn-bedrock-agentcore-runtime-custom-personaid', '')
     user_id = headers.get('x-amzn-bedrock-agentcore-runtime-custom-userid', '')
@@ -230,6 +230,12 @@ async def websocket_handler(websocket, context: RequestContext):
     session_id = headers.get('x-amzn-bedrock-agentcore-runtime-session-id', '')
     
     print(f"[WebSocket] Connection from user={user_id}, persona={persona_id}, session={session_id}")
+    
+    if not persona_id or not user_id or not session_id:
+        await websocket.accept()
+        await websocket.send_json({"type": "error", "message": "Missing required session parameters"})
+        await websocket.close()
+        return
     
     agent = None
     

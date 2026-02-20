@@ -1,4 +1,6 @@
-import { WEBSOCKET_URL, QA_SESSION_CONFIG } from '../config/config';
+import { WEBSOCKET_URL, QA_SESSION_CONFIG, cognitoConfig } from '../config/config';
+import { signWebSocketUrl } from './websocketSigner';
+import { getAwsCredentials } from './awsCredentials';
 
 export interface QAWebSocketConfig {
   personaId: string;
@@ -6,7 +8,7 @@ export interface QAWebSocketConfig {
   userId: string;
   dateStr: string;
   voiceId?: string;
-  getAccessToken: () => Promise<string>;
+  getIdToken: () => Promise<string>;
 }
 
 export interface QATranscriptEntry {
@@ -49,30 +51,29 @@ export class QAWebSocketClient {
 
   async connect(): Promise<void> {
     try {
-      // Get Cognito access token — AgentCore validates client_id claim
-      const accessToken = await this.config.getAccessToken();
-
-      const url = new URL(WEBSOCKET_URL);
-
-      // Standard AgentCore session header
-      url.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id', this.config.sessionId);
-
-      // Custom context headers passed as query params (browsers can't set WS headers)
-      url.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Custom-PersonaId', this.config.personaId);
-      url.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Custom-UserId', this.config.userId);
-      url.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Custom-DateStr', this.config.dateStr);
-
+      const credentials = await getAwsCredentials(this.config.getIdToken);
+      
+      const baseUrl = new URL(WEBSOCKET_URL);
+      
+      baseUrl.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id', this.config.sessionId);
+      baseUrl.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Custom-PersonaId', this.config.personaId);
+      baseUrl.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Custom-UserId', this.config.userId);
+      baseUrl.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Custom-DateStr', this.config.dateStr);
+      
       if (this.config.voiceId) {
-        url.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Custom-VoiceId', this.config.voiceId);
+        baseUrl.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Custom-VoiceId', this.config.voiceId);
       }
-
-      // JWT authorizer validates client_id from access token
-      url.searchParams.set('Authorization', `Bearer ${accessToken}`);
-
-      console.log('[QA WebSocket] Connecting with Cognito JWT authentication...');
+      
+      const signedUrl = await signWebSocketUrl(
+        baseUrl.toString(),
+        credentials,
+        cognitoConfig.region
+      );
+      
+      console.log('[QA WebSocket] Connecting with SigV4 authentication...');
       
       return new Promise((resolve, reject) => {
-        this.ws = new WebSocket(url.toString());
+        this.ws = new WebSocket(signedUrl);
 
       this.ws.onopen = () => {
         console.log('[QA WebSocket] Connected');
