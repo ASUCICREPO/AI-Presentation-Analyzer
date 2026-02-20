@@ -75,17 +75,11 @@ export class FrontendConfigStack extends cdk.Stack {
           action: 'startJob',
           parameters: jobParams,
           physicalResourceId: PhysicalResourceId.of(
-            `${amplifyAppId}-${branchName}-${Date.now()}`
+            `${amplifyAppId}-${branchName}-initial`
           ),
         },
-        onUpdate: {
-          service: 'Amplify',
-          action: 'startJob',
-          parameters: jobParams,
-          physicalResourceId: PhysicalResourceId.of(
-            `${amplifyAppId}-${branchName}-${Date.now()}`
-          ),
-        },
+        // onUpdate intentionally omitted — Amplify auto-builds on every git push.
+        // Triggering here causes failures when a job is already pending or running.
         policy: AwsCustomResourcePolicy.fromSdkCalls({
           resources: [
             `arn:aws:amplify:${this.region}:${this.account}:apps/${amplifyAppId}`,
