@@ -2,8 +2,9 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  // Static export for Amplify WEB (static) hosting — all routes are client-side
   output: "export",
+  // Static export has no image optimization server — serve images as-is
+  images: { unoptimized: true },
 };
 
 export default nextConfig;

@@ -62,3 +62,6 @@ yarn-error.log*
 
 # Lambda layer dependencies (built locally)
 backend/agentcore/python/
+
+# DynamoDB seed data (local reference only — do not commit)
+backend/seed/
