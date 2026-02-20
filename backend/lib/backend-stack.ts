@@ -503,62 +503,6 @@ export class AIPresentationCoachStack extends cdk.Stack {
     );
 
     // ──────────────────────────────────────────────
-    // Amplify Hosting for Frontend (Next.js)
-    // ──────────────────────────────────────────────
-    // COMMENTED OUT: Uncomment when ready to deploy frontend to Amplify
-    /*
-    const amplifyApp = new amplify.CfnApp(this, 'FrontendApp', {
-      name: 'ai-presentation-coach-frontend',
-      description: 'AI Presentation Coach - Next.js Frontend',
-      platform: 'WEB_COMPUTE', // Amplify Gen 2 platform for SSR/SSG support
-      environmentVariables: [
-        { name: 'NEXT_PUBLIC_COGNITO_REGION', value: this.region },
-        { name: 'NEXT_PUBLIC_COGNITO_USER_POOL_ID', value: userPool.userPoolId },
-        { name: 'NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID', value: userPoolClient.userPoolClientId },
-        { name: 'NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID', value: identityPool.ref },
-        { name: 'NEXT_PUBLIC_API_BASE_URL', value: apiGateway.url },
-        { name: 'NEXT_PUBLIC_WEBSOCKET_API_URL', value: `wss://bedrock-agentcore.${this.region}.amazonaws.com/runtimes/${agentCoreRuntime.agentRuntimeArn}/ws` },
-      ],
-      // Build settings for Next.js
-      buildSpec: `version: 1
-frontend:
-  phases:
-    preBuild:
-      commands:
-        - npm ci
-    build:
-      commands:
-        - npm run build
-  artifacts:
-    baseDirectory: .next
-    files:
-      - '**\/*'
-  cache:
-    paths:
-      - node_modules\/**\/*`,
-    });
-
-    // Create main branch for manual deployments
-    const amplifyBranch = new amplify.CfnBranch(this, 'FrontendMainBranch', {
-      appId: amplifyApp.attrAppId,
-      branchName: 'main',
-      enableAutoBuild: false, // Manual deployments only (no GitHub connection)
-      framework: 'Next.js - SSR',
-    });
-
-    // Output Amplify app URL
-    new cdk.CfnOutput(this, 'AmplifyAppUrl', {
-      value: `https://main.${amplifyApp.attrDefaultDomain}`,
-      description: 'Amplify Frontend URL',
-    });
-
-    new cdk.CfnOutput(this, 'AmplifyAppId', {
-      value: amplifyApp.attrAppId,
-      description: 'Amplify App ID (use with AWS CLI for manual deployments)',
-    });
-    */
-
-    // ──────────────────────────────────────────────
     // Stack Outputs (useful for frontend configuration)
     // ──────────────────────────────────────────────
     new cdk.CfnOutput(this, 'UserPoolId', {
