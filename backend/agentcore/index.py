@@ -1,5 +1,5 @@
 from starlette.websockets import WebSocket, WebSocketDisconnect
-from strands.experimental.bidi import BidiAgent, BidiAudioIO, BidiTextIO
+from strands.experimental.bidi import BidiAgent, BidiTextIO
 from strands.experimental.bidi.types.events import BidiAudioInputEvent
 from strands.experimental.bidi.models import BidiNovaSonicModel
 from strands.experimental.bidi.tools import stop_conversation
@@ -175,14 +175,17 @@ async def load_transcript(user_id: str, date_str: str, session_id: str) -> str:
         return ""
 
 
-audio_io = BidiAudioIO()
+audio_io = None  # Initialized only in local main() — not available in cloud container
 text_io = BidiTextIO()
 
 
 async def main():
     # Persistent connection with continuous streaming
+    # BidiAudioIO uses pyaudio (local mic) — only import when running locally
+    from strands.experimental.bidi import BidiAudioIO
     import signal
 
+    audio_io = BidiAudioIO()
     loop = asyncio.get_event_loop()
 
     def signal_handler():
