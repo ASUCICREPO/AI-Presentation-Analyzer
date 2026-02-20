@@ -20,6 +20,7 @@ export interface FrontendConfigStackProps extends cdk.StackProps {
   userPoolId: string;
   userPoolClientId: string;
   identityPoolId: string;
+  agentCoreWebSocketUrl: string;
 }
 
 export class FrontendConfigStack extends cdk.Stack {
@@ -35,15 +36,17 @@ export class FrontendConfigStack extends cdk.Stack {
       userPoolId,
       userPoolClientId,
       identityPoolId,
+      agentCoreWebSocketUrl,
     } = props;
 
     const envVars: amplify_cfn.CfnBranch.EnvironmentVariableProperty[] = useGitHub
       ? [
-          { name: 'NEXT_PUBLIC_API_BASE_URL', value: apiUrl },
-          { name: 'NEXT_PUBLIC_COGNITO_USER_POOL_ID', value: userPoolId },
+          { name: 'NEXT_PUBLIC_API_BASE_URL',              value: apiUrl },
+          { name: 'NEXT_PUBLIC_COGNITO_USER_POOL_ID',      value: userPoolId },
           { name: 'NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID', value: userPoolClientId },
-          { name: 'NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID', value: identityPoolId },
-          { name: 'NEXT_PUBLIC_COGNITO_REGION', value: cdk.Stack.of(this).region },
+          { name: 'NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID',  value: identityPoolId },
+          { name: 'NEXT_PUBLIC_COGNITO_REGION',            value: cdk.Stack.of(this).region },
+          { name: 'NEXT_PUBLIC_AGENTCORE_WEBSOCKET_URL',   value: agentCoreWebSocketUrl },
         ]
       : [];
 

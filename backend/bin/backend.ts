@@ -73,7 +73,7 @@ const backend = new AIPresentationCoachStack(app, `AIPresentationCoachStack-${co
 // ──────────────────────────────────────────────
 // 3. AgentCore — live Q&A WebSocket agent
 // ──────────────────────────────────────────────
-new AgentCoreStack(app, `AgentCoreStack-${config.branchName}`, {
+const agentCore = new AgentCoreStack(app, `AgentCoreStack-${config.branchName}`, {
   description: `Live Q&A AgentCore runtime for ${config.branchName}`,
   userPool:          backend.userPool,
   userPoolClient:    backend.userPoolClient,
@@ -87,14 +87,15 @@ new AgentCoreStack(app, `AgentCoreStack-${config.branchName}`, {
 // ──────────────────────────────────────────────
 new FrontendConfigStack(app, `FrontendConfigStack-${config.branchName}`, {
   description: `Frontend branch config for ${config.branchName}`,
-  amplifyAppId:         amplifyHosting.appId,
-  amplifyDefaultDomain: amplifyHosting.defaultDomain,
-  branchName:           config.branchName,
+  amplifyAppId:          amplifyHosting.appId,
+  amplifyDefaultDomain:  amplifyHosting.defaultDomain,
+  branchName:            config.branchName,
   useGitHub,
-  apiUrl:               backend.apiUrl,
-  userPoolId:           backend.userPoolId,
-  userPoolClientId:     backend.userPoolClientId,
-  identityPoolId:       backend.identityPoolId,
+  apiUrl:                backend.apiUrl,
+  userPoolId:            backend.userPoolId,
+  userPoolClientId:      backend.userPoolClientId,
+  identityPoolId:        backend.identityPoolId,
+  agentCoreWebSocketUrl: agentCore.webSocketUrl,
 });
 
 // Security scanning

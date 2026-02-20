@@ -18,6 +18,8 @@ export interface AgentCoreStackProps extends cdk.StackProps {
 }
 
 export class AgentCoreStack extends cdk.Stack {
+  public readonly webSocketUrl: string;
+
   constructor(scope: Construct, id: string, props: AgentCoreStackProps) {
     super(scope, id, props);
 
@@ -73,6 +75,8 @@ export class AgentCoreStack extends cdk.Stack {
       }),
     );
 
+    this.webSocketUrl = `wss://bedrock-agentcore.${this.region}.amazonaws.com/runtimes/${agentCoreRuntime.agentRuntimeArn}/ws`;
+
     // ──────────────────────────────────────────────
     // Stack Outputs
     // ──────────────────────────────────────────────
@@ -82,7 +86,7 @@ export class AgentCoreStack extends cdk.Stack {
     });
 
     new cdk.CfnOutput(this, 'AgentCoreWebSocketUrl', {
-      value: `wss://bedrock-agentcore.${this.region}.amazonaws.com/runtimes/${agentCoreRuntime.agentRuntimeArn}/ws`,
+      value: this.webSocketUrl,
       description: 'WebSocket URL for Live Q&A (authenticate with Cognito ID token)',
     });
 
