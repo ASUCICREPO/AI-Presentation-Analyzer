@@ -37,7 +37,7 @@ export function useQASession(
   const wsClientRef = useRef<QAWebSocketClient | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
-  const processorNodeRef = useRef<ScriptProcessorNode | null>(null);
+  const processorNodeRef = useRef<AudioWorkletNode | null>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isMutedRef = useRef(false);
 
