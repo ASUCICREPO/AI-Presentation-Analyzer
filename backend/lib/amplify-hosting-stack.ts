@@ -42,7 +42,7 @@ export class AmplifyHostingStack extends cdk.Stack {
       amplifyApp = new amplify.App(this, 'FrontendApp', {
         appName: `ai-presentation-coach-${branchName}`,
         description: `AI Presentation Coach frontend (${branchName})`,
-        platform: amplify.Platform.WEB,
+        platform: amplify.Platform.WEB_COMPUTE,
         sourceCodeProvider: new amplify.GitHubSourceCodeProvider({
           owner: githubOwner!,
           repository: githubRepo!,
@@ -77,8 +77,6 @@ export class AmplifyHostingStack extends cdk.Stack {
         platform: amplify.Platform.WEB,
       });
     }
-
-    amplifyApp.addCustomRule(amplify.CustomRule.SINGLE_PAGE_APPLICATION_REDIRECT);
 
     this.appId = amplifyApp.appId;
     this.defaultDomain = amplifyApp.defaultDomain;
