@@ -43,8 +43,9 @@ export default function QASession({
       userId,
       dateStr,
       voiceId,
+      getIdToken,
     }),
-    [personaId, sessionId, userId, dateStr, voiceId],
+    [personaId, sessionId, userId, dateStr, voiceId, getIdToken],
   );
 
   const qa = useQASession(wsConfig, getIdToken);
