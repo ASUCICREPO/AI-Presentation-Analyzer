@@ -34,7 +34,9 @@ phases:
     on-failure: ABORT
     commands:
       - echo "Deploying CDK stack..."
-      # - cd backend
+      - echo "Listing available stacks..."
+      - npx cdk list
+      - echo "Deploying stack - $STACK_NAME"
       - npx cdk deploy $STACK_NAME --require-approval never --verbose
     finally:
       - echo "Build phase completed"
