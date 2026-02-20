@@ -5,7 +5,12 @@ import { AwsSolutionsChecks } from 'cdk-nag';
 import { AIPresentationCoachStack } from '../lib/backend-stack';
 
 const app = new cdk.App();
-new AIPresentationCoachStack(app, 'AIPresentationCoachStack', {
+
+// Allow stack name to be overridden via environment variable (for branch-specific deployments)
+// Falls back to 'AIPresentationCoachStack' if STACK_NAME is not set
+const stackName = process.env.STACK_NAME || 'AIPresentationCoachStack';
+
+new AIPresentationCoachStack(app, stackName, {
   /* If you don't specify 'env', this stack will be environment-agnostic.
    * Account/Region-dependent features and context lookups will not work,
    * but a single synthesized template can be deployed anywhere. */

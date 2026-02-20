@@ -20,7 +20,8 @@ const steps: Step[] = [
   { number: 1, label: 'Select Persona' },
   { number: 2, label: 'Upload Content' },
   { number: 3, label: 'Practice & Record' },
-  { number: 4, label: 'Review Analytics' },
+  { number: 4, label: 'Q&A Session' },
+  { number: 5, label: 'Review Analytics' },
 ];
 
 export default function Header({ currentStep, onStepClick, sessionId }: HeaderProps) {

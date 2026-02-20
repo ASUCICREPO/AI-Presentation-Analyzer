@@ -1,0 +1,51 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 18
+    commands:
+      - echo "Installing dependencies..."
+      - node --version
+      - npm --version
+    finally:
+      - echo "Install phase completed"
+
+  pre_build:
+    commands:
+      - echo "Starting CDK deployment process..."
+      - echo "Branch - $BRANCH_NAME"
+      - echo "Stack Name - $STACK_NAME"
+      - |
+        if [ -z "$BRANCH_NAME" ] || [ -z "$STACK_NAME" ]; then
+          echo "Error - Required environment variables not set"
+          exit 1
+        fi
+      - echo "Changing to backend directory..."
+      - cd backend
+      - echo "Installing npm dependencies..."
+      - npm install
+      - echo "Checking if CDK bootstrap is needed..."
+      - npx cdk bootstrap --require-approval never
+    finally:
+      - echo "Pre-build phase completed"
+
+  build:
+    on-failure: ABORT
+    commands:
+      - echo "Deploying CDK stack..."
+      - echo "Listing available stacks..."
+      - npx cdk list
+      - echo "Deploying stack - $STACK_NAME"
+      - npx cdk deploy $STACK_NAME --require-approval never --verbose
+    finally:
+      - echo "Build phase completed"
+
+  post_build:
+    commands:
+      - echo "Deployment completed successfully!"
+      - echo "Stack Name - $STACK_NAME"
+      - echo "Retrieving stack outputs..."
+      - aws cloudformation describe-stacks --stack-name $STACK_NAME --query 'Stacks[0].Outputs' --output table || echo "Could not retrieve outputs"
+    finally:
+      - echo "Post-build phase completed"

@@ -6,6 +6,7 @@ import Header from './components/Header';
 import PersonaSelection from './components/PersonaSelection';
 import UploadContent from './components/UploadContent';
 import PracticeSession from './components/PracticeSession';
+import QASession from './components/QASession';
 import ReviewAnalytics from './components/ReviewAnalytics';
 import ConfirmationModal from './components/ConfirmationModal';
 import LoginPage from './components/LoginPage';
@@ -19,7 +20,7 @@ import { Loader2 } from 'lucide-react';
 type AuthView = 'login' | 'signup' | 'confirm';
 
 export default function Home() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, userId } = useAuth();
 
   // Auth page state
   const [authView, setAuthView] = useState<AuthView>('login');
@@ -54,7 +55,7 @@ export default function Home() {
   };
   const handleConfirmed = () => setAuthView('login');
 
-  // --- App handlers (unchanged) ---
+  // --- App handlers ---
   const handlePersonaSelect = (id: string | null) => {
     setSelectedPersona(id);
   };
@@ -91,6 +92,12 @@ export default function Home() {
     setAiFeedback(feedback);
     setCurrentStep(4);
     window.scrollTo(0, 0);
+  };
+
+  const handleBackToPractice = () => {
+    // From QA, go back to practice (with confirmation)
+    setPendingStep(3);
+    setIsModalOpen(true);
   };
 
   const handleDownloadSessionData = () => {
@@ -228,7 +235,19 @@ export default function Home() {
         />
       )}
 
-      {currentStep === 4 && sessionData && (
+      {currentStep === 4 && (
+        <QASession
+          personaId={selectedPersona || ''}
+          personaName={selectedPersonaName}
+          sessionId={sessionId}
+          userId={userId || ''}
+          onBack={handleBackToPractice}
+          onComplete={handleQAComplete}
+          onSkip={handleQASkip}
+        />
+      )}
+
+      {currentStep === 5 && sessionData && (
         <ReviewAnalytics
           sessionData={sessionData}
           aiFeedback={aiFeedback}
@@ -238,7 +257,7 @@ export default function Home() {
         />
       )}
 
-      {currentStep === 4 && !sessionData && (
+      {currentStep === 5 && !sessionData && (
         <div className="flex min-h-[60vh] items-center justify-center">
           <div className="text-center">
             <h2 className="text-2xl font-bold text-gray-900 font-serif">Review Analytics</h2>
