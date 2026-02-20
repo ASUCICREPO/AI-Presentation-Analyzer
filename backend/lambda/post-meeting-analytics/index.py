@@ -174,17 +174,21 @@ def generate_feedback(persona, transcript, persona_customization=None,
         f"Based on your role as {persona_name}, the transcript, the delivery metrics,"
         " and the presentation materials (if PDF is provided), provide structured feedback.",
         "",
-        "For keyRecommendations: provide 4-6 specific, actionable recommendations"
+        "IMPORTANT: Keep ALL feedback concise — maximum 4 lines per section.",
+        "",
+        "For keyRecommendations: provide exactly 5 specific, actionable recommendations"
         " covering content, delivery, and persona-specific improvements. Each"
-        " recommendation should have a short title and a detailed description with"
-        " concrete examples from the transcript.",
+        " recommendation should have a short title and a description of no more"
+        " than 4 lines with a concrete example from the transcript.",
         "",
         "For performanceSummary: provide an overall assessment (2-3 sentences), list"
-        " 2-3 content strengths with transcript references, and give delivery feedback"
-        " on pace, volume, eye contact, filler words, and pauses based on the session metrics.",
+        " 2-3 content strengths (each no more than 1 sentence), and give delivery"
+        " feedback on pace, volume, eye contact, filler words, and pauses — each"
+        " limited to 1-2 sentences based on the session metrics.",
         "",
         f"Use a {communication_style} tone throughout your feedback.",
         "Be constructive and encouraging while being honest about areas needing work.",
+        "Prioritize brevity and clarity — avoid verbose explanations.",
         "",
         "You MUST respond with ONLY valid JSON matching this exact structure — no"
         " markdown fences, no commentary before or after the JSON:",

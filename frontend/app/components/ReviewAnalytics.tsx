@@ -14,6 +14,11 @@ import {
   ChevronDown,
   ChevronUp,
   X,
+  Gauge,
+  Eye,
+  Volume2,
+  MessageCircle,
+  Timer,
 } from 'lucide-react';
 
 import {
@@ -275,7 +280,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDo
               {/* Speaking Pace */}
               <div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium text-gray-700">Speaking Pace</span>
+                  <span className="flex items-center gap-1.5 font-medium text-gray-700"><Gauge className="h-4 w-4 text-blue-500" />Speaking Pace</span>
                   <span className="font-bold text-gray-900">{stats.avgWpm} wpm</span>
                 </div>
                 <MetricBar value={stats.avgWpm} max={200} color={getBarColor(stats.avgWpm, 'wpm')} />
@@ -287,7 +292,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDo
               {/* Eye Contact */}
               <div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium text-gray-700">Eye Contact</span>
+                  <span className="flex items-center gap-1.5 font-medium text-gray-700"><Eye className="h-4 w-4 text-purple-500" />Eye Contact</span>
                   <span className="font-bold text-gray-900">{stats.avgEyeContact}%</span>
                 </div>
                 <MetricBar value={stats.avgEyeContact} max={100} color={getBarColor(stats.avgEyeContact, 'eyeContact')} />
@@ -299,7 +304,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDo
               {/* Volume */}
               <div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium text-gray-700">Volume</span>
+                  <span className="flex items-center gap-1.5 font-medium text-gray-700"><Volume2 className="h-4 w-4 text-teal-500" />Volume</span>
                   <span className="font-bold text-gray-900">{stats.avgVolume}%</span>
                 </div>
                 <MetricBar value={stats.avgVolume} max={100} color={getBarColor(stats.avgVolume, 'volume')} />
@@ -311,7 +316,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDo
               {/* Filler Words */}
               <div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium text-gray-700">Filler Words</span>
+                  <span className="flex items-center gap-1.5 font-medium text-gray-700"><MessageCircle className="h-4 w-4 text-orange-500" />Filler Words</span>
                   <span className={`font-bold ${stats.totalFillers <= bp.fillerWords.max ? 'text-green-600' : stats.totalFillers <= bp.fillerWords.max * 2 ? 'text-yellow-600' : 'text-red-600'}`}>
                     {stats.totalFillers} detected
                   </span>
@@ -324,7 +329,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDo
               {/* Strategic Pauses */}
               <div>
                 <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium text-gray-700">Strategic Pauses</span>
+                  <span className="flex items-center gap-1.5 font-medium text-gray-700"><Timer className="h-4 w-4 text-indigo-500" />Strategic Pauses</span>
                   <span className="font-bold text-gray-900">{stats.totalPauses}</span>
                 </div>
                 {aiFeedback && (
