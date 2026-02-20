@@ -42,7 +42,7 @@ export class AmplifyHostingStack extends cdk.Stack {
       amplifyApp = new amplify.App(this, 'FrontendApp', {
         appName: `ai-presentation-coach-${branchName}`,
         description: `AI Presentation Coach frontend (${branchName})`,
-        platform: amplify.Platform.WEB_COMPUTE,
+        platform: amplify.Platform.WEB,
         sourceCodeProvider: new amplify.GitHubSourceCodeProvider({
           owner: githubOwner!,
           repository: githubRepo!,
@@ -59,7 +59,7 @@ export class AmplifyHostingStack extends cdk.Stack {
                   build: { commands: ['npm run build'] },
                 },
                 artifacts: {
-                  baseDirectory: '.next',
+                  baseDirectory: 'out',
                   files: ['**/*'],
                 },
                 cache: {
