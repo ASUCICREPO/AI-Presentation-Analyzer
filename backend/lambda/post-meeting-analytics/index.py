@@ -231,19 +231,31 @@ def generate_feedback(persona, transcript, persona_customization=None,
     response = bedrock_runtime.converse(
         modelId=BEDROCK_MODEL_ID,
         messages=[{'role': 'user', 'content': message_content}],
-        inferenceConfig={'maxTokens': 4096},
+        inferenceConfig={'maxTokens': 8192},
     )
 
     stop_reason = response.get('stopReason', '')
     if stop_reason == 'max_tokens':
-        print("Warning: response truncated (max_tokens)")
+        print("Warning: response truncated (max_tokens) — retrying with higher limit")
+        response = bedrock_runtime.converse(
+            modelId=BEDROCK_MODEL_ID,
+            messages=[{'role': 'user', 'content': message_content}],
+            inferenceConfig={'maxTokens': 16384},
+        )
+        stop_reason = response.get('stopReason', '')
+        if stop_reason == 'max_tokens':
+            print("Error: response still truncated after retry")
 
     raw = response['output']['message']['content'][0]['text']
 
     text = raw.strip()
+    # Strip markdown code fences if present (e.g. ```json ... ```)
     if text.startswith('```'):
-        first_newline = text.index('\n')
-        text = text[first_newline + 1:]
+        newline_idx = text.find('\n')
+        if newline_idx != -1:
+            text = text[newline_idx + 1:]
+        else:
+            text = text[3:]
     if text.endswith('```'):
         text = text[:-3]
 
@@ -280,10 +292,12 @@ def lambda_handler(event, context):
             status = json.loads(status_str)
 
             if status.get('status') == 'failed':
-                return api_response(500, {
-                    "status": "failed",
-                    "error": status.get('error', 'Unknown error during feedback generation'),
-                })
+                # Clear the failed status so this invocation can retry generation
+                print(f"Previous generation failed, retrying: {status.get('error')}")
+                try:
+                    s3.delete_object(Bucket=BUCKET_NAME, Key=status_key)
+                except Exception:
+                    pass
 
             if status.get('status') == 'processing':
                 started = status.get('startedAt', '')

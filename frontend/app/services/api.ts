@@ -384,6 +384,12 @@ export async function pollAnalytics(
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
         continue;
       }
+      // Retry on server errors (5xx) — the backend may recover on next attempt
+      if (err instanceof Error && /\(5\d{2}\)/.test(err.message)) {
+        console.warn(`[pollAnalytics] Server error on attempt ${attempt + 1}, retrying...`, err.message);
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        continue;
+      }
       throw err;
     }
   }
