@@ -230,21 +230,8 @@ def generate_feedback(persona, transcript, persona_customization=None,
 
     response = bedrock_runtime.converse(
         modelId=BEDROCK_MODEL_ID,
-        messages=[{'role': 'user', 'content': message_content}],
-        inferenceConfig={'maxTokens': 8192},
+        messages=[{'role': 'user', 'content': message_content}]
     )
-
-    stop_reason = response.get('stopReason', '')
-    if stop_reason == 'max_tokens':
-        print("Warning: response truncated (max_tokens) — retrying with higher limit")
-        response = bedrock_runtime.converse(
-            modelId=BEDROCK_MODEL_ID,
-            messages=[{'role': 'user', 'content': message_content}],
-            inferenceConfig={'maxTokens': 16384},
-        )
-        stop_reason = response.get('stopReason', '')
-        if stop_reason == 'max_tokens':
-            print("Error: response still truncated after retry")
 
     raw = response['output']['message']['content'][0]['text']
 
