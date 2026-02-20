@@ -100,7 +100,7 @@ export class FrontendConfigStack extends cdk.Stack {
 
       // AwsSolutions-IAM5: Amplify job IDs are generated at runtime by startJob — wildcard is the minimum scope
       NagSuppressions.addResourceSuppressionsByPath(this, `/${stackName}/TriggerAmplifyBuild/CustomResourcePolicy/Resource`, [
-        { id: 'AwsSolutions-IAM5', reason: 'Amplify startJob creates dynamic job IDs at runtime. The wildcard on jobs/* is the narrowest possible scope — it is already scoped to a specific app and branch.', appliesTo: [`Resource::arn:aws:amplify:<AWS::Region>:<AWS::AccountId>:apps/${amplifyAppId}/branches/${branchName}/jobs/*`] },
+        { id: 'AwsSolutions-IAM5', reason: 'Amplify startJob creates dynamic job IDs at runtime. The wildcard on jobs/* is the narrowest possible scope — already scoped to a single app and branch.' },
       ]);
 
       // AwsSolutions-IAM4 + AwsSolutions-L1: CDK AwsCustomResource creates an internal singleton Lambda
