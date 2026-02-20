@@ -65,15 +65,21 @@ export class AgentCoreStack extends cdk.Stack {
       ],
     }));
 
-    props.authenticatedRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: [
-          'bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream',
-        ],
-        resources: [agentCoreRuntime.agentRuntimeArn],
-      }),
-    );
+    // Policy lives inside AgentCoreStack so the agentRuntimeArn token never
+    // crosses into AIPresentationCoachStack — that would create a cycle.
+    // attachToRole() creates AWS::IAM::Policy here, referencing the role by name
+    // (a cross-stack import from AIPresentationCoachStack, same direction as all
+    // other props). AIPresentationCoachStack has zero references to this stack.
+    new iam.Policy(this, 'AuthRoleAgentCorePolicy', {
+      statements: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: ['bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream'],
+          resources: [agentCoreRuntime.agentRuntimeArn],
+        }),
+      ],
+      roles: [props.authenticatedRole],
+    });
 
     this.webSocketUrl = `wss://bedrock-agentcore.${this.region}.amazonaws.com/runtimes/${agentCoreRuntime.agentRuntimeArn}/ws`;
 
