@@ -6,7 +6,7 @@ export interface QAWebSocketConfig {
   userId: string;
   dateStr: string;
   voiceId?: string;
-  getIdToken: () => Promise<string>;
+  getAccessToken: () => Promise<string>;
 }
 
 export interface QATranscriptEntry {
@@ -49,8 +49,8 @@ export class QAWebSocketClient {
 
   async connect(): Promise<void> {
     try {
-      // Get Cognito ID token — AgentCore uses a JWT authorizer (not SigV4)
-      const idToken = await this.config.getIdToken();
+      // Get Cognito access token — AgentCore validates client_id claim
+      const accessToken = await this.config.getAccessToken();
 
       const url = new URL(WEBSOCKET_URL);
 
@@ -66,9 +66,8 @@ export class QAWebSocketClient {
         url.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Custom-VoiceId', this.config.voiceId);
       }
 
-      // JWT authorizer expects Authorization: Bearer <token>
-      // Passed as query param since browsers can't set WebSocket headers
-      url.searchParams.set('Authorization', `Bearer ${idToken}`);
+      // JWT authorizer validates client_id from access token
+      url.searchParams.set('Authorization', `Bearer ${accessToken}`);
 
       console.log('[QA WebSocket] Connecting with Cognito JWT authentication...');
       

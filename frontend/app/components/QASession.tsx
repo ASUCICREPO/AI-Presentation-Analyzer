@@ -29,7 +29,7 @@ export default function QASession({
   onComplete,
   onSkip,
 }: QASessionProps) {
-  const { getIdToken } = useAuth();
+  const { getIdToken, getAccessToken } = useAuth();
 
   const dateStr = useMemo(() => {
     const now = new Date();
@@ -43,9 +43,9 @@ export default function QASession({
       userId,
       dateStr,
       voiceId,
-      getIdToken,
+      getAccessToken,
     }),
-    [personaId, sessionId, userId, dateStr, voiceId, getIdToken],
+    [personaId, sessionId, userId, dateStr, voiceId, getAccessToken],
   );
 
   const qa = useQASession(wsConfig, getIdToken);

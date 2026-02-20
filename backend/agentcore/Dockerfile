@@ -5,6 +5,7 @@ WORKDIR /app
 # imports unconditionally at module level even in server (non-audio) contexts
 RUN apt-get update && apt-get install -y --no-install-recommends \
     portaudio19-dev \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt requirements.txt

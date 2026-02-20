@@ -37,8 +37,6 @@ export class AgentCoreStack extends cdk.Stack {
       authorizerConfiguration: agentcore.RuntimeAuthorizerConfiguration.usingCognito(
         props.userPool,
         [props.userPoolClient],
-        [props.userPoolClient.userPoolClientId],
-        ['openid', 'email', 'profile']
       ),
       environmentVariables: {
         'VOICE_ID': 'matthew',

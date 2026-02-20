@@ -1,9 +1,10 @@
 from starlette.websockets import WebSocket, WebSocketDisconnect
-from strands.experimental.bidi import BidiAgent, BidiTextIO
+from strands.experimental.bidi import BidiAgent
+from strands.experimental.bidi.io.text import BidiTextIO
 from strands.experimental.bidi.types.events import BidiAudioInputEvent
 from strands.experimental.bidi.models import BidiNovaSonicModel
 from strands.experimental.bidi.tools import stop_conversation
-from strands.experimental.bidi.hooks.events import (
+from strands.experimental.hooks.events import (
     BidiAgentInitializedEvent,
     BidiBeforeInvocationEvent,
     BidiAfterInvocationEvent,
@@ -175,9 +176,6 @@ async def load_transcript(user_id: str, date_str: str, session_id: str) -> str:
         return ""
 
 
-text_io = BidiTextIO()
-
-
 async def main():
     # Persistent connection with continuous streaming
     # BidiAudioIO uses pyaudio (local mic) — only import when running locally
@@ -185,6 +183,7 @@ async def main():
     import signal
 
     audio_io = BidiAudioIO()
+    text_io = None  # BidiTextIO removed in newer strands SDK
     loop = asyncio.get_event_loop()
 
     def signal_handler():
@@ -198,7 +197,7 @@ async def main():
         await agent.start()
         await agent.run(
             inputs=[audio_io.input()],
-            outputs=[audio_io.output(), text_io.output()]
+            outputs=[audio_io.output()]
         )
     except asyncio.CancelledError:
         print("Agent run cancelled, shutting down...")
