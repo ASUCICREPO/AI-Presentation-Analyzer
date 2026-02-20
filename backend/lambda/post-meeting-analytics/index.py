@@ -292,10 +292,12 @@ def lambda_handler(event, context):
                     elapsed = (datetime.now(timezone.utc)
                                - datetime.fromisoformat(started)).total_seconds()
                     if elapsed > STALE_THRESHOLD_SEC:
-                        return api_response(500, {
-                            "status": "failed",
-                            "error": "Feedback generation timed out. Please try again.",
-                        })
+                        # Clear stale processing status so next poll retries
+                        try:
+                            s3.delete_object(Bucket=BUCKET_NAME, Key=status_key)
+                        except Exception:
+                            pass
+                        return api_response(202, {"status": "processing"})
                 return api_response(202, {"status": "processing"})
 
         # ── 3. Nothing cached, no active job → generate synchronously ────
