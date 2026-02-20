@@ -48,7 +48,7 @@ export class FrontendConfigStack extends cdk.Stack {
           { name: 'NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID', value: userPoolClientId },
           { name: 'NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID',  value: identityPoolId },
           { name: 'NEXT_PUBLIC_COGNITO_REGION',            value: cdk.Stack.of(this).region },
-          { name: 'NEXT_PUBLIC_AGENTCORE_WEBSOCKET_URL',   value: agentCoreWebSocketUrl },
+          { name: 'NEXT_PUBLIC_WEBSOCKET_API_URL',           value: agentCoreWebSocketUrl },
         ]
       : [];
 
