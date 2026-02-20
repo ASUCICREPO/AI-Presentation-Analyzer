@@ -40,6 +40,7 @@ export function useQASession(
   const processorNodeRef = useRef<AudioWorkletNode | null>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isMutedRef = useRef(false);
+  const startTimerRef = useRef<(() => void) | null>(null);
 
   // Audio playback queue
   const playbackContextRef = useRef<AudioContext | null>(null);
@@ -52,6 +53,7 @@ export function useQASession(
       case 'session_started':
         setStatus('active');
         setPersonaName((event.persona_name as string) || '');
+        startTimerRef.current?.();
         break;
 
       case 'audio':
@@ -141,6 +143,9 @@ export function useQASession(
       });
     }, 1000);
   }, []);
+
+  // Keep ref in sync so handleEvent (defined earlier) can call it
+  startTimerRef.current = startTimer;
 
   const stopTimer = useCallback(() => {
     if (timerIntervalRef.current) {
@@ -246,8 +251,8 @@ export function useQASession(
       wsClientRef.current = client;
       await client.connect();
       await startAudioCapture();
-      client.startSession();
-      startTimer();
+      // No startSession() call — the agent starts automatically after
+      // the setup message sent in connect()'s onopen handler.
     } catch (e) {
       console.error('[useQASession] Failed to start:', e);
       setError('Failed to connect to QA session');
