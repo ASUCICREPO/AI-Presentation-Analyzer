@@ -1,15 +1,15 @@
 from starlette.websockets import WebSocket, WebSocketDisconnect
 from strands.experimental.bidi import BidiAgent
-from strands.experimental.bidi.io.text import BidiTextIO
-from strands.experimental.bidi.types.events import BidiAudioInputEvent
+from strands.experimental.bidi.types.events import (
+    BidiAudioInputEvent,
+    BidiAudioStreamEvent,
+    BidiTranscriptStreamEvent,
+    BidiInterruptionEvent,
+    BidiResponseCompleteEvent,
+)
+from strands.experimental.bidi.types.io import BidiInput, BidiOutput, BidiOutputEvent
 from strands.experimental.bidi.models import BidiNovaSonicModel
 from strands.experimental.bidi.tools import stop_conversation
-from strands.experimental.hooks.events import (
-    BidiAgentInitializedEvent,
-    BidiBeforeInvocationEvent,
-    BidiAfterInvocationEvent,
-    BidiMessageAddedEvent
-)
 from bedrock_agentcore import BedrockAgentCoreApp, RequestContext
 from typing import Literal
 import asyncio
@@ -17,6 +17,9 @@ import boto3
 import aioboto3
 import os
 import json
+import logging
+
+logger = logging.getLogger("agentcore.qa")
 
 '''
 A quick note on voice selection:
@@ -86,33 +89,92 @@ def create_nova_sonic_model(voice_id: str = None) -> BidiNovaSonicModel:
             }
         },
         client_config={
-            "boto_session": boto3.Session(),
-            "region": REGION
+            "boto_session": boto3.Session(region_name=REGION),
         }
     )
 
 
-def create_qa_agent(system_prompt: str, voice_id: str = None) -> BidiAgent:
-    """Create a BidiAgent configured for QA sessions."""
-    model = create_nova_sonic_model(voice_id)
-    return BidiAgent(
-        model=model,
-        tools=[stop_conversation],
-        system_prompt=system_prompt,
-    )
+class WebSocketBidiInput(BidiInput):
+    """Bridge browser WebSocket audio into BidiAgent input events.
+
+    The browser sends JSON frames: {"action": "audio", "data": "<base64 PCM>"}
+    This converts them into BidiAudioInputEvent objects the agent understands.
+    The frontend already base64-encodes 16-bit PCM at 16 kHz mono.
+    """
+
+    def __init__(self, websocket: WebSocket):
+        self._ws = websocket
+        self._stopped = False
+
+    async def start(self, agent: BidiAgent) -> None:
+        self._stopped = False
+
+    async def __call__(self) -> BidiAudioInputEvent:
+        while not self._stopped:
+            try:
+                msg = await self._ws.receive_json()
+            except WebSocketDisconnect:
+                self._stopped = True
+                raise asyncio.CancelledError("client disconnected")
+
+            action = msg.get("action", "")
+            if action == "audio":
+                return BidiAudioInputEvent(
+                    audio=msg["data"],
+                    format="pcm",
+                    sample_rate=16000,
+                    channels=1,
+                )
+            elif action == "end":
+                self._stopped = True
+                raise asyncio.CancelledError("client ended session")
+        raise asyncio.CancelledError("input stopped")
+
+    async def stop(self) -> None:
+        self._stopped = True
 
 
-class ConversationLogger:
-    """Log all major conversation events for debugging and analysis."""
+class WebSocketBidiOutput(BidiOutput):
+    """Bridge BidiAgent output events back to the browser WebSocket.
 
-    async def on_agent_initialized(self, event: BidiAgentInitializedEvent):
-        print(f"Agent initialized with model: {event.agent.model.model_id}")
+    Converts BidiOutputEvent objects into JSON frames the frontend understands:
+    - audio  -> {"type": "audio", "data": "<base64 PCM>"}
+    - transcript -> {"type": "transcript", "role": ..., "text": ..., "is_partial": ...}
+    - interruption -> {"type": "interruption"}
+    """
 
-    async def on_before_invocation(self, event: BidiBeforeInvocationEvent):
-        print(f"Before invocation: {event.agent.model.model_id}, input type: {type(event.input)}")
+    def __init__(self, websocket: WebSocket):
+        self._ws = websocket
 
-    async def on_after_invocation(self, event: BidiAfterInvocationEvent):
-        print(f"QA session ended for conversation with ID: {event.conversation_id}")
+    async def start(self, agent: BidiAgent) -> None:
+        pass
+
+    async def __call__(self, event: BidiOutputEvent) -> None:
+        try:
+            if isinstance(event, BidiAudioStreamEvent):
+                await self._ws.send_json({"type": "audio", "data": event.audio})
+
+            elif isinstance(event, BidiTranscriptStreamEvent):
+                await self._ws.send_json({
+                    "type": "transcript",
+                    "role": event.role,
+                    "text": event.text,
+                    "is_partial": not event.is_final,
+                })
+
+            elif isinstance(event, BidiInterruptionEvent):
+                await self._ws.send_json({"type": "interruption"})
+
+            elif isinstance(event, BidiResponseCompleteEvent):
+                pass
+
+        except WebSocketDisconnect:
+            pass
+        except Exception as e:
+            logger.warning("Failed to send output event: %s", e)
+
+    async def stop(self) -> None:
+        pass
 
 
 async def load_persona(persona_id: str) -> dict:
@@ -176,142 +238,120 @@ async def load_transcript(user_id: str, date_str: str, session_id: str) -> str:
         return ""
 
 
-async def main():
-    # Persistent connection with continuous streaming
-    # BidiAudioIO uses pyaudio (local mic) — only import when running locally
-    from strands.experimental.bidi import BidiAudioIO
-    import signal
-
-    audio_io = BidiAudioIO()
-    text_io = None  # BidiTextIO removed in newer strands SDK
-    loop = asyncio.get_event_loop()
-
-    def signal_handler():
-        print("Received stop signal, stopping agent...")
-        loop.create_task(agent.stop())
-
-    loop.add_signal_handler(signal.SIGINT, signal_handler)
-    loop.add_signal_handler(signal.SIGTERM, signal_handler)
-
-    try:
-        await agent.start()
-        await agent.run(
-            inputs=[audio_io.input()],
-            outputs=[audio_io.output()]
-        )
-    except asyncio.CancelledError:
-        print("Agent run cancelled, shutting down...")
-
 app = BedrockAgentCoreApp()
 
 @app.websocket
 async def websocket_handler(websocket, context: RequestContext):
+    """WebSocket handler for Q&A sessions.
+
+    Session parameters are delivered via a setup message sent by the client
+    immediately after the WebSocket connection is established:
+      {"action": "setup", "personaId": "...", "userId": "...",
+       "sessionId": "...", "dateStr": "...", "voiceId": "..."}
+
+    This avoids relying on AgentCore's query-param-to-header mapping, which
+    strips custom params before they reach the container.
     """
-    WebSocket handler for Q&A sessions.
-    
-    Custom headers are passed as query parameters with prefix:
-    X-Amzn-Bedrock-AgentCore-Runtime-Custom-
-    
-    Expected headers:
-    - PersonaId: DynamoDB persona ID
-    - UserId: User identifier
-    - DateStr: Session date string
-    - VoiceId: Voice selection (optional)
-    """
-    
-    # Extract custom headers from context
-    headers = getattr(context, 'request_headers', None) or {}
-    
-    persona_id = headers.get('x-amzn-bedrock-agentcore-runtime-custom-personaid', '')
-    user_id = headers.get('x-amzn-bedrock-agentcore-runtime-custom-userid', '')
-    date_str = headers.get('x-amzn-bedrock-agentcore-runtime-custom-datestr', '')
-    voice_id = headers.get('x-amzn-bedrock-agentcore-runtime-custom-voiceid', DEFAULT_VOICE_ID)
-    
-    session_id = headers.get('x-amzn-bedrock-agentcore-runtime-session-id', '')
-    
-    print(f"[WebSocket] Connection from user={user_id}, persona={persona_id}, session={session_id}")
-    
+    await websocket.accept()
+
+    # Wait for the setup frame (give the client up to 10 s to send it)
+    try:
+        raw = await asyncio.wait_for(websocket.receive_json(), timeout=10)
+    except asyncio.TimeoutError:
+        logger.warning("[WebSocket] Timed out waiting for setup message")
+        await websocket.send_json({"type": "error", "message": "Setup message not received within 10 s"})
+        await websocket.close()
+        return
+    except WebSocketDisconnect:
+        logger.info("[WebSocket] Client disconnected before sending setup")
+        return
+
+    if raw.get("action") != "setup":
+        logger.warning("[WebSocket] Expected setup message, got: %s", raw.get("action"))
+        await websocket.send_json({"type": "error", "message": "First message must be {action: 'setup', ...}"})
+        await websocket.close()
+        return
+
+    persona_id = raw.get("personaId", "")
+    user_id    = raw.get("userId", "")
+    date_str   = raw.get("dateStr", "")
+    voice_id   = raw.get("voiceId", DEFAULT_VOICE_ID)
+    session_id = raw.get("sessionId", "") or (context.session_id or "")
+
+    logger.info("[WebSocket] Setup from user=%s persona=%s session=%s", user_id, persona_id, session_id)
+
     if not persona_id or not user_id or not session_id:
-        await websocket.accept()
-        await websocket.send_json({"type": "error", "message": "Missing required session parameters"})
+        logger.warning("[WebSocket] Missing required params: persona=%s user=%s session=%s", persona_id, user_id, session_id)
+        await websocket.send_json({"type": "error", "message": "Setup missing personaId, userId, or sessionId"})
         await websocket.close()
         return
     
     agent = None
-    
+
     try:
-        # Load persona configuration from DynamoDB
         persona_data = await load_persona(persona_id)
         if not persona_data:
-            await websocket.accept()
-            await websocket.send_json({
-                "type": "error",
-                "message": f"Persona {persona_id} not found"
-            })
+            await websocket.send_json({"type": "error", "message": f"Persona {persona_id} not found"})
             await websocket.close()
             return
-        
-        # Load presentation transcript from S3
+
         transcript_text = await load_transcript(user_id, date_str, session_id)
         if not transcript_text:
-            print(f"[Warning] No transcript found for session {session_id}, using empty transcript")
+            logger.info("[WebSocket] No transcript for session %s, using placeholder", session_id)
             transcript_text = "No presentation transcript available."
-        
-        # Build QA system prompt
+
         system_prompt = build_qa_system_prompt(
             persona_name=persona_data.get('name', 'Interviewer'),
             persona_prompt=persona_data.get('personaPrompt', ''),
             custom_instructions=persona_data.get('description', ''),
             transcript_text=transcript_text
         )
-        
-        # Create agent with configuration
+
         model = create_nova_sonic_model(voice_id)
         agent = BidiAgent(
             model=model,
             tools=[stop_conversation],
             system_prompt=system_prompt,
         )
-        
-        # Accept connection and start agent
-        await websocket.accept()
-        
-        # Send session started event
+
         await websocket.send_json({
             "type": "session_started",
             "persona_name": persona_data.get('name', 'Interviewer'),
             "session_id": session_id
         })
         
-        # Run agent with bidirectional streaming
-        await agent.start()
-        await agent.run(
-            inputs=[websocket.receive_json],
-            outputs=[websocket.send_json]
-        )
+        ws_input = WebSocketBidiInput(websocket)
+        ws_output = WebSocketBidiOutput(websocket)
+        
+        logger.info("[WebSocket] Starting BidiAgent for session %s", session_id)
+        await agent.run(inputs=[ws_input], outputs=[ws_output])
         
     except WebSocketDisconnect:
-        print("[WebSocket] Client disconnected")
+        logger.info("[WebSocket] Client disconnected")
+    except asyncio.CancelledError:
+        logger.info("[WebSocket] Session cancelled (client ended or disconnected)")
     except Exception as e:
-        print(f"[Error] WebSocket handler error: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("[WebSocket] Handler error: %s", e)
         try:
             await websocket.send_json({
                 "type": "error",
                 "message": str(e)
             })
-        except:
+        except Exception:
             pass
     finally:
         if agent:
             try:
                 await agent.stop()
-            except:
+            except Exception:
                 pass
         try:
+            await websocket.send_json({"type": "session_ended", "reason": "server_complete"})
+        except Exception:
+            pass
+        try:
             await websocket.close()
-        except:
+        except Exception:
             pass
 
 if __name__ == "__main__":

@@ -53,19 +53,10 @@ export class QAWebSocketClient {
     try {
       const credentials = await getAwsCredentials(this.config.getIdToken);
       
-      const baseUrl = new URL(WEBSOCKET_URL);
-      
-      baseUrl.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Session-Id', this.config.sessionId);
-      baseUrl.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Custom-PersonaId', this.config.personaId);
-      baseUrl.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Custom-UserId', this.config.userId);
-      baseUrl.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Custom-DateStr', this.config.dateStr);
-      
-      if (this.config.voiceId) {
-        baseUrl.searchParams.set('X-Amzn-Bedrock-AgentCore-Runtime-Custom-VoiceId', this.config.voiceId);
-      }
-      
+      // Sign only the bare WS URL — AgentCore strips custom query params before
+      // they reach the container. We deliver them via a setup message instead.
       const signedUrl = await signWebSocketUrl(
-        baseUrl.toString(),
+        WEBSOCKET_URL,
         credentials,
         cognitoConfig.region
       );
@@ -76,9 +67,18 @@ export class QAWebSocketClient {
         this.ws = new WebSocket(signedUrl);
 
       this.ws.onopen = () => {
-        console.log('[QA WebSocket] Connected');
+        console.log('[QA WebSocket] Connected — sending setup');
         this._isConnected = true;
         this.reconnectAttempts = 0;
+        // Send session parameters as first message
+        this.send({
+          action: 'setup',
+          personaId: this.config.personaId,
+          userId: this.config.userId,
+          sessionId: this.config.sessionId,
+          dateStr: this.config.dateStr,
+          voiceId: this.config.voiceId ?? 'matthew',
+        });
         resolve();
       };
 
