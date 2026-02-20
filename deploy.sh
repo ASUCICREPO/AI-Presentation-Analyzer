@@ -182,7 +182,7 @@ EOF
     aws codebuild create-project \
         --name "$PROJECT_NAME" \
         --description "Automated deployment for AI Presentation Coach from GitHub" \
-        --source type=GITHUB,location="https://github.com/${GITHUB_REPO}.git" \
+        --source type=GITHUB,location="https://github.com/${GITHUB_REPO}.git",buildspec=buildspec-deploy.yml \
         --artifacts type=NO_ARTIFACTS \
         --environment type=ARM_CONTAINER,image="$BUILD_IMAGE",computeType="$COMPUTE_TYPE",privilegedMode=true \
         --service-role "$ROLE_ARN" \
