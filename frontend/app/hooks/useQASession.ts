@@ -165,20 +165,42 @@ export function useQASession(
     audioContextRef.current = ctx;
 
     const source = ctx.createMediaStreamSource(stream);
-    // Use ScriptProcessorNode (deprecated but broadly supported) for PCM access
-    const processor = ctx.createScriptProcessor(4096, 1, 1);
+
+    // Use AudioWorkletNode (modern replacement for ScriptProcessorNode) for PCM access
+    const workletCode = `
+      class PCMProcessor extends AudioWorkletProcessor {
+        process(inputs) {
+          const input = inputs[0];
+          if (!input || input.length === 0) {
+            return true;
+          }
+          const channelData = input[0];
+          if (!channelData) {
+            return true;
+          }
+          const int16 = new Int16Array(channelData.length);
+          for (let i = 0; i < channelData.length; i++) {
+            const s = Math.max(-1, Math.min(1, channelData[i]));
+            int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+          }
+          this.port.postMessage(int16.buffer, [int16.buffer]);
+          return true;
+        }
+      }
+      registerProcessor('pcm-processor', PCMProcessor);
+    `;
+
+    const workletBlob = new Blob([workletCode], { type: 'application/javascript' });
+    const workletUrl = URL.createObjectURL(workletBlob);
+    await ctx.audioWorklet.addModule(workletUrl);
+
+    const processor = new AudioWorkletNode(ctx, 'pcm-processor');
     processorNodeRef.current = processor;
 
-    processor.onaudioprocess = (e) => {
+    processor.port.onmessage = (event) => {
       if (isMutedRef.current) return;
-      const input = e.inputBuffer.getChannelData(0);
-      // Convert float32 → int16 PCM → base64
-      const int16 = new Int16Array(input.length);
-      for (let i = 0; i < input.length; i++) {
-        const s = Math.max(-1, Math.min(1, input[i]));
-        int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-      }
-      const bytes = new Uint8Array(int16.buffer);
+      const buffer = event.data as ArrayBuffer;
+      const bytes = new Uint8Array(buffer);
       let binary = '';
       for (let i = 0; i < bytes.length; i++) {
         binary += String.fromCharCode(bytes[i]);
