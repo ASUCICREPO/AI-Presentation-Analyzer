@@ -100,6 +100,16 @@ export default function Home() {
     setIsModalOpen(true);
   };
 
+  const handleQAComplete = () => {
+    setCurrentStep(5);
+    window.scrollTo(0, 0);
+  };
+
+  const handleQASkip = () => {
+    setCurrentStep(5);
+    window.scrollTo(0, 0);
+  };
+
   const handleDownloadSessionData = () => {
     if (sessionData) {
       const blob = new Blob([JSON.stringify(sessionData, null, 2)], { type: 'application/json' });
