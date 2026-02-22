@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { SessionAnalytics } from '../hooks/useSessionAnalytics';
-import { AIFeedbackResponse } from '../services/api';
+import { AIFeedbackResponse, getVideoPlaybackUrl } from '../services/api';
 import {
   Download,
   TrendingUp,
@@ -19,6 +19,9 @@ import {
   Volume2,
   MessageCircle,
   Timer,
+  Clock,
+  Play,
+  RotateCcw,
 } from 'lucide-react';
 
 import {
@@ -115,6 +118,13 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDo
   const { windows } = sessionData;
   const [showWindows, setShowWindows] = useState(false);
   const [dismissedBanner, setDismissedBanner] = useState(false);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  // Fetch video playback URL on mount
+  useEffect(() => {
+    getVideoPlaybackUrl(sessionData.sessionId).then(setVideoUrl);
+  }, [sessionData.sessionId]);
 
   const bp = resolveBestPractices(persona);
   const weights = resolveScoringWeights(persona);
@@ -270,6 +280,106 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDo
         </div>
       )}
 
+      {/* Video Playback + Timestamped Feedback */}
+      {(videoUrl || (aiFeedback?.timestampedFeedback && aiFeedback.timestampedFeedback.length > 0)) && (
+        <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {/* Left: Recording Playback */}
+          <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+            <h2 className="mb-4 text-lg font-semibold text-gray-900">Recording Playback</h2>
+            {videoUrl ? (
+              <>
+                <div className="relative overflow-hidden rounded-lg bg-gray-900">
+                  <video
+                    ref={videoRef}
+                    src={videoUrl}
+                    className="w-full rounded-lg"
+                    controls
+                    preload="metadata"
+                  />
+                </div>
+                <div className="mt-3 flex gap-3">
+                  <button
+                    onClick={() => { videoRef.current?.play(); }}
+                    className="flex items-center gap-2 rounded-lg bg-maroon px-4 py-2 text-sm text-white hover:bg-maroon/90 transition-colors"
+                  >
+                    <Play className="h-4 w-4" /> Play Recording
+                  </button>
+                  <button
+                    onClick={() => { if (videoRef.current) { videoRef.current.currentTime = 0; } }}
+                    className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <RotateCcw className="h-4 w-4" /> Restart
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="flex h-48 items-center justify-center rounded-lg bg-gray-900">
+                <p className="text-sm text-gray-400">Video recording unavailable</p>
+              </div>
+            )}
+          </div>
+
+          {/* Right: Timestamped Feedback */}
+          <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+            <h2 className="mb-1 text-lg font-semibold text-gray-900">Timestamped Feedback</h2>
+            <p className="mb-4 text-sm text-gray-500">Moments where your delivery fell below best practices</p>
+            {aiFeedback?.timestampedFeedback && aiFeedback.timestampedFeedback.length > 0 ? (
+              <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                {aiFeedback.timestampedFeedback.map((event, i) => {
+                  const msg = event.message.toLowerCase();
+                  const isEye = msg.includes('eye contact');
+                  const isFiller = msg.includes('filler');
+                  const isPace = msg.includes('pace');
+                  const isPause = msg.includes('pause');
+                  const isVolume = msg.includes('volume');
+
+                  let borderColor = 'border-red-200';
+                  let bgColor = 'bg-red-50';
+                  let iconColor = 'text-red-500';
+                  let Icon = AlertTriangle;
+
+                  if (isFiller) {
+                    borderColor = 'border-yellow-200'; bgColor = 'bg-yellow-50'; iconColor = 'text-yellow-500'; Icon = MessageCircle;
+                  } else if (isPace) {
+                    borderColor = 'border-yellow-200'; bgColor = 'bg-yellow-50'; iconColor = 'text-yellow-500'; Icon = Gauge;
+                  } else if (isEye) {
+                    borderColor = 'border-red-200'; bgColor = 'bg-red-50'; iconColor = 'text-red-500'; Icon = Eye;
+                  } else if (isPause) {
+                    borderColor = 'border-yellow-200'; bgColor = 'bg-yellow-50'; iconColor = 'text-yellow-500'; Icon = Clock;
+                  } else if (isVolume) {
+                    borderColor = 'border-yellow-200'; bgColor = 'bg-yellow-50'; iconColor = 'text-yellow-500'; Icon = Volume2;
+                  }
+
+                  return (
+                    <button
+                      key={i}
+                      className={`flex w-full items-center gap-3 rounded-lg border ${borderColor} ${bgColor} px-4 py-3 text-left transition-colors hover:opacity-80`}
+                      onClick={() => {
+                        if (videoRef.current) {
+                          const [min, sec] = event.timestamp.split(':').map(Number);
+                          videoRef.current.currentTime = min * 60 + sec;
+                          videoRef.current.play();
+                        }
+                      }}
+                    >
+                      <span className="flex-shrink-0 rounded border border-gray-200 bg-white px-2 py-0.5 font-mono text-sm text-gray-700">
+                        {event.timestamp}
+                      </span>
+                      <span className="flex-1 text-sm text-gray-800">{event.message}</span>
+                      <Icon className={`h-5 w-5 flex-shrink-0 ${iconColor}`} />
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex h-32 items-center justify-center">
+                <p className="text-sm text-gray-400">All metrics within best practices</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Two-Column: Metrics + Recommendations */}
       <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Detailed Metrics */}
@@ -384,6 +494,8 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDo
           </ul>
         </div>
       )}
+
+      {/* Timestamped Feedback — removed, now in video+feedback section above */}
 
       {/* Comparison with Best Practices */}
       {stats && (
