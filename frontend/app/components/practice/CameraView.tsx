@@ -9,7 +9,6 @@ interface CameraViewProps {
   isPaused: boolean;
   isCalibrating: boolean;
   permissionDenied: boolean;
-  compact?: boolean;
   onStartCamera: () => void;
   onStartRecording: () => void;
   onPauseRecording: () => void;
@@ -26,7 +25,6 @@ export default function CameraView({
   isPaused,
   isCalibrating,
   permissionDenied,
-  compact = false,
   onStartCamera,
   onStartRecording,
   onPauseRecording,
@@ -37,9 +35,7 @@ export default function CameraView({
   return (
     <div className="space-y-3">
       <div
-        className={`relative w-full overflow-hidden rounded-xl bg-gray-900 shadow-lg group aspect-video transition-all duration-500 ${
-          compact ? 'mx-auto max-w-[900px]' : ''
-        }`}
+        className="relative w-full overflow-hidden rounded-xl bg-gray-900 shadow-lg group aspect-video"
       >
         {/* Status Badges */}
         <div className="absolute left-4 top-4 z-10 flex gap-2">
@@ -145,7 +141,7 @@ export default function CameraView({
                 className="flex items-center gap-2 rounded-lg bg-red-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-red-700 active:scale-[0.98] 2xl:px-8 2xl:py-3.5 2xl:text-lg font-sans"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h12v12H6z"/></svg>
-                Stop & Review
+                Finish Recording
               </button>
             </>
           )}

@@ -187,6 +187,19 @@ export function useVideoRecording(sessionId: string, options?: VideoRecordingOpt
         // browsers can seek and display the video without artifacts.
         if (partsRef.current.length === 0) {
           const durationMs = Date.now() - startTimeRef.current;
+
+          // If recording was extremely short (< 1s) the blob is likely
+          // unusable — skip the upload entirely and abort the multipart.
+          if (durationMs < 1000 || blob.size < 1000) {
+            console.warn(`[useVideoRecording] Recording too short (${durationMs}ms, ${blob.size}B), aborting upload`);
+            try {
+              await abortMultipartUpload(sessionId, uploadIdRef.current);
+            } catch { /* best-effort abort */ }
+            uploadIdRef.current = null;
+            setState((prev) => ({ ...prev, isRecording: false }));
+            return;
+          }
+
           try {
             console.log(`[useVideoRecording] Fixing WebM duration (${(durationMs / 1000).toFixed(1)}s) on final blob`);
             blob = await fixWebmDuration(blob, durationMs, { logger: false });
