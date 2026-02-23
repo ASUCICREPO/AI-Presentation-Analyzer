@@ -68,7 +68,7 @@ export default function Header({ currentStep, onStepClick, sessionId }: HeaderPr
           {steps.map((step, index) => {
             const isActive = step.number === currentStep;
             const isCompleted = step.number < currentStep;
-            const isClickable = step.number < currentStep || step.number === currentStep;
+            const isClickable = currentStep !== 5 && (step.number < currentStep || step.number === currentStep);
 
             return (
               <React.Fragment key={step.number}>
