@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Orb } from '../ui/orb';
+import { CircularWaveform } from '@pipecat-ai/voice-ui-kit';
 import type { AgentState } from '../ui/orb';
 import { Mic, Loader2, MicOff, PhoneOff, ArrowRight } from 'lucide-react';
 import { QASessionStatus } from '../../hooks/useQASession';
@@ -11,6 +11,7 @@ interface QAOrbPanelProps {
   agentState: AgentState;
   status: QASessionStatus;
   isMuted: boolean;
+  botAudioTrack: MediaStreamTrack | null;
   onStart: () => void;
   onEnd: () => void;
   onToggleMute: () => void;
@@ -28,6 +29,7 @@ export default function QAOrbPanel({
   agentState,
   status,
   isMuted,
+  botAudioTrack,
   onStart,
   onEnd,
   onToggleMute,
@@ -37,18 +39,22 @@ export default function QAOrbPanel({
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm 2xl:p-6 relative overflow-hidden">
-      {/* Orb */}
-      <div className="relative w-full h-[240px] 2xl:h-[300px]">
-        <Orb
-          agentState={agentState}
-          colors={["#6366F1", "#A78BFA"]}
-          seed={42}
-          className="absolute inset-0 h-full w-full"
+      {/* Visualizer */}
+      <div className="relative w-full h-[220px] 2xl:h-[280px] flex items-center justify-center">
+        <CircularWaveform
+          audioTrack={agentState === 'talking' ? botAudioTrack : null}
+          isThinking={agentState === 'thinking'}
+          color1="#9F1239"
+          color2="#E11D48"
+          backgroundColor="transparent"
+          sensitivity={1.2}
+          numBars={64}
+          barWidth={4}
         />
       </div>
 
       {/* Persona info */}
-      <div className="mt-2 text-center">
+      <div className="mt-3 text-center">
         <h4 className="text-base font-semibold text-gray-900 font-serif italic 2xl:text-lg">
           {personaName || 'AI Interviewer'}
         </h4>
@@ -62,7 +68,7 @@ export default function QAOrbPanel({
           </div>
         ) : status === 'idle' ? (
           <p className="mt-1 text-xs text-gray-400 font-sans">
-            Your AI interviewer will ask questions about your presentation
+            Will ask questions about your presentation
           </p>
         ) : status === 'connecting' ? (
           <p className="mt-1 text-xs text-amber-500 font-sans">Connecting...</p>
@@ -74,7 +80,7 @@ export default function QAOrbPanel({
       </div>
 
       {/* Controls */}
-      <div className="mt-4 flex flex-col items-center gap-3">
+      <div className="mt-4 flex flex-col items-center gap-2.5">
         {status === 'idle' && (
           <>
             <button

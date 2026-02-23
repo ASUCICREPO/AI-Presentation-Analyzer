@@ -74,9 +74,9 @@ export default function QASession({
 
   useEffect(() => {
     if (transcriptScrollRef.current) {
-      transcriptScrollRef.current.scrollTop = transcriptScrollRef.current.scrollHeight;
+      transcriptScrollRef.current.scrollTop = 0;
     }
-  }, [qa.transcriptEntries, qa.partialUserText, qa.partialAssistantText]);
+  }, [qa.transcriptEntries, qa.partialUserText]);
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 py-3 sm:px-6 sm:py-4 2xl:max-w-[1600px] 2xl:py-8">
@@ -141,6 +141,7 @@ export default function QASession({
             agentState={qa.agentState}
             status={qa.status}
             isMuted={qa.isMuted}
+            botAudioTrack={qa.botAudioTrack}
             onStart={qa.startSession}
             onEnd={qa.endSession}
             onToggleMute={qa.toggleMute}
@@ -168,7 +169,7 @@ export default function QASession({
           ref={transcriptScrollRef}
           className="max-h-[200px] overflow-y-auto rounded-xl border border-gray-200 bg-white p-3 shadow-sm space-y-2.5 2xl:p-5 2xl:max-h-[280px]"
         >
-          {qa.transcriptEntries.length === 0 && !qa.partialUserText && !qa.partialAssistantText && (
+          {qa.transcriptEntries.length === 0 && !qa.partialUserText && (
             <div className="py-6 text-center">
               <MessageSquareText className="mx-auto mb-3 h-8 w-8 text-gray-300" />
               <p className="text-sm text-gray-400 font-sans">
@@ -177,7 +178,20 @@ export default function QASession({
             </div>
           )}
 
-          {qa.transcriptEntries.map((entry, index) => (
+          {/* Partial user text (typing indicator) — newest, shown at top */}
+          {qa.partialUserText && (
+            <div className="flex gap-3 items-start opacity-60">
+              <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-gray-400 mt-0.5">
+                ...
+              </span>
+              <p className="text-sm text-gray-500 italic leading-relaxed font-sans">
+                {qa.partialUserText}
+              </p>
+            </div>
+          )}
+
+          {/* Finalized entries — newest first */}
+          {[...qa.transcriptEntries].reverse().map((entry, index) => (
             <div key={index} className="flex gap-3 items-start">
               <span className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[11px] font-medium mt-0.5 ${
                 entry.role === 'assistant'
@@ -191,28 +205,6 @@ export default function QASession({
               </p>
             </div>
           ))}
-
-          {qa.partialAssistantText && (
-            <div className="flex gap-3 items-start opacity-60">
-              <span className="shrink-0 rounded bg-maroon/10 px-1.5 py-0.5 font-mono text-[11px] font-medium text-maroon mt-0.5">
-                {displayPersonaName}
-              </span>
-              <p className="text-sm text-gray-500 italic leading-relaxed font-sans">
-                {qa.partialAssistantText}
-              </p>
-            </div>
-          )}
-
-          {qa.partialUserText && (
-            <div className="flex gap-3 items-start opacity-60">
-              <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-gray-400 mt-0.5">
-                You
-              </span>
-              <p className="text-sm text-gray-500 italic leading-relaxed font-sans">
-                {qa.partialUserText}
-              </p>
-            </div>
-          )}
         </div>
       </div>
     </div>

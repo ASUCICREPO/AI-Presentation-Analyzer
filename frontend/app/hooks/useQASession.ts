@@ -15,6 +15,7 @@ export interface QASessionState {
   error: string | null;
   isMuted: boolean;
   agentState: AgentState;
+  botAudioTrack: MediaStreamTrack | null;
 }
 
 export interface UseQASessionReturn extends QASessionState {
@@ -36,6 +37,7 @@ export function useQASession(
   const [error, setError] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [agentState, setAgentState] = useState<AgentState>(null);
+  const [botAudioTrack, setBotAudioTrack] = useState<MediaStreamTrack | null>(null);
 
   const wsClientRef = useRef<QAWebSocketClient | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -47,6 +49,8 @@ export function useQASession(
 
   // Audio playback queue
   const playbackContextRef = useRef<AudioContext | null>(null);
+  const playbackDestRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+  const playbackGainRef = useRef<GainNode | null>(null);
   const playbackQueueRef = useRef<Float32Array[]>([]);
   const isPlayingRef = useRef(false);
 
@@ -56,12 +60,11 @@ export function useQASession(
       case 'session_started':
         setStatus('active');
         setPersonaName((event.persona_name as string) || '');
-        setAgentState('thinking');
+        setAgentState('listening');
         startTimerRef.current?.();
         break;
 
       case 'audio':
-        setAgentState('talking');
         if (event.data) {
           const pcmBytes = Uint8Array.from(atob(event.data as string), c => c.charCodeAt(0));
           const int16 = new Int16Array(pcmBytes.buffer);
@@ -80,20 +83,14 @@ export function useQASession(
         const isPartial = event.is_partial as boolean;
 
         if (isPartial) {
-          if (role === 'user') {
-            setPartialUserText(text);
-            setAgentState('listening');
-          } else {
-            setPartialAssistantText(text);
-            setAgentState('talking');
-          }
+          if (role === 'user') setPartialUserText(text);
+          else setPartialAssistantText(text);
         } else {
           if (role === 'user') {
             setPartialUserText('');
-            setAgentState('thinking');
+            if (!isPlayingRef.current) setAgentState('thinking');
           } else {
             setPartialAssistantText('');
-            setAgentState('listening');
           }
           if (text.trim()) {
             setTranscriptEntries(prev => [...prev, { role, text, is_partial: false }]);
@@ -126,21 +123,38 @@ export function useQASession(
   const drainPlaybackQueue = useCallback(() => {
     if (isPlayingRef.current || playbackQueueRef.current.length === 0) return;
     isPlayingRef.current = true;
+    setAgentState('talking');
 
     const ctx = playbackContextRef.current || new AudioContext({ sampleRate: QA_SESSION_CONFIG.AUDIO_SAMPLE_RATE });
     playbackContextRef.current = ctx;
+
+    if (!playbackDestRef.current) {
+      const dest = ctx.createMediaStreamDestination();
+      playbackDestRef.current = dest;
+      setBotAudioTrack(dest.stream.getAudioTracks()[0] ?? null);
+    }
+    if (!playbackGainRef.current) {
+      const gain = ctx.createGain();
+      gain.gain.value = 1;
+      gain.connect(ctx.destination);
+      gain.connect(playbackDestRef.current);
+      playbackGainRef.current = gain;
+    }
+
+    const gainNode = playbackGainRef.current;
 
     const playNext = () => {
       const chunk = playbackQueueRef.current.shift();
       if (!chunk) {
         isPlayingRef.current = false;
+        setAgentState('listening');
         return;
       }
       const buffer = ctx.createBuffer(1, chunk.length, QA_SESSION_CONFIG.AUDIO_SAMPLE_RATE);
       buffer.copyToChannel(new Float32Array(chunk), 0);
       const source = ctx.createBufferSource();
       source.buffer = buffer;
-      source.connect(ctx.destination);
+      source.connect(gainNode);
       source.onended = playNext;
       source.start();
     };
@@ -241,6 +255,10 @@ export function useQASession(
     audioContextRef.current = null;
     mediaStreamRef.current?.getTracks().forEach(t => t.stop());
     mediaStreamRef.current = null;
+    playbackGainRef.current?.disconnect();
+    playbackGainRef.current = null;
+    playbackDestRef.current = null;
+    setBotAudioTrack(null);
     playbackContextRef.current?.close();
     playbackContextRef.current = null;
     playbackQueueRef.current = [];
@@ -315,6 +333,7 @@ export function useQASession(
     error,
     isMuted,
     agentState,
+    botAudioTrack,
     startSession,
     endSession,
     toggleMute,
