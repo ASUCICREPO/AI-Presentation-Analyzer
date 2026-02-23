@@ -21,6 +21,7 @@ export interface AIFeedbackResponse {
   generatedAt: string;
   model: string;
   includedFiles: Record<string, boolean>;
+  timestampedFeedback?: { timestamp: string; message: string }[];
 }
 
 export class AnalyticsProcessingError extends Error {
@@ -310,6 +311,23 @@ export async function abortMultipartUpload(
 }
 
 // ─── JSON Upload Helper ──────────────────────────────────────────────
+
+// ─── Video Playback URL ──────────────────────────────────────────────
+
+export async function getVideoPlaybackUrl(sessionId: string): Promise<string | null> {
+  const headers = await authHeaders();
+  try {
+    const res = await fetch(
+      `${API_BASE_URL}/s3_urls?action=get_video_url&session_id=${sessionId}`,
+      { headers },
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.url ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Upload a JSON object to S3 using a presigned POST URL.

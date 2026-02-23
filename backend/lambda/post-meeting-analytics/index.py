@@ -99,6 +99,66 @@ def get_persona(identifier):
 
     return None
 
+# ─── Timestamped feedback from session analytics windows ──────────────────────
+
+# Fallback thresholds — only used when the persona has no bestPractices.
+_FALLBACK_BP = {
+    'wpm': {'min': 140, 'max': 160},
+    'eyeContact': {'min': 60},
+    'fillerWords': {'max': 3},
+    'pauses': {'min': 4},
+}
+
+def _resolve_best_practices(persona):
+    """Pull bestPractices from the persona; fall back to defaults per field."""
+    persona_bp = persona.get('bestPractices', {}) if persona else {}
+    resolved = {}
+    for key, default in _FALLBACK_BP.items():
+        if key in persona_bp and isinstance(persona_bp[key], dict):
+            resolved[key] = {**default, **persona_bp[key]}
+        else:
+            resolved[key] = dict(default)
+    return resolved
+
+def _window_timestamp(window_number):
+    """Convert a 1-based window number to MM:SS (each window = 30s)."""
+    secs = (window_number - 1) * 30
+    return f"{secs // 60:02d}:{secs % 60:02d}"
+
+def generate_timestamped_feedback(session_analytics, persona=None):
+    """Check each 30-second window against the persona's best-practice
+    thresholds. Returns events only where a metric is below standard."""
+    windows = session_analytics.get('windows', [])
+    if not windows:
+        return []
+
+    bp = _resolve_best_practices(persona)
+    events = []
+
+    for w in windows:
+        ts = _window_timestamp(w.get('windowNumber', 1))
+        pace = w.get('speakingPace', {}).get('average', 0)
+        eye = w.get('eyeContactScore', 100)
+        fillers = w.get('fillerWords', 0)
+        pauses = w.get('pauses', 0)
+
+        if pace > 0 and pace < bp['wpm']['min']:
+            events.append({'timestamp': ts, 'message': f'Speaking pace too slow ({pace} wpm)'})
+        elif pace > bp['wpm']['max']:
+            events.append({'timestamp': ts, 'message': f'Speaking pace too fast ({pace} wpm)'})
+
+        if eye < bp['eyeContact']['min']:
+            events.append({'timestamp': ts, 'message': f'Low eye contact ({eye}%)'})
+
+        if fillers > bp['fillerWords']['max']:
+            events.append({'timestamp': ts, 'message': f'High filler word usage ({fillers} detected)'})
+
+        if pauses < bp['pauses']['min']:
+            events.append({'timestamp': ts, 'message': f'Too few pauses ({pauses} used)'})
+
+    return events
+
+
 
 # ─── Bedrock feedback generation (prompt-based JSON, no outputConfig) ─────────
 
@@ -171,20 +231,32 @@ def generate_feedback(persona, transcript, persona_customization=None,
 
     parts.extend([
         "",
-        f"Based on your role as {persona_name}, the transcript, the delivery metrics,"
+        f"Based on your role as {persona_name}, the transcript,"
         " and the presentation materials (if PDF is provided), provide structured feedback.",
         "",
-        "IMPORTANT: Keep ALL feedback concise — maximum 4 lines per section.",
+        "IMPORTANT: Keep ALL feedback concise. Brevity is mandatory.",
         "",
-        "For keyRecommendations: provide exactly 5 specific, actionable recommendations"
-        " covering content, delivery, and persona-specific improvements. Each"
-        " recommendation should have a short title and a description of no more"
-        " than 4 lines with a concrete example from the transcript.",
+        "CRITICAL CONSTRAINT FOR keyRecommendations: You MUST return EXACTLY 5"
+        " recommendations — not 4, not 6, exactly 5. Each recommendation MUST"
+        " have a short title (under 8 words) and a description of EXACTLY 3"
+        " sentences. No more, no less than 3 sentences per description. Keep"
+        " each description under 60 words total. Do NOT write paragraphs."
+        " Recommendations MUST focus ONLY on the presentation CONTENT — what"
+        " was said, the arguments made, the structure, clarity, depth, and"
+        " completeness of the material. Do NOT mention delivery metrics like"
+        " speaking pace, volume, eye contact, filler words, or pauses in"
+        " keyRecommendations. Delivery feedback belongs in performanceSummary only.",
         "",
         "For performanceSummary: provide an overall assessment (2-3 sentences), list"
         " 2-3 content strengths (each no more than 1 sentence), and give delivery"
-        " feedback on pace, volume, eye contact, filler words, and pauses — each"
-        " limited to 1-2 sentences based on the session metrics.",
+        " feedback on pace, volume, eye contact, filler words, and pauses.",
+        "",
+        "CRITICAL CONSTRAINT FOR deliveryFeedback: Each of the five delivery feedback"
+        " fields (speakingPace, volume, eyeContact, fillerWords, pauses) MUST be"
+        " EXACTLY 2 sentences. No more, no less. The first sentence should state"
+        " what was observed. The second sentence should give one actionable tip."
+        " Do NOT include statistics, standard deviations, window breakdowns, or"
+        " lengthy analysis. Keep each field under 30 words total.",
         "",
         f"Use a {communication_style} tone throughout your feedback.",
         "Be constructive and encouraging while being honest about areas needing work.",
@@ -361,11 +433,16 @@ def lambda_handler(event, context):
                 except json.JSONDecodeError:
                     print("Warning: could not parse session_analytics.json")
 
-            # Generate
+            # Generate AI feedback
             feedback = generate_feedback(
                 persona, transcript, persona_customization,
                 pdf_bytes, session_analytics,
             )
+
+            # Generate timestamped feedback from window data + persona thresholds
+            timestamped = []
+            if session_analytics:
+                timestamped = generate_timestamped_feedback(session_analytics, persona)
 
             result = {
                 'status': 'completed',
@@ -377,6 +454,7 @@ def lambda_handler(event, context):
                 },
                 'keyRecommendations': feedback.get('keyRecommendations', []),
                 'performanceSummary': feedback.get('performanceSummary', {}),
+                'timestampedFeedback': timestamped,
                 'generatedAt': datetime.now(timezone.utc).isoformat(),
                 'model': BEDROCK_MODEL_ID,
                 'includedFiles': {

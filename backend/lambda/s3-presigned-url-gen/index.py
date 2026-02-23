@@ -177,6 +177,22 @@ def upload_persona_customization(user_id: str, session_id: str, text: str) -> bo
 
 
 # ─── Multipart upload helpers ─────────────────────────────────────────
+
+def get_video_playback_url(user_id: str, session_id: str) -> Optional[str]:
+    """Generate a presigned GET URL for playing back the recorded video."""
+    key = _build_s3_key(user_id, session_id, 'session')
+    try:
+        url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': UPLOADS_BUCKET, 'Key': key},
+            ExpiresIn=PRESENTATION_TIMEOUT,
+        )
+        return url
+    except ClientError as e:
+        print(f"[ERROR] Failed to generate video playback URL: {e}")
+        return None
+
+
 def initiate_multipart(user_id: str, session_id: str) -> Optional[dict]:
     """Create a new multipart upload for recording.webm."""
     key = _build_s3_key(user_id, session_id, 'session')
@@ -391,6 +407,13 @@ def lambda_handler(event, context):
             if not url:
                 return _response(500, {'message': 'Failed to generate part URL'})
             return _response(200, {'url': url, 'part_number': int(part_number)})
+
+        # Route: presigned GET URL for video playback
+        if action == 'get_video_url':
+            url = get_video_playback_url(user_id, session_id)
+            if not url:
+                return _response(404, {'message': 'Video not found or URL generation failed'})
+            return _response(200, {'url': url})
 
         # Route: presigned POST URL for file upload
         request_type = qs.get('request_type')
