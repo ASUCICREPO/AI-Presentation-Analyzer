@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useMemo } from 'react';
-import { ArrowLeft, ArrowRight, MessageCircle, AlertCircle } from 'lucide-react';
+import React, { useMemo, useEffect, useRef } from 'react';
+import { ArrowLeft, AlertCircle, MessageSquareText } from 'lucide-react';
 import { useQASession } from '../hooks/useQASession';
 import { QAWebSocketConfig } from '../services/websocket';
 import { useAuth } from '../context/AuthContext';
-import QAVoiceControls from './qa/QAVoiceControls';
-import QATranscript from './qa/QATranscript';
+import { QA_SESSION_CONFIG } from '../config/config';
+import QACameraView from './qa/QACameraView';
+import QAOrbPanel from './qa/QAOrbPanel';
 
 interface QASessionProps {
   personaId: string;
@@ -17,6 +18,12 @@ interface QASessionProps {
   onBack: () => void;
   onComplete: () => void;
   onSkip: () => void;
+}
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
 export default function QASession({
@@ -30,6 +37,8 @@ export default function QASession({
   onSkip,
 }: QASessionProps) {
   const { getIdToken } = useAuth();
+  const autoNavigatedRef = useRef(false);
+  const transcriptScrollRef = useRef<HTMLDivElement>(null);
 
   const dateStr = useMemo(() => {
     const now = new Date();
@@ -51,67 +60,66 @@ export default function QASession({
   const qa = useQASession(wsConfig, getIdToken);
   const displayPersonaName = qa.personaName || initialPersonaName;
 
+  const remaining = Math.max(0, QA_SESSION_CONFIG.DURATION_SEC - qa.timer);
+  const isWarning = remaining <= QA_SESSION_CONFIG.WARNING_AT_SEC;
+  const isCritical = remaining <= QA_SESSION_CONFIG.FINAL_WARNING_AT_SEC;
+
+  useEffect(() => {
+    if (qa.status === 'ended' && !autoNavigatedRef.current) {
+      autoNavigatedRef.current = true;
+      const timeout = setTimeout(() => onComplete(), 1500);
+      return () => clearTimeout(timeout);
+    }
+  }, [qa.status, onComplete]);
+
+  useEffect(() => {
+    if (transcriptScrollRef.current) {
+      transcriptScrollRef.current.scrollTop = transcriptScrollRef.current.scrollHeight;
+    }
+  }, [qa.transcriptEntries, qa.partialUserText, qa.partialAssistantText]);
+
   return (
-    <div className="mx-auto w-full max-w-[1000px] px-4 py-6 sm:px-6 2xl:max-w-[1200px]">
+    <div className="mx-auto w-full max-w-[1200px] px-4 py-3 sm:px-6 sm:py-4 2xl:max-w-[1600px] 2xl:py-8">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          {qa.status === 'idle' && (
-            <button
-              onClick={onBack}
-              className="flex items-center gap-1.5 text-sm text-gray-500 transition hover:text-gray-700 font-sans"
-            >
-              <ArrowLeft size={16} />
-              Back to Practice
-            </button>
-          )}
+      <div className="mb-3 flex items-center justify-between 2xl:mb-6">
+        <div className="flex items-start gap-4">
+          <button
+            onClick={onBack}
+            className="group mt-1 flex h-10 w-10 items-center justify-center rounded-full bg-white border border-gray-200 text-gray-500 shadow-sm transition-all duration-300 ease-out hover:border-maroon-200 hover:bg-maroon-50 hover:text-maroon-700 hover:shadow-md"
+            title="Exit Session"
+          >
+            <ArrowLeft className="w-5 h-5 transition-transform duration-300 ease-out group-hover:-translate-x-1" />
+          </button>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 font-serif italic sm:text-3xl">
+            <h1 className="text-xl font-bold text-gray-900 font-serif italic sm:text-2xl 2xl:text-4xl">
               Q&A Session
             </h1>
-            <p className="mt-1 text-sm text-gray-500 font-sans">
-              {displayPersonaName} will ask questions about your presentation
+            <p className="mt-1 text-sm text-gray-500 font-sans 2xl:text-xl">
+              Presenting to: <span className="text-maroon-700 font-medium">{displayPersonaName}</span>
             </p>
           </div>
         </div>
 
-        {(qa.status === 'idle' || qa.status === 'ended' || qa.status === 'error') && (
-          <button
-            onClick={onSkip}
-            className="flex items-center gap-1.5 text-sm text-gray-500 transition hover:text-gray-700 font-sans"
+        {/* Timer */}
+        <div className="text-right">
+          <div
+            className={`
+              text-2xl font-bold font-mono 2xl:text-4xl transition-colors duration-300
+              ${isCritical ? 'text-red-600' : isWarning ? 'text-amber-600' : 'text-gray-900'}
+            `}
           >
-            Skip to Analytics
-            <ArrowRight size={16} />
-          </button>
-        )}
-      </div>
-
-      {/* Status banner for ended/error */}
-      {qa.status === 'ended' && (
-        <div className="mb-6 rounded-lg border border-green-200 bg-green-50 p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <MessageCircle size={18} className="text-green-600" />
-              <div>
-                <p className="text-sm font-medium text-green-800 font-sans">Q&A Session Complete</p>
-                <p className="text-xs text-green-600 font-sans">
-                  {qa.transcriptEntries.length} exchanges recorded
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={onComplete}
-              className="flex items-center gap-1.5 rounded-lg bg-maroon px-4 py-2 text-sm font-medium text-white transition hover:bg-maroon/90 font-sans"
-            >
-              Continue to Analytics
-              <ArrowRight size={14} />
-            </button>
+            {formatTime(qa.timer)}
+          </div>
+          <div className="text-xs text-gray-500 font-sans 2xl:text-base">
+            {qa.status === 'active' && isWarning
+              ? `${formatTime(remaining)} remaining`
+              : 'Session Time'}
           </div>
         </div>
-      )}
+      </div>
 
       {qa.error && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-4">
+        <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3">
           <div className="flex items-center gap-2">
             <AlertCircle size={18} className="text-red-600" />
             <p className="text-sm text-red-700 font-sans">{qa.error}</p>
@@ -119,75 +127,92 @@ export default function QASession({
         </div>
       )}
 
-      {/* Main content grid */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {/* Left: Instructions & Controls */}
-        <div className="lg:col-span-1 space-y-4">
-          {/* Instructions card */}
-          {qa.status === 'idle' && (
-            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-900 font-sans mb-3">How it works</h3>
-              <ul className="space-y-2 text-xs text-gray-600 font-sans">
-                <li className="flex items-start gap-2">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-maroon/10 text-[10px] font-bold text-maroon">1</span>
-                  <span>Click &ldquo;Start Q&A Session&rdquo; to begin</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-maroon/10 text-[10px] font-bold text-maroon">2</span>
-                  <span>{displayPersonaName} will ask questions about your presentation</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-maroon/10 text-[10px] font-bold text-maroon">3</span>
-                  <span>Answer naturally — speak clearly into your microphone</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-maroon/10 text-[10px] font-bold text-maroon">4</span>
-                  <span>The session lasts ~5 minutes, then proceed to analytics</span>
-                </li>
-              </ul>
-            </div>
-          )}
+      {/* Two-column layout */}
+      <div className="flex flex-col lg:flex-row gap-4 2xl:gap-6">
+        {/* Left: Camera */}
+        <div className="min-w-0" style={{ flex: '2 1 0%' }}>
+          <QACameraView />
+        </div>
 
-          {/* Voice controls */}
-          <QAVoiceControls
+        {/* Right: Orb panel with controls */}
+        <div className="min-w-0" style={{ flex: '1 1 0%' }}>
+          <QAOrbPanel
+            personaName={displayPersonaName}
+            agentState={qa.agentState}
             status={qa.status}
-            timer={qa.timer}
             isMuted={qa.isMuted}
             onStart={qa.startSession}
             onEnd={qa.endSession}
             onToggleMute={qa.toggleMute}
+            onSkip={onSkip}
           />
+        </div>
+      </div>
 
-          {/* Session stats (during/after session) */}
-          {(qa.status === 'active' || qa.status === 'ended') && (
-            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 font-sans">Session Stats</h3>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-lg bg-gray-50 p-2.5 text-center">
-                  <p className="text-lg font-bold text-gray-900 font-mono">
-                    {qa.transcriptEntries.filter(e => e.role === 'assistant').length}
-                  </p>
-                  <p className="text-[10px] text-gray-500 font-sans">Questions Asked</p>
-                </div>
-                <div className="rounded-lg bg-gray-50 p-2.5 text-center">
-                  <p className="text-lg font-bold text-gray-900 font-mono">
-                    {qa.transcriptEntries.filter(e => e.role === 'user').length}
-                  </p>
-                  <p className="text-[10px] text-gray-500 font-sans">Your Responses</p>
-                </div>
-              </div>
+      {/* Live Transcript */}
+      <div className="mt-4 animate-slide-up 2xl:mt-6">
+        <div className="flex items-center justify-between mb-2">
+          <h4 className="font-serif text-base font-semibold text-gray-900 2xl:text-xl flex items-center gap-2">
+            <MessageSquareText className="w-5 h-5 text-maroon" />
+            Live Transcript
+          </h4>
+          {qa.status === 'active' && (
+            <div className="flex items-center gap-1.5">
+              <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+              <span className="text-xs text-gray-500 font-sans">Listening</span>
             </div>
           )}
         </div>
 
-        {/* Right: Transcript */}
-        <div className="lg:col-span-2">
-          <QATranscript
-            entries={qa.transcriptEntries}
-            partialUserText={qa.partialUserText}
-            partialAssistantText={qa.partialAssistantText}
-            personaName={displayPersonaName}
-          />
+        <div
+          ref={transcriptScrollRef}
+          className="max-h-[200px] overflow-y-auto rounded-xl border border-gray-200 bg-white p-3 shadow-sm space-y-2.5 2xl:p-5 2xl:max-h-[280px]"
+        >
+          {qa.transcriptEntries.length === 0 && !qa.partialUserText && !qa.partialAssistantText && (
+            <div className="py-6 text-center">
+              <MessageSquareText className="mx-auto mb-3 h-8 w-8 text-gray-300" />
+              <p className="text-sm text-gray-400 font-sans">
+                The conversation will appear here once the Q&A session starts.
+              </p>
+            </div>
+          )}
+
+          {qa.transcriptEntries.map((entry, index) => (
+            <div key={index} className="flex gap-3 items-start">
+              <span className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[11px] font-medium mt-0.5 ${
+                entry.role === 'assistant'
+                  ? 'bg-maroon/10 text-maroon'
+                  : 'bg-gray-100 text-gray-500'
+              }`}>
+                {entry.role === 'assistant' ? displayPersonaName : 'You'}
+              </span>
+              <p className="text-sm text-gray-800 leading-relaxed font-sans">
+                {entry.text}
+              </p>
+            </div>
+          ))}
+
+          {qa.partialAssistantText && (
+            <div className="flex gap-3 items-start opacity-60">
+              <span className="shrink-0 rounded bg-maroon/10 px-1.5 py-0.5 font-mono text-[11px] font-medium text-maroon mt-0.5">
+                {displayPersonaName}
+              </span>
+              <p className="text-sm text-gray-500 italic leading-relaxed font-sans">
+                {qa.partialAssistantText}
+              </p>
+            </div>
+          )}
+
+          {qa.partialUserText && (
+            <div className="flex gap-3 items-start opacity-60">
+              <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[11px] font-medium text-gray-400 mt-0.5">
+                You
+              </span>
+              <p className="text-sm text-gray-500 italic leading-relaxed font-sans">
+                {qa.partialUserText}
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>

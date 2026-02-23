@@ -21,13 +21,6 @@ import RealTimeFeedbackPanel from './practice/RealTimeFeedbackPanel';
 import TranscriptionPanel from './practice/TranscriptionPanel';
 
 // ─── Processing phase labels ──────────────────────────────────────────
-const PROCESSING_PHASES = [
-  'Uploading your session...',
-  'Analyzing your presentation...',
-  'Almost there...',
-] as const;
-
-type ProcessingPhase = 0 | 1 | 2;
 
 interface PracticeSessionProps {
   personaTitle: string;
@@ -37,7 +30,7 @@ interface PracticeSessionProps {
   hasPresentationPdf?: boolean;
   hasPersonaCustomization?: boolean;
   onBack: () => void;
-  onComplete: (sessionData: SessionAnalytics, aiFeedback: AIFeedbackResponse | null) => void;
+  onComplete: (sessionData: SessionAnalytics, analyticsPromise: Promise<AIFeedbackResponse | null>) => void;
   exitSessionRef?: MutableRefObject<(() => void) | null>;
 }
 
@@ -49,8 +42,6 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
   const [timer, setTimer] = useState(0);
   const [cameraActive, setCameraActive] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processingPhase, setProcessingPhase] = useState<ProcessingPhase>(0);
 
   // MediaPipe & Tracking State
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -73,6 +64,9 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
   // New Calibration Mode State
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [showMesh, setShowMesh] = useState(false);
+
+  // Runtime toggle for real-time feedback panel (config provides default)
+  const [showFeedback, setShowFeedback] = useState(ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK);
 
   // Time-limit alert tracking (each fires once)
   const shownAlertsRef = useRef<Set<string>>(new Set());
@@ -105,6 +99,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
   const analyticsIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const windowIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isPausedRef = useRef(false);
+  const stoppingRef = useRef(false);
 
   // Session Manifest Hook (lightweight coordination file in S3)
   const manifest = useSessionManifest(sessionId, personaId);
@@ -125,7 +120,9 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
       exitSessionRef.current = () => {
         stopAnalysis();
         vocalVariety.stopAnalysis();
-        videoRecording.abort();
+        if (!stoppingRef.current) {
+          videoRecording.abort();
+        }
         manifest.abort(timer);
         stopCamera();
       };
@@ -466,7 +463,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
         videoRef.current.onloadeddata = () => {
           setCameraActive(true);
           setPermissionDenied(false);
-          setIsCalibrating(ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK);
+          setIsCalibrating(true);
         };
       }
     } catch (err) {
@@ -497,7 +494,9 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
     return () => {
       stopAnalysis();
       vocalVariety.stopAnalysis();
-      videoRecording.abort();
+      if (!stoppingRef.current) {
+        videoRecording.abort();
+      }
       stopCamera();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -568,28 +567,29 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
   };
 
   const handleStopRecording = async () => {
+    stoppingRef.current = true;
     setIsRecording(false);
     setIsPaused(false);
-    setIsProcessing(true);
-    setProcessingPhase(0);
     stopAnalysis();
     vocalVariety.stopAnalysis();
 
     sessionAnalytics.finalizeWindow();
     const sessionData = sessionAnalytics.getSessionData();
 
-    // Fire-and-forget video upload — analytics don't depend on video
-    videoRecording.stop().catch((err) =>
-      console.error('[PracticeSession] Error stopping video recording:', err),
-    );
+    // Fire-and-forget video upload
+    videoRecording.stop().catch((err) => {
+      console.error('[PracticeSession] Error stopping video recording:', err);
+      toast.error('Failed to save video recording');
+    });
 
-    // Upload required JSON files in parallel
+    // Upload JSON files in background with toast notifications
     const uploadPromises: Promise<void>[] = [];
 
     uploadPromises.push(
-      uploadJsonToS3('session_analytics', sessionId, sessionData).catch((err) =>
-        console.error('[PracticeSession] Failed to upload session analytics:', err),
-      ),
+      uploadJsonToS3('session_analytics', sessionId, sessionData).catch((err) => {
+        console.error('[PracticeSession] Failed to upload session analytics:', err);
+        toast.error('Failed to upload session analytics');
+      }),
     );
 
     if (transcripts.length > 0) {
@@ -597,41 +597,40 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
         uploadJsonToS3('transcript', sessionId, {
           sessionId,
           transcripts,
-        }).catch((err) =>
-          console.error('[PracticeSession] Failed to upload transcript:', err),
-        ),
+        }).catch((err) => {
+          console.error('[PracticeSession] Failed to upload transcript:', err);
+          toast.error('Failed to upload transcript');
+        }),
       );
     }
 
     const detailedData = detailedMetrics.getData();
     if (detailedData.snapshots.length > 0) {
       uploadPromises.push(
-        uploadJsonToS3('detailed_metrics', sessionId, detailedData).catch((err) =>
-          console.error('[PracticeSession] Failed to upload detailed metrics:', err),
-        ),
+        uploadJsonToS3('detailed_metrics', sessionId, detailedData).catch((err) => {
+          console.error('[PracticeSession] Failed to upload detailed metrics:', err);
+          toast.error('Failed to upload detailed metrics');
+        }),
       );
     }
 
-    await Promise.allSettled(uploadPromises);
-    await manifest.complete(timer);
+    // Complete manifest after uploads, then kick off AI analytics — all in background
+    const analyticsPromise: Promise<AIFeedbackResponse | null> = (async () => {
+      await Promise.allSettled(uploadPromises);
+      await manifest.complete(timer);
+      toast.info('Analyzing your presentation...', { duration: 4000 });
 
-    // Kick off AI analytics
-    setProcessingPhase(1);
-
-    const almostThereTimer = setTimeout(() => setProcessingPhase(2), 15_000);
-
-    let aiFeedback: AIFeedbackResponse | null = null;
-    try {
-      aiFeedback = await pollAnalytics(sessionId);
-    } catch (err) {
-      console.error('[PracticeSession] AI analytics failed:', err);
-    } finally {
-      clearTimeout(almostThereTimer);
-    }
+      try {
+        return await pollAnalytics(sessionId);
+      } catch (err) {
+        console.error('[PracticeSession] AI analytics failed:', err);
+        toast.error('AI analysis encountered an issue — results may be incomplete');
+        return null;
+      }
+    })();
 
     stopCamera();
-    setIsProcessing(false);
-    onComplete(sessionData, aiFeedback);
+    onComplete(sessionData, analyticsPromise);
   };
 
   // Map audio metrics to the shape RealTimeFeedbackPanel expects
@@ -642,63 +641,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
     pauses: audioMetrics.pauses,
   };
 
-  // ─── Processing Screen ─────────────────────────────────────────────
-  if (isProcessing) {
-    return (
-      <div className="flex min-h-[70vh] items-center justify-center px-4">
-        <div className="mx-auto max-w-md text-center">
-          {/* Animated rings */}
-          <div className="relative mx-auto mb-8 h-24 w-24">
-            <div className="absolute inset-0 animate-ping rounded-full bg-maroon-200 opacity-20" />
-            <div className="absolute inset-2 animate-pulse rounded-full bg-maroon-100 opacity-40" />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <svg
-                className="h-12 w-12 animate-spin text-maroon-600"
-                viewBox="0 0 48 48"
-                fill="none"
-              >
-                <circle
-                  cx="24"
-                  cy="24"
-                  r="20"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeDasharray="80 40"
-                  opacity="0.3"
-                />
-                <circle
-                  cx="24"
-                  cy="24"
-                  r="20"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeDasharray="30 90"
-                />
-              </svg>
-            </div>
-          </div>
-
-          <h2 className="text-xl font-bold text-gray-900 font-serif italic sm:text-2xl 2xl:text-3xl">
-            Processing Your Session
-          </h2>
-          <div className="relative mt-3 h-8 overflow-hidden">
-            <p
-              key={processingPhase}
-              className="animate-fade-in text-sm text-gray-500 font-sans leading-relaxed sm:text-base 2xl:text-lg"
-            >
-              {PROCESSING_PHASES[processingPhase]}
-            </p>
-          </div>
-
-          <p className="mt-8 text-xs text-gray-400 font-sans 2xl:text-sm">
-            Please don&apos;t close this tab while processing.
-          </p>
-        </div>
-      </div>
-    );
-  }
+  const showRightPanel = showFeedback || isCalibrating;
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 py-3 sm:px-6 sm:py-4 2xl:max-w-[1600px] 2xl:py-8">
@@ -708,11 +651,16 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
         timer={timer}
         maxDurationSec={maxDuration}
         personaTitle={personaTitle}
+        showFeedback={showFeedback}
+        onToggleFeedback={() => setShowFeedback((prev) => !prev)}
       />
 
-      <div className={`grid grid-cols-1 gap-4 ${ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK ? 'lg:grid-cols-3' : ''} 2xl:gap-6`}>
+      <div className="flex flex-col lg:flex-row gap-4 2xl:gap-6">
         {/* 2. Left Column: Camera View & Controls */}
-        <div className={`${ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK ? 'lg:col-span-2' : ''} space-y-3`}>
+        <div
+          className="space-y-3 min-w-0"
+          style={{ flex: '2 1 0%' }}
+        >
           <CameraView
             videoRef={videoRef}
             canvasRef={canvasRef}
@@ -721,7 +669,6 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
             isPaused={isPaused}
             isCalibrating={isCalibrating}
             permissionDenied={permissionDenied}
-            showCalibrationControls={ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK}
             onStartCamera={startCamera}
             onStartRecording={handleStartRecording}
             onPauseRecording={handlePauseRecording}
@@ -731,32 +678,37 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
           />
         </div>
 
-        {/* 3. Right Column: Dynamic Panel (Feedback OR Calibration) */}
-        {ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK && (
-        <div className="lg:col-span-1 space-y-4">
-          <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm 2xl:p-6 relative overflow-hidden">
-
-            {isCalibrating ? (
-              <CalibrationPanel
-                showMesh={showMesh}
-                onToggleMesh={() => setShowMesh(!showMesh)}
-                gazeStatus={gazeStatus}
-                onComplete={() => setIsCalibrating(false)}
-              />
-            ) : (
-              <RealTimeFeedbackPanel
-                isRecording={isRecording && !isPaused}
-                soundEnabled={soundEnabled}
-                onToggleSound={() => setSoundEnabled(!soundEnabled)}
-                isDistracted={gazeDisplayDistracted}
-                metrics={feedbackMetrics}
-                vocalVariety={vocalVariety.metrics}
-              />
-            )}
-          </div>
-
+        {/* 3. Right Column: Calibration always here, Feedback only when toggled on */}
+        <div
+          className="space-y-4 min-w-0 overflow-hidden"
+          style={{
+            flex: showRightPanel ? '1 1 0%' : '0 0 0px',
+            opacity: showRightPanel ? 1 : 0,
+            transition: 'flex 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.35s ease',
+          }}
+        >
+          {showRightPanel && (
+            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm 2xl:p-6 relative overflow-hidden animate-fade-in">
+              {isCalibrating ? (
+                <CalibrationPanel
+                  showMesh={showMesh}
+                  onToggleMesh={() => setShowMesh(!showMesh)}
+                  gazeStatus={gazeStatus}
+                  onComplete={() => setIsCalibrating(false)}
+                />
+              ) : (
+                <RealTimeFeedbackPanel
+                  isRecording={isRecording && !isPaused}
+                  soundEnabled={soundEnabled}
+                  onToggleSound={() => setSoundEnabled(!soundEnabled)}
+                  isDistracted={gazeDisplayDistracted}
+                  metrics={feedbackMetrics}
+                  vocalVariety={vocalVariety.metrics}
+                />
+              )}
+            </div>
+          )}
         </div>
-        )}
       </div>
 
       {/* 4. Live Transcription — hidden during calibration */}

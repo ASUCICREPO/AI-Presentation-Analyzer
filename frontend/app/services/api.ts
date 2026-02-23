@@ -21,6 +21,7 @@ export interface AIFeedbackResponse {
   generatedAt: string;
   model: string;
   includedFiles: Record<string, boolean>;
+  timestampedFeedback?: { timestamp: string; message: string }[];
 }
 
 export class AnalyticsProcessingError extends Error {
@@ -311,6 +312,23 @@ export async function abortMultipartUpload(
 
 // ─── JSON Upload Helper ──────────────────────────────────────────────
 
+// ─── Video Playback URL ──────────────────────────────────────────────
+
+export async function getVideoPlaybackUrl(sessionId: string): Promise<string | null> {
+  const headers = await authHeaders();
+  try {
+    const res = await fetch(
+      `${API_BASE_URL}/s3_urls?action=get_video_url&session_id=${sessionId}`,
+      { headers },
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.url ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Upload a JSON object to S3 using a presigned POST URL.
  * Convenience wrapper around getPresignedUrl + POST with JSON body.
@@ -381,6 +399,12 @@ export async function pollAnalytics(
       return await fetchAnalytics(sessionId);
     } catch (err) {
       if (err instanceof AnalyticsProcessingError) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        continue;
+      }
+      // Retry on server errors (5xx) — the backend may recover on next attempt
+      if (err instanceof Error && /\(5\d{2}\)/.test(err.message)) {
+        console.warn(`[pollAnalytics] Server error on attempt ${attempt + 1}, retrying...`, err.message);
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
         continue;
       }

@@ -21,7 +21,7 @@ out/
 
 # Production
 /build
-
+/temp
 # Compiled JavaScript files (CDK backend only)
 backend/**/*.js
 !backend/jest.config.js

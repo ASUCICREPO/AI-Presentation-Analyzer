@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { QAWebSocketClient, QAWebSocketConfig, QAWebSocketEvent, QATranscriptEntry } from '../services/websocket';
 import { QA_SESSION_CONFIG } from '../config/config';
+import type { AgentState } from '../components/ui/orb';
 
 export type QASessionStatus = 'idle' | 'connecting' | 'active' | 'ending' | 'ended' | 'error';
 
@@ -13,6 +14,7 @@ export interface QASessionState {
   partialAssistantText: string;
   error: string | null;
   isMuted: boolean;
+  agentState: AgentState;
 }
 
 export interface UseQASessionReturn extends QASessionState {
@@ -33,6 +35,7 @@ export function useQASession(
   const [partialAssistantText, setPartialAssistantText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
+  const [agentState, setAgentState] = useState<AgentState>(null);
 
   const wsClientRef = useRef<QAWebSocketClient | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -40,6 +43,7 @@ export function useQASession(
   const processorNodeRef = useRef<AudioWorkletNode | null>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isMutedRef = useRef(false);
+  const startTimerRef = useRef<(() => void) | null>(null);
 
   // Audio playback queue
   const playbackContextRef = useRef<AudioContext | null>(null);
@@ -52,10 +56,12 @@ export function useQASession(
       case 'session_started':
         setStatus('active');
         setPersonaName((event.persona_name as string) || '');
+        setAgentState('thinking');
+        startTimerRef.current?.();
         break;
 
       case 'audio':
-        // Queue audio for playback
+        setAgentState('talking');
         if (event.data) {
           const pcmBytes = Uint8Array.from(atob(event.data as string), c => c.charCodeAt(0));
           const int16 = new Int16Array(pcmBytes.buffer);
@@ -74,11 +80,21 @@ export function useQASession(
         const isPartial = event.is_partial as boolean;
 
         if (isPartial) {
-          if (role === 'user') setPartialUserText(text);
-          else setPartialAssistantText(text);
+          if (role === 'user') {
+            setPartialUserText(text);
+            setAgentState('listening');
+          } else {
+            setPartialAssistantText(text);
+            setAgentState('talking');
+          }
         } else {
-          if (role === 'user') setPartialUserText('');
-          else setPartialAssistantText('');
+          if (role === 'user') {
+            setPartialUserText('');
+            setAgentState('thinking');
+          } else {
+            setPartialAssistantText('');
+            setAgentState('listening');
+          }
           if (text.trim()) {
             setTranscriptEntries(prev => [...prev, { role, text, is_partial: false }]);
           }
@@ -87,12 +103,13 @@ export function useQASession(
       }
 
       case 'interruption':
-        // Clear playback queue on interruption
         playbackQueueRef.current = [];
+        setAgentState('listening');
         break;
 
       case 'session_ended':
         setStatus('ended');
+        setAgentState(null);
         stopAudioCapture();
         stopTimer();
         break;
@@ -100,6 +117,7 @@ export function useQASession(
       case 'error':
         setError((event.message as string) || 'Unknown error');
         setStatus('error');
+        setAgentState(null);
         break;
     }
   }, []);
@@ -141,6 +159,9 @@ export function useQASession(
       });
     }, 1000);
   }, []);
+
+  // Keep ref in sync so handleEvent (defined earlier) can call it
+  startTimerRef.current = startTimer;
 
   const stopTimer = useCallback(() => {
     if (timerIntervalRef.current) {
@@ -246,8 +267,8 @@ export function useQASession(
       wsClientRef.current = client;
       await client.connect();
       await startAudioCapture();
-      client.startSession();
-      startTimer();
+      // No startSession() call — the agent starts automatically after
+      // the setup message sent in connect()'s onopen handler.
     } catch (e) {
       console.error('[useQASession] Failed to start:', e);
       setError('Failed to connect to QA session');
@@ -293,6 +314,7 @@ export function useQASession(
     partialAssistantText,
     error,
     isMuted,
+    agentState,
     startSession,
     endSession,
     toggleMute,

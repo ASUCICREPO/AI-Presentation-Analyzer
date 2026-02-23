@@ -34,14 +34,13 @@ export default function RootLayout({
       >
         <AuthProvider>{children}</AuthProvider>
         <Toaster
-          position="bottom-center"
+          position="bottom-left"
           richColors
           toastOptions={{
             style: {
-              fontSize: '1.1rem',
-              padding: '20px 24px',
-              minWidth: '380px',
-              borderRadius: '14px',
+              fontSize: '0.875rem',
+              padding: '14px 18px',
+              borderRadius: '10px',
             },
             className: 'font-sans',
           }}
