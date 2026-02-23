@@ -61,7 +61,7 @@ export default function Header({ currentStep, onStepClick, sessionId }: HeaderPr
         </div>
 
         {/* Spacer pushes stepper + avatar to the right */}
-        <div className="flex-1" />
+        <div className="min-w-[24px] flex-1 sm:min-w-[40px] lg:min-w-[60px]" />
 
         {/* Stepper */}
         <nav className="flex items-center">

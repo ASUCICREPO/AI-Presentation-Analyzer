@@ -63,7 +63,7 @@ export default function Home() {
   const handleContinueToUpload = () => {
     if (selectedPersona) {
       setCurrentStep(2);
-      window.scrollTo(0, 0);
+      window.scrollTo({ top: 0 });
     }
   };
 
@@ -155,7 +155,7 @@ export default function Home() {
     exitSessionRef.current = null;
     if (pendingStep !== null) {
       setCurrentStep(pendingStep);
-      window.scrollTo(0, 0);
+      window.scrollTo({ top: 0 });
     }
     setIsModalOpen(false);
     setPendingStep(null);
@@ -202,79 +202,81 @@ export default function Home() {
     <div className="min-h-screen bg-gray-50">
       <Header currentStep={currentStep} onStepClick={handleStepClick} sessionId={sessionId} />
 
-      {currentStep === 1 && (
-        <PersonaSelection
-          selectedPersona={selectedPersona}
-          onSelectPersona={handlePersonaSelect}
-          onPersonaNameChange={setSelectedPersonaName}
-          onTimeLimitChange={setSelectedPersonaTimeLimit}
-          onPersonaDataChange={setSelectedPersonaData}
-          customNotes={customNotes}
-          onCustomNotesChange={setCustomNotes}
-          sessionId={sessionId}
-          onContinue={handleContinueToUpload}
-        />
-      )}
+      <div key={currentStep} className="animate-step-enter">
+        {currentStep === 1 && (
+          <PersonaSelection
+            selectedPersona={selectedPersona}
+            onSelectPersona={handlePersonaSelect}
+            onPersonaNameChange={setSelectedPersonaName}
+            onTimeLimitChange={setSelectedPersonaTimeLimit}
+            onPersonaDataChange={setSelectedPersonaData}
+            customNotes={customNotes}
+            onCustomNotesChange={setCustomNotes}
+            sessionId={sessionId}
+            onContinue={handleContinueToUpload}
+          />
+        )}
 
-      {currentStep === 2 && (
-        <UploadContent
-          personaName={selectedPersonaName}
-          sessionId={sessionId}
-          initialFileName={uploadedFileName}
-          initialUploaded={pdfUploaded}
-          onBack={handleBackToPersona}
-          onContinue={handleContinueFromUpload}
-          onPdfUploaded={(fileName) => {
-            setPdfUploaded(true);
-            setUploadedFileName(fileName);
-          }}
-        />
-      )}
+        {currentStep === 2 && (
+          <UploadContent
+            personaName={selectedPersonaName}
+            sessionId={sessionId}
+            initialFileName={uploadedFileName}
+            initialUploaded={pdfUploaded}
+            onBack={handleBackToPersona}
+            onContinue={handleContinueFromUpload}
+            onPdfUploaded={(fileName) => {
+              setPdfUploaded(true);
+              setUploadedFileName(fileName);
+            }}
+          />
+        )}
 
-      {currentStep === 3 && (
-        <PracticeSession
-          personaTitle={selectedPersonaName}
-          personaId={selectedPersona ?? ''}
-          sessionId={sessionId}
-          timeLimitSec={selectedPersonaTimeLimit}
-          hasPresentationPdf={pdfUploaded}
-          hasPersonaCustomization={customNotes.trim().length > 0}
-          onBack={handleBackToUpload}
-          onComplete={handlePracticeComplete}
-          exitSessionRef={exitSessionRef}
-        />
-      )}
+        {currentStep === 3 && (
+          <PracticeSession
+            personaTitle={selectedPersonaName}
+            personaId={selectedPersona ?? ''}
+            sessionId={sessionId}
+            timeLimitSec={selectedPersonaTimeLimit}
+            hasPresentationPdf={pdfUploaded}
+            hasPersonaCustomization={customNotes.trim().length > 0}
+            onBack={handleBackToUpload}
+            onComplete={handlePracticeComplete}
+            exitSessionRef={exitSessionRef}
+          />
+        )}
 
-      {currentStep === 4 && (
-        <QASession
-          personaId={selectedPersona || ''}
-          personaName={selectedPersonaName}
-          sessionId={sessionId}
-          userId={userId || ''}
-          onBack={handleBackToPractice}
-          onComplete={handleQAComplete}
-          onSkip={handleQASkip}
-        />
-      )}
+        {currentStep === 4 && (
+          <QASession
+            personaId={selectedPersona || ''}
+            personaName={selectedPersonaName}
+            sessionId={sessionId}
+            userId={userId || ''}
+            onBack={handleBackToPractice}
+            onComplete={handleQAComplete}
+            onSkip={handleQASkip}
+          />
+        )}
 
-      {currentStep === 5 && sessionData && (
-        <ReviewAnalytics
-          sessionData={sessionData}
-          aiFeedback={aiFeedback}
-          persona={selectedPersonaData}
-          onDownload={handleDownloadSessionData}
-          onBackToStart={handleBackToStart}
-        />
-      )}
+        {currentStep === 5 && sessionData && (
+          <ReviewAnalytics
+            sessionData={sessionData}
+            aiFeedback={aiFeedback}
+            persona={selectedPersonaData}
+            onDownload={handleDownloadSessionData}
+            onBackToStart={handleBackToStart}
+          />
+        )}
 
-      {currentStep === 5 && !sessionData && (
-        <div className="flex min-h-[60vh] items-center justify-center">
-          <div className="text-center">
-            <h2 className="text-2xl font-bold text-gray-900 font-serif">Review Analytics</h2>
-            <p className="mt-2 text-gray-500 font-sans">No session data available</p>
+        {currentStep === 5 && !sessionData && (
+          <div className="flex min-h-[60vh] items-center justify-center">
+            <div className="text-center">
+              <h2 className="text-2xl font-bold text-gray-900 font-serif">Review Analytics</h2>
+              <p className="mt-2 text-gray-500 font-sans">No session data available</p>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Confirmation Modal */}
       <ConfirmationModal
