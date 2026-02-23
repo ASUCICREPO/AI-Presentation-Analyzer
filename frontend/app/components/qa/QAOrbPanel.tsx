@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { CircularWaveform } from '@pipecat-ai/voice-ui-kit';
-import type { AgentState } from '../ui/orb';
+import type { AgentState } from '../../hooks/useQASession';
 import { Mic, Loader2, MicOff, PhoneOff, ArrowRight } from 'lucide-react';
 import { QASessionStatus } from '../../hooks/useQASession';
 

@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { QAWebSocketClient, QAWebSocketConfig, QAWebSocketEvent, QATranscriptEntry } from '../services/websocket';
 import { QA_SESSION_CONFIG } from '../config/config';
-import type { AgentState } from '../components/ui/orb';
+
+export type AgentState = null | 'thinking' | 'listening' | 'talking';
 
 export type QASessionStatus = 'idle' | 'connecting' | 'active' | 'ending' | 'ended' | 'error';
 
