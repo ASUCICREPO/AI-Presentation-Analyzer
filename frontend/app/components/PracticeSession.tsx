@@ -74,6 +74,9 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [showMesh, setShowMesh] = useState(false);
 
+  // Runtime toggle for real-time feedback panel (config provides default)
+  const [showFeedback, setShowFeedback] = useState(ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK);
+
   // Time-limit alert tracking (each fires once)
   const shownAlertsRef = useRef<Set<string>>(new Set());
 
@@ -466,7 +469,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
         videoRef.current.onloadeddata = () => {
           setCameraActive(true);
           setPermissionDenied(false);
-          setIsCalibrating(ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK);
+          setIsCalibrating(true);
         };
       }
     } catch (err) {
@@ -642,6 +645,8 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
     pauses: audioMetrics.pauses,
   };
 
+  const showRightPanel = showFeedback || isCalibrating;
+
   // ─── Processing Screen ─────────────────────────────────────────────
   if (isProcessing) {
     return (
@@ -708,11 +713,19 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
         timer={timer}
         maxDurationSec={maxDuration}
         personaTitle={personaTitle}
+        showFeedback={showFeedback}
+        onToggleFeedback={() => setShowFeedback((prev) => !prev)}
       />
 
-      <div className={`grid grid-cols-1 gap-4 ${ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK ? 'lg:grid-cols-3' : ''} 2xl:gap-6`}>
+      <div className="flex flex-col lg:flex-row gap-4 2xl:gap-6">
         {/* 2. Left Column: Camera View & Controls */}
-        <div className={`${ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK ? 'lg:col-span-2' : ''} space-y-3`}>
+        <div
+          className="space-y-3 min-w-0"
+          style={{
+            flex: showRightPanel ? '2 1 0%' : '1 1 0%',
+            transition: 'flex 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+          }}
+        >
           <CameraView
             videoRef={videoRef}
             canvasRef={canvasRef}
@@ -721,7 +734,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
             isPaused={isPaused}
             isCalibrating={isCalibrating}
             permissionDenied={permissionDenied}
-            showCalibrationControls={ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK}
+            compact={!showRightPanel}
             onStartCamera={startCamera}
             onStartRecording={handleStartRecording}
             onPauseRecording={handlePauseRecording}
@@ -731,32 +744,37 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
           />
         </div>
 
-        {/* 3. Right Column: Dynamic Panel (Feedback OR Calibration) */}
-        {ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK && (
-        <div className="lg:col-span-1 space-y-4">
-          <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm 2xl:p-6 relative overflow-hidden">
-
-            {isCalibrating ? (
-              <CalibrationPanel
-                showMesh={showMesh}
-                onToggleMesh={() => setShowMesh(!showMesh)}
-                gazeStatus={gazeStatus}
-                onComplete={() => setIsCalibrating(false)}
-              />
-            ) : (
-              <RealTimeFeedbackPanel
-                isRecording={isRecording && !isPaused}
-                soundEnabled={soundEnabled}
-                onToggleSound={() => setSoundEnabled(!soundEnabled)}
-                isDistracted={gazeDisplayDistracted}
-                metrics={feedbackMetrics}
-                vocalVariety={vocalVariety.metrics}
-              />
-            )}
-          </div>
-
+        {/* 3. Right Column: Calibration always here, Feedback only when toggled on */}
+        <div
+          className="space-y-4 min-w-0 overflow-hidden"
+          style={{
+            flex: showRightPanel ? '1 1 0%' : '0 0 0px',
+            opacity: showRightPanel ? 1 : 0,
+            transition: 'flex 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.35s ease',
+          }}
+        >
+          {showRightPanel && (
+            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm 2xl:p-6 relative overflow-hidden animate-fade-in">
+              {isCalibrating ? (
+                <CalibrationPanel
+                  showMesh={showMesh}
+                  onToggleMesh={() => setShowMesh(!showMesh)}
+                  gazeStatus={gazeStatus}
+                  onComplete={() => setIsCalibrating(false)}
+                />
+              ) : (
+                <RealTimeFeedbackPanel
+                  isRecording={isRecording && !isPaused}
+                  soundEnabled={soundEnabled}
+                  onToggleSound={() => setSoundEnabled(!soundEnabled)}
+                  isDistracted={gazeDisplayDistracted}
+                  metrics={feedbackMetrics}
+                  vocalVariety={vocalVariety.metrics}
+                />
+              )}
+            </div>
+          )}
         </div>
-        )}
       </div>
 
       {/* 4. Live Transcription — hidden during calibration */}

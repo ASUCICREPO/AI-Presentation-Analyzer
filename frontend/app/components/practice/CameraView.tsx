@@ -9,7 +9,7 @@ interface CameraViewProps {
   isPaused: boolean;
   isCalibrating: boolean;
   permissionDenied: boolean;
-  showCalibrationControls?: boolean;
+  compact?: boolean;
   onStartCamera: () => void;
   onStartRecording: () => void;
   onPauseRecording: () => void;
@@ -26,7 +26,7 @@ export default function CameraView({
   isPaused,
   isCalibrating,
   permissionDenied,
-  showCalibrationControls = true,
+  compact = false,
   onStartCamera,
   onStartRecording,
   onPauseRecording,
@@ -36,7 +36,11 @@ export default function CameraView({
 }: CameraViewProps) {
   return (
     <div className="space-y-3">
-      <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-gray-900 shadow-lg group">
+      <div
+        className={`relative w-full overflow-hidden rounded-xl bg-gray-900 shadow-lg group aspect-video transition-all duration-500 ${
+          compact ? 'mx-auto max-w-[900px]' : ''
+        }`}
+      >
         {/* Status Badges */}
         <div className="absolute left-4 top-4 z-10 flex gap-2">
           {isRecording && !isPaused && (
@@ -85,15 +89,13 @@ export default function CameraView({
             </svg>
             <h3 className="text-xl font-semibold text-white mb-2 font-serif">Ready to Practice?</h3>
             <p className="text-sm text-gray-400 mb-6 max-w-md text-center font-sans">
-              {showCalibrationControls
-                ? "Enable your camera to start the calibration process. We'll check your lighting and positioning before recording."
-                : "Enable your camera and microphone to begin your practice session."}
+              Enable your camera to start the calibration process. We&apos;ll check your lighting and positioning before recording.
             </p>
             <button 
               onClick={onStartCamera}
               className="rounded-full bg-maroon px-8 py-3 text-base font-medium text-white shadow-lg hover:bg-maroon-dark active:scale-95 transition-all font-sans"
             >
-              {showCalibrationControls ? 'Turn On Camera & Calibrate' : 'Turn On Camera'}
+              Turn On Camera &amp; Calibrate
             </button>
             {permissionDenied && (
               <p className="mt-4 text-sm text-red-400 font-sans">
@@ -151,7 +153,7 @@ export default function CameraView({
       )}
       
       {/* Recalibrate Button */}
-      {showCalibrationControls && cameraActive && !isCalibrating && !isRecording && (
+      {cameraActive && !isCalibrating && !isRecording && (
          <div className="flex justify-center mt-2">
            <button 
              onClick={onReEnterCalibration}
