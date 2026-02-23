@@ -193,6 +193,18 @@ def get_video_playback_url(user_id: str, session_id: str) -> Optional[str]:
         return None
 
 
+def get_manifest_data(user_id: str, session_id: str) -> Optional[dict]:
+    """Fetch and parse the manifest.json file from S3."""
+    key = _build_s3_key(user_id, session_id, 'manifest')
+    try:
+        response = s3_client.get_object(Bucket=UPLOADS_BUCKET, Key=key)
+        content = response['Body'].read().decode('utf-8')
+        return json.loads(content)
+    except ClientError as e:
+        print(f"[ERROR] Failed to fetch manifest: {e}")
+        return None
+
+
 def initiate_multipart(user_id: str, session_id: str) -> Optional[dict]:
     """Create a new multipart upload for recording.webm."""
     key = _build_s3_key(user_id, session_id, 'session')
@@ -414,6 +426,13 @@ def lambda_handler(event, context):
             if not url:
                 return _response(404, {'message': 'Video not found or URL generation failed'})
             return _response(200, {'url': url})
+
+        # Route: fetch manifest.json data
+        if action == 'get_manifest':
+            manifest_data = get_manifest_data(user_id, session_id)
+            if not manifest_data:
+                return _response(404, {'message': 'Manifest not found'})
+            return _response(200, manifest_data)
 
         # Route: presigned POST URL for file upload
         request_type = qs.get('request_type')

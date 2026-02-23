@@ -1,4 +1,5 @@
 import { API_BASE_URL, Persona, S3RequestType } from '../config/config';
+import { SessionManifest } from '../hooks/useSessionManifest';
 
 // ─── AI Feedback Types ───────────────────────────────────────────────
 
@@ -324,6 +325,20 @@ export async function getVideoPlaybackUrl(sessionId: string): Promise<string | n
     if (!res.ok) return null;
     const data = await res.json();
     return data.url ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getManifestData(sessionId: string): Promise<SessionManifest | null> {
+  const headers = await authHeaders();
+  try {
+    const res = await fetch(
+      `${API_BASE_URL}/s3_urls?action=get_manifest&session_id=${sessionId}`,
+      { headers },
+    );
+    if (!res.ok) return null;
+    return res.json();
   } catch {
     return null;
   }

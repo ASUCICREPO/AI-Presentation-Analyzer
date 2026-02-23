@@ -24,6 +24,8 @@ import {
   RotateCcw,
 } from 'lucide-react';
 
+import { CustomVideoPlayer, CustomVideoPlayerHandle } from './CustomVideoPlayer';
+
 import {
   Persona,
   PersonaBestPractices,
@@ -119,7 +121,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDo
   const [showWindows, setShowWindows] = useState(false);
   const [dismissedBanner, setDismissedBanner] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<CustomVideoPlayerHandle>(null);
 
   // Fetch video playback URL on mount
   useEffect(() => {
@@ -288,15 +290,12 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDo
             <h2 className="mb-4 text-lg font-semibold text-gray-900">Recording Playback</h2>
             {videoUrl ? (
               <>
-                <div className="relative overflow-hidden rounded-lg bg-gray-900">
-                  <video
-                    ref={videoRef}
-                    src={videoUrl}
-                    className="w-full rounded-lg"
-                    controls
-                    preload="metadata"
-                  />
-                </div>
+                <CustomVideoPlayer
+                  ref={videoRef}
+                  sessionId={sessionData.sessionId}
+                  videoUrl={videoUrl}
+                  className="relative overflow-hidden rounded-lg bg-gray-900"
+                />
                 <div className="mt-3 flex gap-3">
                   <button
                     onClick={() => { videoRef.current?.play(); }}
@@ -305,7 +304,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDo
                     <Play className="h-4 w-4" /> Play Recording
                   </button>
                   <button
-                    onClick={() => { if (videoRef.current) { videoRef.current.currentTime = 0; } }}
+                    onClick={() => { videoRef.current?.seekTo(0); }}
                     className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
                   >
                     <RotateCcw className="h-4 w-4" /> Restart
@@ -359,7 +358,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDo
                           // timestamp may be "MM:SS - MM:SS" range; seek to start time
                           const startPart = event.timestamp.split(' - ')[0];
                           const [min, sec] = startPart.split(':').map(Number);
-                          videoRef.current.currentTime = min * 60 + sec;
+                          videoRef.current.seekTo(min * 60 + sec);
                           videoRef.current.play();
                         }
                       }}
