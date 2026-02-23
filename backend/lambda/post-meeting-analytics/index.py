@@ -121,9 +121,12 @@ def _resolve_best_practices(persona):
     return resolved
 
 def _window_timestamp(window_number):
-    """Convert a 1-based window number to MM:SS (each window = 30s)."""
-    secs = (window_number - 1) * 30
-    return f"{secs // 60:02d}:{secs % 60:02d}"
+    """Convert a 1-based window number to a MM:SS - MM:SS range (each window = 30s)."""
+    start_secs = (window_number - 1) * 30
+    end_secs = window_number * 30
+    start = f"{start_secs // 60:02d}:{start_secs % 60:02d}"
+    end = f"{end_secs // 60:02d}:{end_secs % 60:02d}"
+    return f"{start} - {end}"
 
 def generate_timestamped_feedback(session_analytics, persona=None):
     """Check each 30-second window against the persona's best-practice

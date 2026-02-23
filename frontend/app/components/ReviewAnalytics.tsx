@@ -356,7 +356,9 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDo
                       className={`flex w-full items-center gap-3 rounded-lg border ${borderColor} ${bgColor} px-4 py-3 text-left transition-colors hover:opacity-80`}
                       onClick={() => {
                         if (videoRef.current) {
-                          const [min, sec] = event.timestamp.split(':').map(Number);
+                          // timestamp may be "MM:SS - MM:SS" range; seek to start time
+                          const startPart = event.timestamp.split(' - ')[0];
+                          const [min, sec] = startPart.split(':').map(Number);
                           videoRef.current.currentTime = min * 60 + sec;
                           videoRef.current.play();
                         }
