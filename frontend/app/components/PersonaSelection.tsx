@@ -7,11 +7,11 @@ import { Persona } from '../config/config';
 import { fetchPersonas, savePersonaCustomization } from '../services/api';
 
 interface PersonaSelectionProps {
-  selectedPersona: string | null;
-  onSelectPersona: (id: string | null) => void;
+  selectedPersonas: string[];
+  onSelectPersonas: (ids: string[]) => void;
   onPersonaNameChange: (name: string) => void;
   onTimeLimitChange: (sec: number | undefined) => void;
-  onPersonaDataChange: (persona: Persona | null) => void;
+  onPersonaDataChange: (personas: Persona[]) => void;
   customNotes: string;
   onCustomNotesChange: (notes: string) => void;
   sessionId: string;
@@ -55,8 +55,8 @@ function PersonaCardSkeleton() {
 }
 
 export default function PersonaSelection({
-  selectedPersona,
-  onSelectPersona,
+  selectedPersonas,
+  onSelectPersonas,
   onPersonaNameChange,
   onTimeLimitChange,
   onPersonaDataChange,
@@ -78,10 +78,10 @@ export default function PersonaSelection({
       .finally(() => setLoading(false));
   }, []);
 
-  const isPersonaSelected = selectedPersona !== null;
+  const isPersonaSelected = selectedPersonas.length > 0;
 
   const handleContinue = async () => {
-    if (!selectedPersona) return;
+    if (selectedPersonas.length === 0) return;
     const hasNotes = customNotes.trim().length > 0;
     if (hasNotes) {
       setSaving(true);
@@ -111,7 +111,7 @@ export default function PersonaSelection({
           Select Your Audience Persona
         </h1>
         <p className="mt-1.5 text-sm leading-relaxed text-gray-500 sm:mt-2 2xl:text-xl 2xl:leading-8 font-sans">
-          Choose the type of audience you&apos;ll be presenting to. The AI will tailor feedback based on the selected persona&apos;s characteristics and expectations.
+          Choose one or more audience personas you&apos;ll be presenting to. The AI will tailor feedback based on the combined characteristics and expectations of all selected personas.
         </p>
       </div>
 
@@ -134,13 +134,33 @@ export default function PersonaSelection({
               keyPriorities={persona.keyPriorities}
               attentionSpan={persona.attentionSpan}
               communicationStyle={persona.communicationStyle}
-              isSelected={selectedPersona === persona.personaID}
+              isSelected={selectedPersonas.includes(persona.personaID)}
               onSelect={() => {
-                const isDeselecting = selectedPersona === persona.personaID;
-                onSelectPersona(isDeselecting ? null : persona.personaID);
-                onPersonaNameChange(isDeselecting ? '' : persona.name);
-                onTimeLimitChange(isDeselecting ? undefined : persona.timeLimitSec);
-                onPersonaDataChange(isDeselecting ? null : persona);
+                const isDeselecting = selectedPersonas.includes(persona.personaID);
+                let newSelected: string[];
+                if (isDeselecting) {
+                  newSelected = selectedPersonas.filter((id) => id !== persona.personaID);
+                } else {
+                  newSelected = [...selectedPersonas, persona.personaID];
+                }
+                onSelectPersonas(newSelected);
+
+                // Derive combined name, min time limit, and full persona data
+                const selectedData = personas.filter((p) => newSelected.includes(p.personaID));
+                const combinedName = selectedData.map((p) => p.name).join(' & ');
+                onPersonaNameChange(newSelected.length === 0 ? '' : combinedName);
+
+                if (newSelected.length === 0) {
+                  onTimeLimitChange(undefined);
+                  onPersonaDataChange([]);
+                } else {
+                  // Use the minimum time limit across all selected personas
+                  const timeLimits = selectedData
+                    .map((p) => p.timeLimitSec)
+                    .filter((t): t is number => t !== undefined);
+                  onTimeLimitChange(timeLimits.length > 0 ? Math.min(...timeLimits) : undefined);
+                  onPersonaDataChange(selectedData);
+                }
               }}
             />
           ))
@@ -151,8 +171,8 @@ export default function PersonaSelection({
       <div
         className={`
           transition-all duration-400 ease-out overflow-hidden
-          ${isPersonaSelected 
-            ? 'opacity-100 max-h-[500px] mb-6 2xl:mb-8' 
+          ${isPersonaSelected
+            ? 'opacity-100 max-h-[500px] mb-6 2xl:mb-8'
             : 'opacity-0 max-h-0 mb-0'
           }
         `}
@@ -168,8 +188,8 @@ export default function PersonaSelection({
       <div
         className={`
           flex flex-col items-end gap-2 transition-all duration-400 ease-out
-          ${isPersonaSelected 
-            ? 'opacity-100 translate-y-0' 
+          ${isPersonaSelected
+            ? 'opacity-100 translate-y-0'
             : 'opacity-0 translate-y-2 pointer-events-none'
           }
         `}

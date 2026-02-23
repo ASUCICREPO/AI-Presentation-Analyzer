@@ -36,10 +36,10 @@ export default function Home() {
 
   // App state
   const [currentStep, setCurrentStep] = useState(1);
-  const [selectedPersona, setSelectedPersona] = useState<string | null>(null);
+  const [selectedPersonas, setSelectedPersonas] = useState<string[]>([]);
   const [selectedPersonaName, setSelectedPersonaName] = useState<string>('');
   const [selectedPersonaTimeLimit, setSelectedPersonaTimeLimit] = useState<number | undefined>(undefined);
-  const [selectedPersonaData, setSelectedPersonaData] = useState<Persona | null>(null);
+  const [selectedPersonaData, setSelectedPersonaData] = useState<Persona[]>([]);
   const [customNotes, setCustomNotes] = useState('');
   const [pdfUploaded, setPdfUploaded] = useState(false);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
@@ -69,12 +69,12 @@ export default function Home() {
   const handleConfirmed = () => setAuthView('login');
 
   // --- App handlers ---
-  const handlePersonaSelect = (id: string | null) => {
-    setSelectedPersona(id);
+  const handlePersonaSelect = (ids: string[]) => {
+    setSelectedPersonas(ids);
   };
 
   const handleContinueToUpload = () => {
-    if (selectedPersona) {
+    if (selectedPersonas.length > 0) {
       setCurrentStep(2);
       window.scrollTo({ top: 0 });
     }
@@ -158,6 +158,7 @@ export default function Home() {
 
   const handleBackToStart = () => {
     setCurrentStep(1);
+    setSelectedPersonas([]);
     setSessionData(null);
     setAiFeedback(null);
     analyticsPromiseRef.current = null;
@@ -169,7 +170,7 @@ export default function Home() {
 
   const handleStepClick = (step: number) => {
     if (step > currentStep) {
-      if (step === 2 && !selectedPersona) return;
+      if (step === 2 && selectedPersonas.length === 0) return;
       if (step === 3 && currentStep < 2) return;
     }
 
@@ -238,8 +239,8 @@ export default function Home() {
       <div key={currentStep} className="animate-step-enter">
         {currentStep === 1 && (
           <PersonaSelection
-            selectedPersona={selectedPersona}
-            onSelectPersona={handlePersonaSelect}
+            selectedPersonas={selectedPersonas}
+            onSelectPersonas={handlePersonaSelect}
             onPersonaNameChange={setSelectedPersonaName}
             onTimeLimitChange={setSelectedPersonaTimeLimit}
             onPersonaDataChange={setSelectedPersonaData}
@@ -268,7 +269,8 @@ export default function Home() {
         {currentStep === 3 && (
           <PracticeSession
             personaTitle={selectedPersonaName}
-            personaId={selectedPersona ?? ''}
+            personaId={selectedPersonas[0] ?? ''}
+            personaIds={selectedPersonas}
             sessionId={sessionId}
             timeLimitSec={selectedPersonaTimeLimit}
             hasPresentationPdf={pdfUploaded}
@@ -281,7 +283,7 @@ export default function Home() {
 
         {currentStep === 4 && (
           <QASession
-            personaId={selectedPersona || ''}
+            personaId={selectedPersonas[0] || ''}
             personaName={selectedPersonaName}
             sessionId={sessionId}
             userId={userId || ''}
@@ -332,7 +334,7 @@ export default function Home() {
           <ReviewAnalytics
             sessionData={sessionData}
             aiFeedback={aiFeedback}
-            persona={selectedPersonaData}
+            personas={selectedPersonaData}
             onDownload={handleDownloadSessionData}
             onBackToStart={handleBackToStart}
           />

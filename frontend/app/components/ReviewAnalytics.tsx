@@ -32,24 +32,26 @@ import {
   PersonaScoringWeights,
   DEFAULT_BEST_PRACTICES,
   DEFAULT_SCORING_WEIGHTS,
+  medianBestPractices,
+  medianScoringWeights,
 } from '../config/config';
 
 interface ReviewAnalyticsProps {
   sessionData: SessionAnalytics;
   aiFeedback: AIFeedbackResponse | null;
-  persona: Persona | null;
+  personas: Persona[];
   onDownload: () => void;
   onBackToStart: () => void;
 }
 
-function resolveBestPractices(persona: Persona | null): PersonaBestPractices {
-  if (!persona?.bestPractices) return DEFAULT_BEST_PRACTICES;
-  return { ...DEFAULT_BEST_PRACTICES, ...persona.bestPractices };
+function resolveBestPractices(personas: Persona[]): PersonaBestPractices {
+  if (personas.length === 0) return DEFAULT_BEST_PRACTICES;
+  return medianBestPractices(personas);
 }
 
-function resolveScoringWeights(persona: Persona | null): PersonaScoringWeights {
-  if (!persona?.scoringWeights) return DEFAULT_SCORING_WEIGHTS;
-  return { ...DEFAULT_SCORING_WEIGHTS, ...persona.scoringWeights };
+function resolveScoringWeights(personas: Persona[]): PersonaScoringWeights {
+  if (personas.length === 0) return DEFAULT_SCORING_WEIGHTS;
+  return medianScoringWeights(personas);
 }
 
 function buildBestPracticeChecks(bp: PersonaBestPractices) {
@@ -116,7 +118,7 @@ function MetricBar({ value, max, color }: { value: number; max: number; color: s
   );
 }
 
-export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDownload, onBackToStart }: ReviewAnalyticsProps) {
+export default function ReviewAnalytics({ sessionData, aiFeedback, personas, onDownload, onBackToStart }: ReviewAnalyticsProps) {
   const { windows } = sessionData;
   const [showWindows, setShowWindows] = useState(false);
   const [dismissedBanner, setDismissedBanner] = useState(false);
@@ -128,8 +130,8 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDo
     getVideoPlaybackUrl(sessionData.sessionId).then(setVideoUrl);
   }, [sessionData.sessionId]);
 
-  const bp = resolveBestPractices(persona);
-  const weights = resolveScoringWeights(persona);
+  const bp = resolveBestPractices(personas);
+  const weights = resolveScoringWeights(personas);
   const BEST_PRACTICES = buildBestPracticeChecks(bp);
 
   const stats = (() => {
@@ -186,7 +188,10 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDo
     return score >= bp.eyeContact.min ? 'text-green-600' : score >= bp.eyeContact.min - 20 ? 'text-yellow-600' : 'text-red-600';
   };
 
-  const feedbackPersona = aiFeedback?.persona;
+  const feedbackPersonas: { id: string; title: string; description: string }[] =
+    (aiFeedback as AIFeedbackResponse & { personas?: { id: string; title: string; description: string }[] })?.personas
+    ?? (aiFeedback?.persona ? [aiFeedback.persona] : []);
+  const feedbackPersonaLabel = feedbackPersonas.map((p: { title: string }) => p.title).join(' & ');
 
   return (
     <div className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6">
@@ -209,12 +214,12 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDo
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Presentation Analysis</h1>
-          {feedbackPersona && (
+          {feedbackPersonaLabel && (
             <p className="mt-1 text-sm text-gray-600">
-              Feedback tailored for: <span className="font-semibold text-maroon">{feedbackPersona.title}</span>
+              Feedback tailored for: <span className="font-semibold text-maroon">{feedbackPersonaLabel}</span>
             </p>
           )}
-          {!feedbackPersona && (
+          {!feedbackPersonaLabel && (
             <p className="mt-1 text-sm text-gray-600">
               {sessionData.personaTitle} &middot; {windows.length} windows recorded
             </p>
@@ -455,7 +460,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onDo
         {aiFeedback && aiFeedback.keyRecommendations.length > 0 && (
           <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
             <h2 className="mb-5 text-lg font-semibold text-gray-900">
-              Key Recommendations{feedbackPersona ? ` for ${feedbackPersona.title}` : ''}
+              Key Recommendations{feedbackPersonaLabel ? ` for ${feedbackPersonaLabel}` : ''}
             </h2>
             <div className="space-y-4">
               {aiFeedback.keyRecommendations.map((rec, i) => (

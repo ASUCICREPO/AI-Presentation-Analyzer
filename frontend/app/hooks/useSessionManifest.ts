@@ -9,6 +9,8 @@ export type ManifestStatus = 'in_progress' | 'completed' | 'aborted';
 export interface SessionManifest {
   sessionId: string;
   persona: string;
+  /** Array of all selected persona IDs (multi-persona support) */
+  personas: string[];
   startTime: string;
   endTime?: string;
   status: ManifestStatus;
@@ -41,7 +43,7 @@ export interface SessionManifest {
  *   await manifest.update({ videoParts: 3 });    // after each video chunk
  *   await manifest.complete(timer);              // on session end
  */
-export function useSessionManifest(sessionId: string, personaId: string) {
+export function useSessionManifest(sessionId: string, personaId: string, personaIds?: string[]) {
   const manifestRef = useRef<SessionManifest | null>(null);
   const flushingRef = useRef(false);
 
@@ -52,6 +54,7 @@ export function useSessionManifest(sessionId: string, personaId: string) {
       const m: SessionManifest = {
         sessionId,
         persona: personaId,
+        personas: personaIds ?? [personaId],
         startTime: now,
         status: 'in_progress',
         videoParts: 0,
@@ -68,7 +71,7 @@ export function useSessionManifest(sessionId: string, personaId: string) {
         console.error('[useSessionManifest] Failed to create manifest:', err);
       }
     },
-    [sessionId, personaId],
+    [sessionId, personaId, personaIds],
   );
 
   // ─── Update — merge partial fields and flush to S3 ─────────────────

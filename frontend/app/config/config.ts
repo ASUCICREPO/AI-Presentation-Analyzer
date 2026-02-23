@@ -99,6 +99,83 @@ export const DEFAULT_SCORING_WEIGHTS: PersonaScoringWeights = {
   pauses: 0.25,
 };
 
+/** Compute median best practices from multiple personas.
+ *  For each threshold, collects values from all personas that define it
+ *  and returns the median. Falls back to defaults when no persona defines a field. */
+export function medianBestPractices(personas: Persona[]): PersonaBestPractices {
+  if (personas.length === 0) return DEFAULT_BEST_PRACTICES;
+  if (personas.length === 1) {
+    return personas[0].bestPractices
+      ? { ...DEFAULT_BEST_PRACTICES, ...personas[0].bestPractices }
+      : DEFAULT_BEST_PRACTICES;
+  }
+
+  const median = (vals: number[]) => {
+    if (vals.length === 0) return undefined;
+    const s = [...vals].sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return s.length % 2 !== 0 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2);
+  };
+
+  const collect = (key: keyof PersonaBestPractices, sub: string) =>
+    personas
+      .map((p) => (p.bestPractices as Record<string, Record<string, number>> | undefined)?.[key]?.[sub])
+      .filter((v): v is number => typeof v === 'number');
+
+  return {
+    wpm: {
+      min: median(collect('wpm', 'min')) ?? DEFAULT_BEST_PRACTICES.wpm.min,
+      max: median(collect('wpm', 'max')) ?? DEFAULT_BEST_PRACTICES.wpm.max,
+    },
+    eyeContact: {
+      min: median(collect('eyeContact', 'min')) ?? DEFAULT_BEST_PRACTICES.eyeContact.min,
+    },
+    fillerWords: {
+      max: median(collect('fillerWords', 'max')) ?? DEFAULT_BEST_PRACTICES.fillerWords.max,
+    },
+    pauses: {
+      min: median(collect('pauses', 'min')) ?? DEFAULT_BEST_PRACTICES.pauses.min,
+    },
+  };
+}
+
+/** Compute median scoring weights from multiple personas. */
+export function medianScoringWeights(personas: Persona[]): PersonaScoringWeights {
+  if (personas.length === 0) return DEFAULT_SCORING_WEIGHTS;
+  if (personas.length === 1) {
+    return personas[0].scoringWeights
+      ? { ...DEFAULT_SCORING_WEIGHTS, ...personas[0].scoringWeights }
+      : DEFAULT_SCORING_WEIGHTS;
+  }
+
+  const median = (vals: number[]) => {
+    if (vals.length === 0) return undefined;
+    const s = [...vals].sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return s.length % 2 !== 0 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  };
+
+  const collect = (key: keyof PersonaScoringWeights) =>
+    personas.map((p) => p.scoringWeights?.[key]).filter((v): v is number => typeof v === 'number');
+
+  const raw = {
+    pace: median(collect('pace')) ?? DEFAULT_SCORING_WEIGHTS.pace,
+    eyeContact: median(collect('eyeContact')) ?? DEFAULT_SCORING_WEIGHTS.eyeContact,
+    fillerWords: median(collect('fillerWords')) ?? DEFAULT_SCORING_WEIGHTS.fillerWords,
+    pauses: median(collect('pauses')) ?? DEFAULT_SCORING_WEIGHTS.pauses,
+  };
+
+  // Normalize to sum to 1.0
+  const total = raw.pace + raw.eyeContact + raw.fillerWords + raw.pauses;
+  if (total === 0) return DEFAULT_SCORING_WEIGHTS;
+  return {
+    pace: raw.pace / total,
+    eyeContact: raw.eyeContact / total,
+    fillerWords: raw.fillerWords / total,
+    pauses: raw.pauses / total,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Session
 // ---------------------------------------------------------------------------

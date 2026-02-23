@@ -7,6 +7,7 @@ export interface AIFeedbackResponse {
   status: string;
   sessionId: string;
   persona: { id: string; title: string; description: string };
+  personas?: { id: string; title: string; description: string }[];
   keyRecommendations: { title: string; description: string }[];
   performanceSummary: {
     overallAssessment: string;

@@ -120,6 +120,44 @@ def _resolve_best_practices(persona):
             resolved[key] = dict(default)
     return resolved
 
+
+def _median(values):
+    """Return the median of a list of numbers."""
+    if not values:
+        return 0
+    s = sorted(values)
+    n = len(s)
+    if n % 2 == 1:
+        return s[n // 2]
+    return (s[n // 2 - 1] + s[n // 2]) / 2
+
+
+def _resolve_best_practices_multi(personas):
+    """Compute median best practices across multiple personas.
+    For each threshold field, collect values from all personas that define it,
+    then take the median. Falls back to defaults when no persona defines a field."""
+    if not personas:
+        return dict(_FALLBACK_BP)
+    if len(personas) == 1:
+        return _resolve_best_practices(personas[0])
+
+    resolved = {}
+    for key, default in _FALLBACK_BP.items():
+        collected = {}  # sub-key -> list of values
+        for p in personas:
+            bp = p.get('bestPractices', {}) if p else {}
+            if key in bp and isinstance(bp[key], dict):
+                for sub_key, val in bp[key].items():
+                    if isinstance(val, (int, float)):
+                        collected.setdefault(sub_key, []).append(val)
+
+        entry = dict(default)
+        for sub_key in default:
+            if sub_key in collected and collected[sub_key]:
+                entry[sub_key] = round(_median(collected[sub_key]))
+        resolved[key] = entry
+    return resolved
+
 def _window_timestamp(window_number):
     """Convert a 1-based window number to a MM:SS - MM:SS range (each window = 30s)."""
     start_secs = (window_number - 1) * 30
@@ -128,14 +166,20 @@ def _window_timestamp(window_number):
     end = f"{end_secs // 60:02d}:{end_secs % 60:02d}"
     return f"{start} - {end}"
 
-def generate_timestamped_feedback(session_analytics, persona=None):
-    """Check each 30-second window against the persona's best-practice
-    thresholds. Returns events only where a metric is below standard."""
+def generate_timestamped_feedback(session_analytics, personas=None):
+    """Check each 30-second window against the median best-practice
+    thresholds across all selected personas. Returns events only where
+    a metric is below standard."""
     windows = session_analytics.get('windows', [])
     if not windows:
         return []
 
-    bp = _resolve_best_practices(persona)
+    if personas is None:
+        personas = []
+    if not isinstance(personas, list):
+        personas = [personas]
+
+    bp = _resolve_best_practices_multi(personas)
     events = []
 
     for w in windows:
@@ -165,33 +209,60 @@ def generate_timestamped_feedback(session_analytics, persona=None):
 
 # ─── Bedrock feedback generation (prompt-based JSON, no outputConfig) ─────────
 
-def generate_feedback(persona, transcript, persona_customization=None,
+def generate_feedback(personas, transcript, persona_customization=None,
                       pdf_bytes=None, session_analytics=None):
-    persona_name = persona.get('name', persona.get('title', 'a professional evaluator'))
-    description = persona.get('description', '')
-    communication_style = persona.get('communicationStyle', '')
-    attention_span = persona.get('attentionSpan', '')
-    expertise = persona.get('expertise', '')
+    """Generate AI feedback using all selected personas' context.
+    Each persona's role, description, and priorities are included in the prompt
+    so the model evaluates from every perspective."""
+    if not isinstance(personas, list):
+        personas = [personas]
 
-    key_priorities = persona.get('keyPriorities', [])
-    if isinstance(key_priorities, list):
-        if key_priorities and isinstance(key_priorities[0], dict) and 'S' in key_priorities[0]:
-            key_priorities = [item['S'] for item in key_priorities]
-        priorities_text = ', '.join(key_priorities)
-    else:
-        priorities_text = str(key_priorities)
+    # Build combined persona context
+    persona_names = []
+    all_priorities = []
+    persona_sections = []
+
+    for i, persona in enumerate(personas, 1):
+        name = persona.get('name', persona.get('title', 'a professional evaluator'))
+        persona_names.append(name)
+        description = persona.get('description', '')
+        communication_style = persona.get('communicationStyle', '')
+        attention_span = persona.get('attentionSpan', '')
+        expertise = persona.get('expertise', '')
+
+        key_priorities = persona.get('keyPriorities', [])
+        if isinstance(key_priorities, list):
+            if key_priorities and isinstance(key_priorities[0], dict) and 'S' in key_priorities[0]:
+                key_priorities = [item['S'] for item in key_priorities]
+            all_priorities.extend(key_priorities)
+            priorities_text = ', '.join(key_priorities)
+        else:
+            priorities_text = str(key_priorities)
+
+        persona_sections.extend([
+            f"  Persona {i}: {name}",
+            f"  - Description: {description}",
+            f"  - Communication Style: {communication_style}",
+            f"  - Attention Span: {attention_span}",
+            f"  - Expertise: {expertise}",
+            f"  - Key Priorities: {priorities_text}",
+            "",
+        ])
+
+    combined_names = ' and '.join(persona_names) if len(persona_names) <= 2 else \
+        ', '.join(persona_names[:-1]) + f', and {persona_names[-1]}'
+
+    # Use the first persona's communication style as the primary tone
+    primary_communication_style = personas[0].get('communicationStyle', 'professional')
 
     parts = [
-        f"You are providing post-presentation feedback as a {persona_name}.",
+        f"You are providing post-presentation feedback from the combined perspective of {combined_names}.",
+        "Evaluate the presentation considering ALL of the following audience personas.",
+        "Your feedback should reflect the priorities and expectations of each persona.",
         "",
-        "Persona Context:",
-        f"- Role: {persona_name}",
-        f"- Description: {description}",
-        f"- Communication Style: {communication_style}",
-        f"- Attention Span: {attention_span}",
-        f"- Expertise: {expertise}",
-        f"- Key Priorities: {priorities_text}",
+        "Audience Personas:",
     ]
+    parts.extend(persona_sections)
 
     if persona_customization:
         parts.extend(["", "Additional Custom Instructions:", persona_customization])
@@ -234,7 +305,7 @@ def generate_feedback(persona, transcript, persona_customization=None,
 
     parts.extend([
         "",
-        f"Based on your role as {persona_name}, the transcript,"
+        f"Based on your combined perspective as {combined_names}, the transcript,"
         " and the presentation materials (if PDF is provided), provide structured feedback.",
         "",
         "IMPORTANT: Keep ALL feedback concise. Brevity is mandatory.",
@@ -261,7 +332,7 @@ def generate_feedback(persona, transcript, persona_customization=None,
         " Do NOT include statistics, standard deviations, window breakdowns, or"
         " lengthy analysis. Keep each field under 30 words total.",
         "",
-        f"Use a {communication_style} tone throughout your feedback.",
+        f"Use a {primary_communication_style} tone throughout your feedback.",
         "Be constructive and encouraging while being honest about areas needing work.",
         "Prioritize brevity and clarity — avoid verbose explanations.",
         "",
@@ -395,14 +466,24 @@ def lambda_handler(event, context):
             print(f"Manifest loaded: {json.dumps(manifest)}")
 
             persona_id = manifest.get('persona')
-            if not persona_id:
-                raise ValueError("Persona not found in manifest")
+            persona_ids = manifest.get('personas', [])
+            # Support both single persona (legacy) and multi-persona manifests
+            if not persona_ids and persona_id:
+                persona_ids = [persona_id]
+            if not persona_ids:
+                raise ValueError("No persona found in manifest")
 
-            # Persona
-            persona = get_persona(persona_id)
-            if not persona:
-                raise ValueError(f"Persona {persona_id} not found in DynamoDB")
-            print(f"Persona loaded: {persona.get('name')}")
+            # Fetch all selected personas
+            personas = []
+            for pid in persona_ids:
+                p = get_persona(pid)
+                if p:
+                    personas.append(p)
+                else:
+                    print(f"Warning: Persona {pid} not found in DynamoDB, skipping")
+            if not personas:
+                raise ValueError(f"None of the personas {persona_ids} found in DynamoDB")
+            print(f"Personas loaded: {[p.get('name') for p in personas]}")
 
             # Transcript
             transcript_str = read_s3_text(f"{prefix}transcript.json")
@@ -438,23 +519,33 @@ def lambda_handler(event, context):
 
             # Generate AI feedback
             feedback = generate_feedback(
-                persona, transcript, persona_customization,
+                personas, transcript, persona_customization,
                 pdf_bytes, session_analytics,
             )
 
             # Generate timestamped feedback from window data + persona thresholds
             timestamped = []
             if session_analytics:
-                timestamped = generate_timestamped_feedback(session_analytics, persona)
+                timestamped = generate_timestamped_feedback(session_analytics, personas)
 
+            # Use primary persona for backward-compatible response shape
+            primary = personas[0]
             result = {
                 'status': 'completed',
                 'sessionId': session_id,
                 'persona': {
-                    'id': persona_id,
-                    'title': persona.get('name'),
-                    'description': persona.get('description'),
+                    'id': persona_ids[0] if persona_ids else '',
+                    'title': primary.get('name'),
+                    'description': primary.get('description'),
                 },
+                'personas': [
+                    {
+                        'id': p.get('personaID', ''),
+                        'title': p.get('name'),
+                        'description': p.get('description'),
+                    }
+                    for p in personas
+                ],
                 'keyRecommendations': feedback.get('keyRecommendations', []),
                 'performanceSummary': feedback.get('performanceSummary', {}),
                 'timestampedFeedback': timestamped,
