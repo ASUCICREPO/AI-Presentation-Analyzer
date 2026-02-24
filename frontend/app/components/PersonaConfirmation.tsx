@@ -76,13 +76,8 @@ export default function PersonaConfirmation({
             {/* Resolved Thresholds */}
             <div className="mb-6 rounded-xl border border-gray-200 bg-white p-5 sm:p-6 2xl:p-10 2xl:mb-8">
                 <h2 className="mb-4 text-base font-semibold text-gray-900 font-serif 2xl:text-2xl 2xl:mb-6">
-                    {personas.length > 1 ? 'Merged Feedback Thresholds' : 'Feedback Thresholds'}
+                    Best Practices
                 </h2>
-                {personas.length > 1 && (
-                    <p className="mb-4 text-xs text-gray-400 font-sans 2xl:text-sm 2xl:mb-6">
-                        Median values computed across all selected personas. These thresholds determine when you receive real-time alerts.
-                    </p>
-                )}
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 2xl:gap-6">
                     <ThresholdCard
                         label="Speaking Pace"
