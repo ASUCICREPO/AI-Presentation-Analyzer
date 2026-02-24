@@ -5,11 +5,11 @@ from decimal import Decimal
 from datetime import datetime, timezone
 
 s3 = boto3.client('s3')
-dynamodb = boto3.resource('dynamodb')
+lambda_client = boto3.client('lambda')
 bedrock_runtime = boto3.client('bedrock-runtime')
 
 BUCKET_NAME = os.environ.get('UPLOADS_BUCKET')
-PERSONA_TABLE_NAME = os.environ.get('PERSONA_TABLE_NAME')
+PERSONA_RESOLVER_FUNCTION = os.environ.get('PERSONA_RESOLVER_FUNCTION')
 BEDROCK_MODEL_ID = 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
 
 FEEDBACK_FILE = 'ai_feedback.json'
@@ -31,16 +31,6 @@ def api_response(status_code, body):
         "headers": CORS_HEADERS,
         "body": json.dumps(body),
     }
-
-
-def decimal_to_float(obj):
-    if isinstance(obj, Decimal):
-        return float(obj)
-    if isinstance(obj, dict):
-        return {k: decimal_to_float(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [decimal_to_float(i) for i in obj]
-    return obj
 
 
 def s3_key(user_sub, session_id, filename):
@@ -76,87 +66,32 @@ def write_s3_json(key, data):
     )
 
 
-def get_persona(identifier):
-    """Look up persona by ID, falling back to scan-by-name."""
-    table = dynamodb.Table(PERSONA_TABLE_NAME)
-    try:
-        item = table.get_item(Key={'personaID': identifier}).get('Item')
-        if item:
-            return decimal_to_float(item)
-    except Exception as e:
-        print(f"Error fetching persona by ID: {e}")
+# ─── Persona resolution via Lambda invoke ─────────────────────────────────────
 
-    try:
-        items = table.scan(
-            FilterExpression='#n = :name',
-            ExpressionAttributeNames={'#n': 'name'},
-            ExpressionAttributeValues={':name': identifier},
-        ).get('Items', [])
-        if items:
-            return decimal_to_float(items[0])
-    except Exception as e:
-        print(f"Error scanning persona by name: {e}")
+def invoke_persona_resolver(persona_ids, persona_customization=None):
+    """Invoke the persona-resolver Lambda to get merged prompt + median values."""
+    payload = {
+        'action': 'resolve-prompt',
+        'personaIds': persona_ids,
+    }
+    if persona_customization:
+        payload['personaCustomization'] = persona_customization
 
-    return None
+    print(f"Invoking persona resolver for {persona_ids}")
+    response = lambda_client.invoke(
+        FunctionName=PERSONA_RESOLVER_FUNCTION,
+        InvocationType='RequestResponse',
+        Payload=json.dumps(payload),
+    )
+    result = json.loads(response['Payload'].read().decode('utf-8'))
+
+    if 'error' in result:
+        raise ValueError(f"Persona resolver error: {result['error']}")
+
+    return result
+
 
 # ─── Timestamped feedback from session analytics windows ──────────────────────
-
-# Fallback thresholds — only used when the persona has no bestPractices.
-_FALLBACK_BP = {
-    'wpm': {'min': 140, 'max': 160},
-    'eyeContact': {'min': 60},
-    'fillerWords': {'max': 3},
-    'pauses': {'min': 4},
-}
-
-def _resolve_best_practices(persona):
-    """Pull bestPractices from the persona; fall back to defaults per field."""
-    persona_bp = persona.get('bestPractices', {}) if persona else {}
-    resolved = {}
-    for key, default in _FALLBACK_BP.items():
-        if key in persona_bp and isinstance(persona_bp[key], dict):
-            resolved[key] = {**default, **persona_bp[key]}
-        else:
-            resolved[key] = dict(default)
-    return resolved
-
-
-def _median(values):
-    """Return the median of a list of numbers."""
-    if not values:
-        return 0
-    s = sorted(values)
-    n = len(s)
-    if n % 2 == 1:
-        return s[n // 2]
-    return (s[n // 2 - 1] + s[n // 2]) / 2
-
-
-def _resolve_best_practices_multi(personas):
-    """Compute median best practices across multiple personas.
-    For each threshold field, collect values from all personas that define it,
-    then take the median. Falls back to defaults when no persona defines a field."""
-    if not personas:
-        return dict(_FALLBACK_BP)
-    if len(personas) == 1:
-        return _resolve_best_practices(personas[0])
-
-    resolved = {}
-    for key, default in _FALLBACK_BP.items():
-        collected = {}  # sub-key -> list of values
-        for p in personas:
-            bp = p.get('bestPractices', {}) if p else {}
-            if key in bp and isinstance(bp[key], dict):
-                for sub_key, val in bp[key].items():
-                    if isinstance(val, (int, float)):
-                        collected.setdefault(sub_key, []).append(val)
-
-        entry = dict(default)
-        for sub_key in default:
-            if sub_key in collected and collected[sub_key]:
-                entry[sub_key] = round(_median(collected[sub_key]))
-        resolved[key] = entry
-    return resolved
 
 def _window_timestamp(window_number):
     """Convert a 1-based window number to a MM:SS - MM:SS range (each window = 30s)."""
@@ -166,20 +101,16 @@ def _window_timestamp(window_number):
     end = f"{end_secs // 60:02d}:{end_secs % 60:02d}"
     return f"{start} - {end}"
 
-def generate_timestamped_feedback(session_analytics, personas=None):
-    """Check each 30-second window against the median best-practice
-    thresholds across all selected personas. Returns events only where
-    a metric is below standard."""
+
+def generate_timestamped_feedback(session_analytics, best_practices):
+    """Check each 30-second window against the resolved best-practice
+    thresholds (median values from persona resolver). Returns events
+    only where a metric is below standard."""
     windows = session_analytics.get('windows', [])
     if not windows:
         return []
 
-    if personas is None:
-        personas = []
-    if not isinstance(personas, list):
-        personas = [personas]
-
-    bp = _resolve_best_practices_multi(personas)
+    bp = best_practices
     events = []
 
     for w in windows:
@@ -206,66 +137,14 @@ def generate_timestamped_feedback(session_analytics, personas=None):
     return events
 
 
+# ─── Bedrock feedback generation ──────────────────────────────────────────────
 
-# ─── Bedrock feedback generation (prompt-based JSON, no outputConfig) ─────────
-
-def generate_feedback(personas, transcript, persona_customization=None,
+def generate_feedback(merged_prompt, communication_style, transcript,
                       pdf_bytes=None, session_analytics=None):
-    """Generate AI feedback using all selected personas' context.
-    Each persona's role, description, and priorities are included in the prompt
-    so the model evaluates from every perspective."""
-    if not isinstance(personas, list):
-        personas = [personas]
+    """Generate AI feedback using the pre-resolved persona prompt from the resolver.
+    The merged_prompt already contains the full persona context (single or merged)."""
 
-    # Build combined persona context
-    persona_names = []
-    all_priorities = []
-    persona_sections = []
-
-    for i, persona in enumerate(personas, 1):
-        name = persona.get('name', persona.get('title', 'a professional evaluator'))
-        persona_names.append(name)
-        description = persona.get('description', '')
-        communication_style = persona.get('communicationStyle', '')
-        attention_span = persona.get('attentionSpan', '')
-        expertise = persona.get('expertise', '')
-
-        key_priorities = persona.get('keyPriorities', [])
-        if isinstance(key_priorities, list):
-            if key_priorities and isinstance(key_priorities[0], dict) and 'S' in key_priorities[0]:
-                key_priorities = [item['S'] for item in key_priorities]
-            all_priorities.extend(key_priorities)
-            priorities_text = ', '.join(key_priorities)
-        else:
-            priorities_text = str(key_priorities)
-
-        persona_sections.extend([
-            f"  Persona {i}: {name}",
-            f"  - Description: {description}",
-            f"  - Communication Style: {communication_style}",
-            f"  - Attention Span: {attention_span}",
-            f"  - Expertise: {expertise}",
-            f"  - Key Priorities: {priorities_text}",
-            "",
-        ])
-
-    combined_names = ' and '.join(persona_names) if len(persona_names) <= 2 else \
-        ', '.join(persona_names[:-1]) + f', and {persona_names[-1]}'
-
-    # Use the first persona's communication style as the primary tone
-    primary_communication_style = personas[0].get('communicationStyle', 'professional')
-
-    parts = [
-        f"You are providing post-presentation feedback from the combined perspective of {combined_names}.",
-        "Evaluate the presentation considering ALL of the following audience personas.",
-        "Your feedback should reflect the priorities and expectations of each persona.",
-        "",
-        "Audience Personas:",
-    ]
-    parts.extend(persona_sections)
-
-    if persona_customization:
-        parts.extend(["", "Additional Custom Instructions:", persona_customization])
+    parts = [merged_prompt]
 
     parts.extend([
         "",
@@ -305,7 +184,7 @@ def generate_feedback(personas, transcript, persona_customization=None,
 
     parts.extend([
         "",
-        f"Based on your combined perspective as {combined_names}, the transcript,"
+        "Based on the above persona context, the transcript,"
         " and the presentation materials (if PDF is provided), provide structured feedback.",
         "",
         "IMPORTANT: Keep ALL feedback concise. Brevity is mandatory.",
@@ -332,7 +211,7 @@ def generate_feedback(personas, transcript, persona_customization=None,
         " Do NOT include statistics, standard deviations, window breakdowns, or"
         " lengthy analysis. Keep each field under 30 words total.",
         "",
-        f"Use a {primary_communication_style} tone throughout your feedback.",
+        f"Use a {communication_style} tone throughout your feedback.",
         "Be constructive and encouraging while being honest about areas needing work.",
         "Prioritize brevity and clarity — avoid verbose explanations.",
         "",
@@ -382,7 +261,6 @@ def generate_feedback(personas, transcript, persona_customization=None,
     raw = response['output']['message']['content'][0]['text']
 
     text = raw.strip()
-    # Strip markdown code fences if present (e.g. ```json ... ```)
     if text.startswith('```'):
         newline_idx = text.find('\n')
         if newline_idx != -1:
@@ -425,7 +303,6 @@ def lambda_handler(event, context):
             status = json.loads(status_str)
 
             if status.get('status') == 'failed':
-                # Clear the failed status so this invocation can retry generation
                 print(f"Previous generation failed, retrying: {status.get('error')}")
                 try:
                     s3.delete_object(Bucket=BUCKET_NAME, Key=status_key)
@@ -438,7 +315,6 @@ def lambda_handler(event, context):
                     elapsed = (datetime.now(timezone.utc)
                                - datetime.fromisoformat(started)).total_seconds()
                     if elapsed > STALE_THRESHOLD_SEC:
-                        # Clear stale processing status so next poll retries
                         try:
                             s3.delete_object(Bucket=BUCKET_NAME, Key=status_key)
                         except Exception:
@@ -447,9 +323,6 @@ def lambda_handler(event, context):
                 return api_response(202, {"status": "processing"})
 
         # ── 3. Nothing cached, no active job → generate synchronously ────
-        #    API Gateway may 504 after 29s, but Lambda keeps running up to
-        #    its own 120s timeout and saves the result to S3 regardless.
-        #    Next poll from the client picks up the cached result.
         now = datetime.now(timezone.utc).isoformat()
         write_s3_json(status_key, {'status': 'processing', 'startedAt': now})
 
@@ -467,23 +340,10 @@ def lambda_handler(event, context):
 
             persona_id = manifest.get('persona')
             persona_ids = manifest.get('personas', [])
-            # Support both single persona (legacy) and multi-persona manifests
             if not persona_ids and persona_id:
                 persona_ids = [persona_id]
             if not persona_ids:
                 raise ValueError("No persona found in manifest")
-
-            # Fetch all selected personas
-            personas = []
-            for pid in persona_ids:
-                p = get_persona(pid)
-                if p:
-                    personas.append(p)
-                else:
-                    print(f"Warning: Persona {pid} not found in DynamoDB, skipping")
-            if not personas:
-                raise ValueError(f"None of the personas {persona_ids} found in DynamoDB")
-            print(f"Personas loaded: {[p.get('name') for p in personas]}")
 
             # Transcript
             transcript_str = read_s3_text(f"{prefix}transcript.json")
@@ -497,16 +357,18 @@ def lambda_handler(event, context):
             )
             print(f"Transcript: {len(transcript)} chars")
 
-            # Optional files
+            # Optional persona customization
             persona_customization = None
             if manifest.get('hasPersonaCustomization'):
                 persona_customization = read_s3_text(
                     f"{prefix}CUSTOM_PERSONA_INSTRUCTION.txt")
 
+            # Optional PDF
             pdf_bytes = None
             if manifest.get('hasPresentationPdf'):
                 pdf_bytes = read_s3_bytes(f"{prefix}presentation.pdf")
 
+            # Optional session analytics
             session_analytics = None
             sa_str = read_s3_text(f"{prefix}session_analytics.json")
             if sa_str:
@@ -517,19 +379,29 @@ def lambda_handler(event, context):
                 except json.JSONDecodeError:
                     print("Warning: could not parse session_analytics.json")
 
-            # Generate AI feedback
+            # ── Invoke persona resolver for merged prompt + median values ──
+            resolved = invoke_persona_resolver(persona_ids, persona_customization)
+            merged_prompt = resolved['mergedPrompt']
+            communication_style = resolved['communicationStyle']
+            best_practices = resolved['bestPractices']
+            persona_info = resolved['personas']
+
+            print(f"Persona resolver returned prompt ({len(merged_prompt)} chars), "
+                  f"{len(persona_info)} personas")
+
+            # Generate AI feedback using the resolved prompt
             feedback = generate_feedback(
-                personas, transcript, persona_customization,
+                merged_prompt, communication_style, transcript,
                 pdf_bytes, session_analytics,
             )
 
-            # Generate timestamped feedback from window data + persona thresholds
+            # Generate timestamped feedback using resolved median best practices
             timestamped = []
             if session_analytics:
-                timestamped = generate_timestamped_feedback(session_analytics, personas)
+                timestamped = generate_timestamped_feedback(
+                    session_analytics, best_practices)
 
-            # Use primary persona for backward-compatible response shape
-            primary = personas[0]
+            primary = persona_info[0] if persona_info else {}
             result = {
                 'status': 'completed',
                 'sessionId': session_id,
@@ -544,7 +416,7 @@ def lambda_handler(event, context):
                         'title': p.get('name'),
                         'description': p.get('description'),
                     }
-                    for p in personas
+                    for p in persona_info
                 ],
                 'keyRecommendations': feedback.get('keyRecommendations', []),
                 'performanceSummary': feedback.get('performanceSummary', {}),

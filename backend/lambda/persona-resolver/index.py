@@ -1,18 +1,19 @@
 """
-Multi-Persona Resolver Lambda
+Persona Resolver Lambda
 
-Resolves single or multiple persona configurations into a unified set of
-best practices and scoring weights. Used by:
-  - Frontend: to get real-time feedback thresholds for a session
-  - Post-meeting analytics: to evaluate session windows against merged thresholds
+Handles ALL persona-related logic:
+  - Resolving single/multiple persona configs into merged best practices & scoring weights
+  - Generating a unified prompt for post-meeting analytics (calls Bedrock to merge multiple personas)
+  - Persona customization text upload/read with S3 guardrail scanning
 
-Routes:
-  POST /personas/resolve  — resolve one or more personas by ID
-    Body: { "personaIds": ["id1", "id2", ...] }
-    Returns merged best practices (median), scoring weights, and full persona details.
+Routes (API Gateway):
+  POST /personas/resolve       — resolve one or more personas by ID (frontend real-time thresholds)
+  GET  /personas/resolve       — same via query string
+  POST /personas/customization — upload persona customization text
+  GET  /personas/customization — read persona customization text
 
-  GET  /personas/resolve?personaIds=id1,id2
-    Same as POST but via query string (convenience for simple lookups).
+Internal (Lambda invoke):
+  action: "resolve-prompt"     — returns merged prompt + median best practices for post-meeting analytics
 """
 
 import json
@@ -22,12 +23,22 @@ from decimal import Decimal
 from botocore.exceptions import ClientError
 
 dynamodb = boto3.resource('dynamodb')
+bedrock_runtime = boto3.client('bedrock-runtime')
+s3_client = boto3.client('s3')
 
 PERSONA_TABLE_NAME = os.environ.get('PERSONA_TABLE_NAME')
 if not PERSONA_TABLE_NAME:
     raise ValueError("PERSONA_TABLE_NAME environment variable is not set")
 
 table = dynamodb.Table(PERSONA_TABLE_NAME)
+
+UPLOADS_BUCKET = os.environ.get('UPLOADS_BUCKET', '')
+PERSONA_GUARDRAIL_ID = os.environ.get('PERSONA_GUARDRAIL_ID', '')
+PERSONA_GUARDRAIL_VERSION = os.environ.get('PERSONA_GUARDRAIL_VERSION', '')
+MAX_PERSONA_TEXT_BYTES = 10 * 1024  # 10 KB
+
+# Model used to merge multiple personas into a single prompt
+MERGE_MODEL_ID = os.environ.get('MERGE_MODEL_ID', 'amazon.nova-lite-v1:0')
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -81,6 +92,17 @@ def decimal_to_float(obj):
     return obj
 
 
+def _median(values):
+    """Return the median of a list of numbers."""
+    if not values:
+        return 0
+    s = sorted(values)
+    n = len(s)
+    if n % 2 == 1:
+        return s[n // 2]
+    return (s[n // 2 - 1] + s[n // 2]) / 2
+
+
 # ─── Persona fetching ────────────────────────────────────────────────────────
 
 def get_persona(identifier):
@@ -92,7 +114,6 @@ def get_persona(identifier):
     except ClientError as e:
         print(f"Error fetching persona by ID: {e}")
 
-    # Fallback: scan by name for backward compatibility
     try:
         items = table.scan(
             FilterExpression='#n = :name',
@@ -107,18 +128,7 @@ def get_persona(identifier):
     return None
 
 
-# ─── Resolution logic ────────────────────────────────────────────────────────
-
-def _median(values):
-    """Return the median of a list of numbers."""
-    if not values:
-        return 0
-    s = sorted(values)
-    n = len(s)
-    if n % 2 == 1:
-        return s[n // 2]
-    return (s[n // 2 - 1] + s[n // 2]) / 2
-
+# ─── Best practices resolution ────────────────────────────────────────────────
 
 def _resolve_best_practices_single(persona):
     """Pull bestPractices from a single persona; fall back to defaults per field."""
@@ -133,9 +143,7 @@ def _resolve_best_practices_single(persona):
 
 
 def resolve_best_practices(personas):
-    """Compute median best practices across multiple personas.
-    For each threshold field, collect values from all personas that define it,
-    then take the median. Falls back to defaults when no persona defines a field."""
+    """Compute median best practices across multiple personas."""
     if not personas:
         return dict(_FALLBACK_BP)
     if len(personas) == 1:
@@ -143,7 +151,7 @@ def resolve_best_practices(personas):
 
     resolved = {}
     for key, default in _FALLBACK_BP.items():
-        collected = {}  # sub-key -> list of values
+        collected = {}
         for p in personas:
             bp = p.get('bestPractices', {}) if p else {}
             if key in bp and isinstance(bp[key], dict):
@@ -189,16 +197,229 @@ def resolve_scoring_weights(personas):
     return {k: v / total for k, v in raw.items()}
 
 
+# ─── Prompt generation (single & multi-persona) ──────────────────────────────
+
+def _build_single_persona_prompt(persona, persona_customization=None):
+    """Build the feedback prompt section for a single persona."""
+    name = persona.get('name', persona.get('title', 'a professional evaluator'))
+    description = persona.get('description', '')
+    communication_style = persona.get('communicationStyle', 'professional')
+    attention_span = persona.get('attentionSpan', '')
+    expertise = persona.get('expertise', '')
+
+    key_priorities = persona.get('keyPriorities', [])
+    if isinstance(key_priorities, list):
+        if key_priorities and isinstance(key_priorities[0], dict) and 'S' in key_priorities[0]:
+            key_priorities = [item['S'] for item in key_priorities]
+        priorities_text = ', '.join(key_priorities)
+    else:
+        priorities_text = str(key_priorities)
+
+    parts = [
+        f"You are providing post-presentation feedback from the perspective of {name}.",
+        "",
+        "Audience Persona:",
+        f"  Name: {name}",
+        f"  Description: {description}",
+        f"  Communication Style: {communication_style}",
+        f"  Attention Span: {attention_span}",
+        f"  Expertise: {expertise}",
+        f"  Key Priorities: {priorities_text}",
+    ]
+
+    if persona_customization:
+        parts.extend(["", "Additional Custom Instructions:", persona_customization])
+
+    return '\n'.join(parts), communication_style
+
+
+def _merge_personas_with_bedrock(personas, persona_customization=None):
+    """Use a Bedrock model to merge multiple personas into a single unified prompt.
+    Returns (merged_prompt_section, communication_style)."""
+    persona_descriptions = []
+    all_priorities = []
+    communication_styles = []
+
+    for i, persona in enumerate(personas, 1):
+        name = persona.get('name', persona.get('title', 'Evaluator'))
+        description = persona.get('description', '')
+        communication_style = persona.get('communicationStyle', 'professional')
+        attention_span = persona.get('attentionSpan', '')
+        expertise = persona.get('expertise', '')
+        communication_styles.append(communication_style)
+
+        key_priorities = persona.get('keyPriorities', [])
+        if isinstance(key_priorities, list):
+            if key_priorities and isinstance(key_priorities[0], dict) and 'S' in key_priorities[0]:
+                key_priorities = [item['S'] for item in key_priorities]
+            all_priorities.extend(key_priorities)
+            priorities_text = ', '.join(key_priorities)
+        else:
+            priorities_text = str(key_priorities)
+
+        persona_descriptions.append(
+            f"Persona {i}: {name}\n"
+            f"  Description: {description}\n"
+            f"  Communication Style: {communication_style}\n"
+            f"  Attention Span: {attention_span}\n"
+            f"  Expertise: {expertise}\n"
+            f"  Key Priorities: {priorities_text}"
+        )
+
+    merge_prompt = (
+        "You are given multiple audience personas for a presentation feedback system. "
+        "Your job is to merge them into a SINGLE unified evaluator persona that captures "
+        "the combined perspective, priorities, and expectations of all personas.\n\n"
+        "Input Personas:\n" + "\n\n".join(persona_descriptions) + "\n\n"
+    )
+
+    if persona_customization:
+        merge_prompt += f"Additional Custom Instructions:\n{persona_customization}\n\n"
+
+    merge_prompt += (
+        "Create a merged persona description that:\n"
+        "1. Combines the key priorities from all personas\n"
+        "2. Balances their communication style preferences\n"
+        "3. Reflects the expertise areas of all personas\n"
+        "4. Captures the attention span expectations (use the most demanding)\n\n"
+        "Respond with ONLY the merged persona prompt in this exact format (no JSON, no markdown):\n"
+        "---\n"
+        "You are providing post-presentation feedback from the combined perspective of [names].\n\n"
+        "Unified Audience Persona:\n"
+        "  Name: [Combined name]\n"
+        "  Description: [merged description]\n"
+        "  Communication Style: [merged style]\n"
+        "  Attention Span: [most demanding]\n"
+        "  Expertise: [combined expertise]\n"
+        "  Key Priorities: [all merged priorities]\n"
+        "---"
+    )
+
+    print(f"Calling Bedrock ({MERGE_MODEL_ID}) to merge {len(personas)} personas")
+
+    try:
+        response = bedrock_runtime.converse(
+            modelId=MERGE_MODEL_ID,
+            messages=[{'role': 'user', 'content': [{'text': merge_prompt}]}],
+        )
+        merged_text = response['output']['message']['content'][0]['text'].strip()
+
+        # Strip any markdown fences
+        if merged_text.startswith('---'):
+            merged_text = merged_text[3:].strip()
+        if merged_text.endswith('---'):
+            merged_text = merged_text[:-3].strip()
+        if merged_text.startswith('```'):
+            nl = merged_text.find('\n')
+            merged_text = merged_text[nl + 1:] if nl != -1 else merged_text[3:]
+        if merged_text.endswith('```'):
+            merged_text = merged_text[:-3].strip()
+
+        # Use the first persona's communication style as primary
+        primary_style = communication_styles[0] if communication_styles else 'professional'
+        return merged_text, primary_style
+
+    except Exception as e:
+        print(f"Bedrock merge failed, falling back to manual merge: {e}")
+        return _manual_merge_personas(personas, persona_customization)
+
+
+def _manual_merge_personas(personas, persona_customization=None):
+    """Fallback: manually combine persona sections without Bedrock."""
+    persona_names = []
+    persona_sections = []
+
+    for i, persona in enumerate(personas, 1):
+        name = persona.get('name', persona.get('title', 'a professional evaluator'))
+        persona_names.append(name)
+        description = persona.get('description', '')
+        communication_style = persona.get('communicationStyle', '')
+        attention_span = persona.get('attentionSpan', '')
+        expertise = persona.get('expertise', '')
+
+        key_priorities = persona.get('keyPriorities', [])
+        if isinstance(key_priorities, list):
+            if key_priorities and isinstance(key_priorities[0], dict) and 'S' in key_priorities[0]:
+                key_priorities = [item['S'] for item in key_priorities]
+            priorities_text = ', '.join(key_priorities)
+        else:
+            priorities_text = str(key_priorities)
+
+        persona_sections.extend([
+            f"  Persona {i}: {name}",
+            f"  - Description: {description}",
+            f"  - Communication Style: {communication_style}",
+            f"  - Attention Span: {attention_span}",
+            f"  - Expertise: {expertise}",
+            f"  - Key Priorities: {priorities_text}",
+            "",
+        ])
+
+    combined_names = ' and '.join(persona_names) if len(persona_names) <= 2 else \
+        ', '.join(persona_names[:-1]) + f', and {persona_names[-1]}'
+
+    parts = [
+        f"You are providing post-presentation feedback from the combined perspective of {combined_names}.",
+        "Evaluate the presentation considering ALL of the following audience personas.",
+        "Your feedback should reflect the priorities and expectations of each persona.",
+        "",
+        "Audience Personas:",
+    ]
+    parts.extend(persona_sections)
+
+    if persona_customization:
+        parts.extend(["", "Additional Custom Instructions:", persona_customization])
+
+    primary_style = personas[0].get('communicationStyle', 'professional')
+    return '\n'.join(parts), primary_style
+
+
+def resolve_persona_prompt(persona_ids, persona_customization=None):
+    """Main entry point: fetch personas, resolve prompt + median values.
+    Returns dict with mergedPrompt, communicationStyle, bestPractices, scoringWeights, personas."""
+    personas = []
+    not_found = []
+    for pid in persona_ids:
+        p = get_persona(pid)
+        if p:
+            personas.append(p)
+        else:
+            not_found.append(pid)
+
+    if not personas:
+        raise ValueError(f"No personas found for IDs: {persona_ids}")
+
+    if not_found:
+        print(f"[WARN] Personas not found: {not_found}")
+
+    # Generate the prompt
+    if len(personas) == 1:
+        merged_prompt, comm_style = _build_single_persona_prompt(personas[0], persona_customization)
+    else:
+        merged_prompt, comm_style = _merge_personas_with_bedrock(personas, persona_customization)
+
+    # Compute median best practices and scoring weights
+    best_practices = resolve_best_practices(personas)
+    scoring_weights = resolve_scoring_weights(personas)
+
+    return {
+        'mergedPrompt': merged_prompt,
+        'communicationStyle': comm_style,
+        'bestPractices': best_practices,
+        'scoringWeights': scoring_weights,
+        'personas': [
+            {
+                'personaID': p.get('personaID', ''),
+                'name': p.get('name', ''),
+                'description': p.get('description', ''),
+            }
+            for p in personas
+        ],
+        'notFound': not_found,
+    }
+
+
 # ─── S3 persona customization ────────────────────────────────────────────────
-
-s3_client = boto3.client('s3')
-bedrock_runtime = boto3.client('bedrock-runtime')
-
-UPLOADS_BUCKET = os.environ.get('UPLOADS_BUCKET', '')
-PERSONA_GUARDRAIL_ID = os.environ.get('PERSONA_GUARDRAIL_ID', '')
-PERSONA_GUARDRAIL_VERSION = os.environ.get('PERSONA_GUARDRAIL_VERSION', '')
-MAX_PERSONA_TEXT_BYTES = 10 * 1024  # 10 KB
-
 
 def _s3_key(user_id, session_id, filename):
     return f"{user_id}/{session_id}/{filename}"
@@ -263,30 +484,38 @@ def get_persona_customization(user_id, session_id):
 # ─── Lambda handler ──────────────────────────────────────────────────────────
 
 def lambda_handler(event, context):
-    """Routes API Gateway requests for persona resolution and customization.
+    """Routes API Gateway requests and internal Lambda invocations.
 
-    Routes:
+    API Gateway routes:
       POST /personas/resolve
-        Body: { "personaIds": ["id1", ...] }
-        Returns resolved best practices, scoring weights, and persona details.
+      GET  /personas/resolve
+      POST /personas/customization
+      GET  /personas/customization
 
-      GET  /personas/resolve?personaIds=id1,id2
-        Same as POST via query string.
-
-      POST /personas/customization?session_id={id}
-        Body: { "text": "..." }
-        Scans text with Bedrock guardrail, saves to S3 if safe.
-
-      GET  /personas/customization?session_id={id}
-        Returns saved persona customization text.
+    Internal Lambda invoke (from post-meeting analytics):
+      { "action": "resolve-prompt", "personaIds": [...], "personaCustomization": "..." }
     """
     print(f"Event: {json.dumps(event)}")
 
+    # ─── Internal Lambda invoke (no httpMethod) ───────────────────────
+    action = event.get('action')
+    if action == 'resolve-prompt':
+        persona_ids = event.get('personaIds', [])
+        persona_customization = event.get('personaCustomization')
+        if not persona_ids:
+            return {'error': 'personaIds is required'}
+        try:
+            result = resolve_persona_prompt(persona_ids, persona_customization)
+            return result
+        except Exception as e:
+            print(f"resolve-prompt failed: {e}")
+            return {'error': str(e)}
+
+    # ─── API Gateway requests ─────────────────────────────────────────
     method = event.get('httpMethod', '')
     if method == 'OPTIONS':
         return api_response(200, {'message': 'OK'})
 
-    # Auth
     claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
     user_id = claims.get('sub')
     if not user_id:
@@ -309,7 +538,6 @@ def lambda_handler(event, context):
         if not persona_ids:
             return api_response(400, {'error': 'personaIds is required'})
 
-        # Fetch all personas
         personas = []
         not_found = []
         for pid in persona_ids:
