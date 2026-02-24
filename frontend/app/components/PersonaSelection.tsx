@@ -219,7 +219,7 @@ export default function PersonaSelection({
             </>
           ) : (
             <>
-              Continue to Content Upload
+              Continue to Review
               <svg
                 width="16"
                 height="16"

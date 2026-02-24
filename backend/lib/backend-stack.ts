@@ -334,6 +334,57 @@ export class AIPresentationCoachStack extends cdk.Stack {
     });
 
     // ──────────────────────────────────────────────
+    // Multi-Persona Resolver Lambda
+    // Resolves single/multi persona configs into merged
+    // best practices & scoring weights. Also handles
+    // persona customization text upload/read with S3.
+    // ──────────────────────────────────────────────
+    const multiPersonaResolverLambda = new lambda.Function(this, 'MultiPersonaResolverLambda', {
+      runtime: lambda.Runtime.PYTHON_3_13,
+      handler: 'index.lambda_handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'multi-persona-resolver')),
+      timeout: cdk.Duration.seconds(20),
+      role: new iam.Role(this, 'MultiPersonaResolverLambdaRole', {
+        assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+        managedPolicies: [
+          iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+        ],
+      }),
+      environment: {
+        'PERSONA_TABLE_NAME': personasTable.tableName,
+        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
+      },
+    });
+
+    // Grant DynamoDB read access (resolve personas by ID)
+    personasTable.grantReadData(multiPersonaResolverLambda);
+
+    // Grant S3 read/write for persona customization text
+    presentationAndSessionUploadsBucket.grantReadWrite(multiPersonaResolverLambda);
+
+    // /personas/resolve resource
+    const personaResolveResource = personas_resource.addResource('resolve');
+    personaResolveResource.addMethod('GET', new apigateway.LambdaIntegration(multiPersonaResolverLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
+    });
+    personaResolveResource.addMethod('POST', new apigateway.LambdaIntegration(multiPersonaResolverLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
+    });
+
+    // /personas/customization resource
+    const personaCustomizationResource = personas_resource.addResource('customization');
+    personaCustomizationResource.addMethod('GET', new apigateway.LambdaIntegration(multiPersonaResolverLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
+    });
+    personaCustomizationResource.addMethod('POST', new apigateway.LambdaIntegration(multiPersonaResolverLambda), {
+      authorizer,
+      authorizationType: apigateway.AuthorizationType.COGNITO,
+    });
+
+    // ──────────────────────────────────────────────
     // Post-Meeting Analytics Lambda
     // ──────────────────────────────────────────────
 
@@ -455,6 +506,17 @@ export class AIPresentationCoachStack extends cdk.Stack {
       resources: [personaCustomizationGuardrail.attrGuardrailArn],
     }));
 
+    // Pass guardrail identifiers to the multi-persona-resolver Lambda
+    multiPersonaResolverLambda.addEnvironment('PERSONA_GUARDRAIL_ID', personaCustomizationGuardrail.attrGuardrailId);
+    multiPersonaResolverLambda.addEnvironment('PERSONA_GUARDRAIL_VERSION', personaGuardrailVersion.attrVersion);
+
+    // Grant the multi-persona-resolver Lambda permission to invoke the guardrail
+    multiPersonaResolverLambda.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['bedrock:ApplyGuardrail'],
+      resources: [personaCustomizationGuardrail.attrGuardrailArn],
+    }));
+
     // ──────────────────────────────────────────────
     // Expose values for cross-stack references
     // ──────────────────────────────────────────────
@@ -508,6 +570,9 @@ export class AIPresentationCoachStack extends cdk.Stack {
     NagSuppressions.addResourceSuppressions(personaCrudLambda.role!, [
       { id: 'AwsSolutions-IAM4', reason: 'AWSLambdaBasicExecutionRole is the standard AWS managed policy required for CloudWatch Logs integration.', appliesTo: ['Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'] },
     ]);
+    NagSuppressions.addResourceSuppressions(multiPersonaResolverLambda.role!, [
+      { id: 'AwsSolutions-IAM4', reason: 'AWSLambdaBasicExecutionRole is the standard AWS managed policy required for CloudWatch Logs integration.', appliesTo: ['Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'] },
+    ]);
     NagSuppressions.addResourceSuppressions(postMeetingAnalyticsLambda.role!, [
       { id: 'AwsSolutions-IAM4', reason: 'AWSLambdaBasicExecutionRole is the standard AWS managed policy required for CloudWatch Logs integration.', appliesTo: ['Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'] },
     ]);
@@ -520,6 +585,9 @@ export class AIPresentationCoachStack extends cdk.Stack {
       { id: 'AwsSolutions-L1', reason: 'Python 3.13 is the latest stable Lambda runtime. Python 3.14 is not yet generally available.' },
     ]);
     NagSuppressions.addResourceSuppressions(personaCrudLambda, [
+      { id: 'AwsSolutions-L1', reason: 'Python 3.13 is the latest stable Lambda runtime. Python 3.14 is not yet generally available.' },
+    ]);
+    NagSuppressions.addResourceSuppressions(multiPersonaResolverLambda, [
       { id: 'AwsSolutions-L1', reason: 'Python 3.13 is the latest stable Lambda runtime. Python 3.14 is not yet generally available.' },
     ]);
     NagSuppressions.addResourceSuppressions(postMeetingAnalyticsLambda, [
@@ -536,6 +604,11 @@ export class AIPresentationCoachStack extends cdk.Stack {
       { id: 'AwsSolutions-IAM5', reason: 'Resource wildcard is scoped to objects within the uploads bucket via CDK grantReadWrite().', appliesTo: ['Resource::<AIPresentationCoachPresentationsVideos1B0D776E.Arn>/*'] },
       { id: 'AwsSolutions-IAM5', reason: 'DynamoDB read actions require wildcard for table indexes.', appliesTo: ['Action::dynamodb:BatchGet*', 'Action::dynamodb:DescribeStream', 'Action::dynamodb:DescribeTable', 'Action::dynamodb:Get*', 'Action::dynamodb:Query', 'Action::dynamodb:Scan'] },
       { id: 'AwsSolutions-IAM5', reason: 'Bedrock InvokeModel wildcard allows easy model switching for analytics feedback generation. Cross-region inference profiles route to multiple regions.', appliesTo: ['Resource::arn:aws:bedrock:*::foundation-model/*', `Resource::arn:aws:bedrock:*:<AWS::AccountId>:inference-profile/*`] },
+    ], true);
+    NagSuppressions.addResourceSuppressions(multiPersonaResolverLambda.role!, [
+      { id: 'AwsSolutions-IAM5', reason: 'Wildcard S3 actions generated by CDK grantReadWrite(), scoped to the uploads bucket for persona customization text.', appliesTo: ['Action::s3:Abort*', 'Action::s3:DeleteObject*', 'Action::s3:GetBucket*', 'Action::s3:GetObject*', 'Action::s3:List*'] },
+      { id: 'AwsSolutions-IAM5', reason: 'Resource wildcard is scoped to objects within the uploads bucket via CDK grantReadWrite().', appliesTo: ['Resource::<AIPresentationCoachPresentationsVideos1B0D776E.Arn>/*'] },
+      { id: 'AwsSolutions-IAM5', reason: 'DynamoDB read actions require wildcard for table indexes.', appliesTo: ['Action::dynamodb:BatchGet*', 'Action::dynamodb:DescribeStream', 'Action::dynamodb:DescribeTable', 'Action::dynamodb:Get*', 'Action::dynamodb:Query', 'Action::dynamodb:Scan'] },
     ], true);
 
     // AwsSolutions-IAM5: Transcribe streaming APIs do not support resource-level permissions; wildcard is required

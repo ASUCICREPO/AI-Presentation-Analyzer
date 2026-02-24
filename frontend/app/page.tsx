@@ -4,6 +4,7 @@ import { useState, useRef, useCallback } from 'react';
 import { useAuth } from './context/AuthContext';
 import Header from './components/Header';
 import PersonaSelection from './components/PersonaSelection';
+import PersonaConfirmation from './components/PersonaConfirmation';
 import UploadContent from './components/UploadContent';
 import PracticeSession from './components/PracticeSession';
 import QASession from './components/QASession';
@@ -73,49 +74,67 @@ export default function Home() {
     setSelectedPersonas(ids);
   };
 
-  const handleContinueToUpload = () => {
+  // Step 1 → Step 2 (Persona Selection → Confirm Setup)
+  const handleContinueToConfirm = () => {
     if (selectedPersonas.length > 0) {
       setCurrentStep(2);
       window.scrollTo({ top: 0 });
     }
   };
 
+  // Step 2 → Step 1 (Confirm Setup → Persona Selection)
   const handleBackToPersona = () => {
     setCurrentStep(1);
     window.scrollTo({ top: 0 });
   };
 
-  const handleContinueFromUpload = () => {
+  // Step 2 → Step 3 (Confirm Setup → Upload Content)
+  const handleContinueToUpload = () => {
     setCurrentStep(3);
     window.scrollTo({ top: 0 });
   };
 
-  const handleBackToUpload = () => {
-    if (currentStep === 3) {
-      setPendingStep(2);
-      setIsModalOpen(true);
-      return;
-    }
+  // Step 3 → Step 2 (Upload Content → Confirm Setup)
+  const handleBackToConfirm = () => {
     setCurrentStep(2);
     window.scrollTo({ top: 0 });
   };
 
-  const handlePracticeComplete = (data: SessionAnalytics, promise: Promise<AIFeedbackResponse | null>) => {
-    setSessionData(data);
-    analyticsPromiseRef.current = promise;
+  // Step 3 → Step 4 (Upload Content → Practice & Record)
+  const handleContinueFromUpload = () => {
     setCurrentStep(4);
     window.scrollTo({ top: 0 });
   };
 
+  // Step 4 → Step 3 (Practice → Upload)
+  const handleBackToUpload = () => {
+    if (currentStep === 4) {
+      setPendingStep(3);
+      setIsModalOpen(true);
+      return;
+    }
+    setCurrentStep(3);
+    window.scrollTo({ top: 0 });
+  };
+
+  // Step 4 → Step 5 (Practice complete → Q&A)
+  const handlePracticeComplete = (data: SessionAnalytics, promise: Promise<AIFeedbackResponse | null>) => {
+    setSessionData(data);
+    analyticsPromiseRef.current = promise;
+    setCurrentStep(5);
+    window.scrollTo({ top: 0 });
+  };
+
+  // Step 5 → Step 4 (Q&A → Practice)
   const handleBackToPractice = () => {
-    setPendingStep(3);
+    setPendingStep(4);
     setIsModalOpen(true);
   };
 
   const resolveAnalyticsAndShow = useCallback(async () => {
     setIsWaitingForAnalytics(true);
     setProcessingPhase(0);
-    setCurrentStep(5);
+    setCurrentStep(6);
     window.scrollTo({ top: 0 });
 
     const phaseTimer1 = setTimeout(() => setProcessingPhase(1), 2_000);
@@ -172,9 +191,10 @@ export default function Home() {
     if (step > currentStep) {
       if (step === 2 && selectedPersonas.length === 0) return;
       if (step === 3 && currentStep < 2) return;
+      if (step === 4 && currentStep < 3) return;
     }
 
-    if (currentStep === 3 && step !== 3) {
+    if (currentStep === 4 && step !== 4) {
       setPendingStep(step);
       setIsModalOpen(true);
       return;
@@ -247,17 +267,26 @@ export default function Home() {
             customNotes={customNotes}
             onCustomNotesChange={setCustomNotes}
             sessionId={sessionId}
-            onContinue={handleContinueToUpload}
+            onContinue={handleContinueToConfirm}
           />
         )}
 
         {currentStep === 2 && (
+          <PersonaConfirmation
+            personas={selectedPersonaData}
+            customNotes={customNotes}
+            onConfirm={handleContinueToUpload}
+            onBack={handleBackToPersona}
+          />
+        )}
+
+        {currentStep === 3 && (
           <UploadContent
             personaName={selectedPersonaName}
             sessionId={sessionId}
             initialFileName={uploadedFileName}
             initialUploaded={pdfUploaded}
-            onBack={handleBackToPersona}
+            onBack={handleBackToConfirm}
             onContinue={handleContinueFromUpload}
             onPdfUploaded={(fileName) => {
               setPdfUploaded(true);
@@ -266,7 +295,7 @@ export default function Home() {
           />
         )}
 
-        {currentStep === 3 && (
+        {currentStep === 4 && (
           <PracticeSession
             personaTitle={selectedPersonaName}
             personaId={selectedPersonas[0] ?? ''}
@@ -281,7 +310,7 @@ export default function Home() {
           />
         )}
 
-        {currentStep === 4 && (
+        {currentStep === 5 && (
           <QASession
             personaId={selectedPersonas[0] || ''}
             personaName={selectedPersonaName}
@@ -293,7 +322,7 @@ export default function Home() {
           />
         )}
 
-        {currentStep === 5 && isWaitingForAnalytics && (
+        {currentStep === 6 && isWaitingForAnalytics && (
           <div className="flex min-h-[70vh] items-center justify-center px-4">
             <div className="mx-auto max-w-md text-center">
               <div className="relative mx-auto mb-8 h-24 w-24">
@@ -330,7 +359,7 @@ export default function Home() {
           </div>
         )}
 
-        {currentStep === 5 && !isWaitingForAnalytics && sessionData && (
+        {currentStep === 6 && !isWaitingForAnalytics && sessionData && (
           <ReviewAnalytics
             sessionData={sessionData}
             aiFeedback={aiFeedback}
@@ -340,7 +369,7 @@ export default function Home() {
           />
         )}
 
-        {currentStep === 5 && !isWaitingForAnalytics && !sessionData && (
+        {currentStep === 6 && !isWaitingForAnalytics && !sessionData && (
           <div className="flex min-h-[60vh] items-center justify-center">
             <div className="text-center">
               <h2 className="text-2xl font-bold text-gray-900 font-serif">Review Analytics</h2>
