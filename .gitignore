@@ -57,8 +57,6 @@ yarn-error.log*
 # Vercel
 .vercel
 
-.deploy.sh
-
 #Agentic IDEs
 .claude
 
