@@ -22,7 +22,10 @@ import {
   Clock,
   Play,
   RotateCcw,
+  Loader2,
 } from 'lucide-react';
+import { pdf } from '@react-pdf/renderer';
+import { ReportDocument } from './ReportPDF';
 
 import { CustomVideoPlayer, CustomVideoPlayerHandle } from './CustomVideoPlayer';
 
@@ -38,7 +41,6 @@ interface ReviewAnalyticsProps {
   sessionData: SessionAnalytics;
   aiFeedback: AIFeedbackResponse | null;
   personas: Persona[];
-  onDownload: () => void;
   onBackToStart: () => void;
 }
 
@@ -122,11 +124,12 @@ function MetricBar({ value, max, color }: { value: number; max: number; color: s
   );
 }
 
-export default function ReviewAnalytics({ sessionData, aiFeedback, personas, onDownload, onBackToStart }: ReviewAnalyticsProps) {
+export default function ReviewAnalytics({ sessionData, aiFeedback, personas, onBackToStart }: ReviewAnalyticsProps) {
   const { windows } = sessionData;
   const [showWindows, setShowWindows] = useState(false);
   const [dismissedBanner, setDismissedBanner] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [isPdfLoading, setIsPdfLoading] = useState(false);
   const videoRef = useRef<CustomVideoPlayerHandle>(null);
 
   // Fetch video playback URL on mount
@@ -197,6 +200,34 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, personas, onD
     ?? (aiFeedback?.persona ? [aiFeedback.persona] : []);
   const feedbackPersonaLabel = feedbackPersonas.map((p: { title: string }) => p.title).join(' & ');
 
+  const handleDownloadPdf = async () => {
+    if (isPdfLoading) return;
+    setIsPdfLoading(true);
+    try {
+      const blob = await pdf(
+        <ReportDocument
+          sessionData={sessionData}
+          aiFeedback={aiFeedback}
+          stats={stats}
+          overallScore={overallScore}
+          feedbackPersonaLabel={feedbackPersonaLabel}
+          bp={bp}
+          BEST_PRACTICES={BEST_PRACTICES}
+        />
+      ).toBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `presentation_report_${sessionData.sessionId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsPdfLoading(false);
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6">
       {/* No-AI Banner */}
@@ -231,11 +262,14 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, personas, onD
         </div>
         <div className="flex gap-3">
           <button
-            onClick={onDownload}
-            className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50 transition-colors"
+            onClick={handleDownloadPdf}
+            disabled={isPdfLoading}
+            className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
           >
-            <Download className="h-4 w-4" />
-            Download JSON
+            {isPdfLoading
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Download className="h-4 w-4" />}
+            {isPdfLoading ? 'Generating PDF...' : 'Download PDF'}
           </button>
           <button
             onClick={onBackToStart}
