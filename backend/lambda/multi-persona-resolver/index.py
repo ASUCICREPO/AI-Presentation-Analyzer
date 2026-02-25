@@ -435,20 +435,6 @@ def lambda_handler(event, context):
         if not custom_persona or not isinstance(custom_persona, dict):
             return api_response(400, {'error': 'customPersona object is required'})
 
-        # Run guardrail on the persona's text content
-        scannable = ' '.join(filter(None, [
-            custom_persona.get('description', ''),
-            custom_persona.get('personaPrompt', ''),
-            custom_persona.get('communicationStyle', ''),
-        ]))
-        if scannable.strip():
-            scan_result = scan_persona_text(scannable)
-            if not scan_result['allowed']:
-                return api_response(400, {
-                    'message': scan_result['message'],
-                    'rejected': True,
-                })
-
         # Save to S3
         key = _s3_key(user_id, session_id, 'CUSTOM_PERSONA.json')
         try:
