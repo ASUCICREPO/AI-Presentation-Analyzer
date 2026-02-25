@@ -6,7 +6,7 @@ interface PersonaCardProps {
   name: string;
   expertise: string;
   keyPriorities: string[];
-  attentionSpan: string;
+  presentationTime: string;
   communicationStyle: string;
   isSelected: boolean;
   onSelect: () => void;
@@ -16,7 +16,7 @@ export default function PersonaCard({
   name,
   expertise,
   keyPriorities,
-  attentionSpan,
+  presentationTime,
   communicationStyle,
   isSelected,
   onSelect,
@@ -117,7 +117,7 @@ export default function PersonaCard({
           </ul>
         </div>
 
-        {/* Attention Span */}
+        {/* Presentation Time */}
         <div>
           <div className="mb-2 flex items-center gap-2 2xl:mb-3">
             <svg
@@ -132,9 +132,9 @@ export default function PersonaCard({
                 fill="currentColor"
               />
             </svg>
-            <span className="text-sm font-medium text-gray-600 2xl:text-lg font-sans">Attention Span</span>
+            <span className="text-sm font-medium text-gray-600 2xl:text-lg font-sans">Presentation Time</span>
           </div>
-          <p className="pl-6 text-sm text-gray-500 2xl:text-lg 2xl:pl-7 font-sans">{attentionSpan}</p>
+          <p className="pl-6 text-sm text-gray-500 2xl:text-lg 2xl:pl-7 font-sans">{presentationTime}</p>
         </div>
       </div>
 

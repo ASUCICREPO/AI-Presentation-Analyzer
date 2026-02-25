@@ -4,7 +4,7 @@ import { useState, useRef, useCallback } from 'react';
 import { useAuth } from './context/AuthContext';
 import Header from './components/Header';
 import PersonaSelection from './components/PersonaSelection';
-import PersonaConfirmation from './components/PersonaConfirmation';
+import CustomPersonaModal from './components/CustomPersonaModal';
 import UploadContent from './components/UploadContent';
 import PracticeSession from './components/PracticeSession';
 import QASession from './components/QASession';
@@ -14,7 +14,7 @@ import LoginPage from './components/LoginPage';
 import SignUpPage from './components/SignUpPage';
 import ConfirmSignUpPage from './components/ConfirmSignUpPage';
 import { SessionAnalytics } from './hooks/useSessionAnalytics';
-import { AIFeedbackResponse } from './services/api';
+import { AIFeedbackResponse, resolvePersonas, confirmCustomPersona } from './services/api';
 import { generateSessionId, Persona } from './config/config';
 import { Loader2 } from 'lucide-react';
 
@@ -35,7 +35,7 @@ export default function Home() {
   const [authView, setAuthView] = useState<AuthView>('login');
   const [confirmEmail, setConfirmEmail] = useState('');
 
-  // App state
+  // App state — Steps: 1=Persona, 2=Upload, 3=Practice, 4=Q&A, 5=Review
   const [currentStep, setCurrentStep] = useState(1);
   const [selectedPersonas, setSelectedPersonas] = useState<string[]>([]);
   const [selectedPersonaName, setSelectedPersonaName] = useState<string>('');
@@ -47,6 +47,13 @@ export default function Home() {
   const [sessionId, setSessionId] = useState<string>(generateSessionId);
   const [sessionData, setSessionData] = useState<SessionAnalytics | null>(null);
   const [aiFeedback, setAiFeedback] = useState<AIFeedbackResponse | null>(null);
+
+  // Custom persona modal state
+  const [showPersonaModal, setShowPersonaModal] = useState(false);
+  const [isGeneratingPersona, setIsGeneratingPersona] = useState(false);
+  const [generatedPersona, setGeneratedPersona] = useState<Persona | null>(null);
+  const [personaModalError, setPersonaModalError] = useState<string | null>(null);
+  const [hasCustomPersona, setHasCustomPersona] = useState(false);
 
   // Background analytics tracking
   const analyticsPromiseRef = useRef<Promise<AIFeedbackResponse | null> | null>(null);
@@ -74,67 +81,109 @@ export default function Home() {
     setSelectedPersonas(ids);
   };
 
-  // Step 1 → Step 2 (Persona Selection → Confirm Setup)
-  const handleContinueToConfirm = () => {
-    if (selectedPersonas.length > 0) {
+  // Step 1 → generate custom persona or go straight to upload
+  const handleContinueFromPersona = async () => {
+    if (selectedPersonas.length === 0) return;
+
+    const hasNotes = customNotes.trim().length > 0;
+    const isMulti = selectedPersonas.length > 1;
+
+    if (!isMulti && !hasNotes) {
+      // Single persona, no notes — skip AI, go to upload
+      setHasCustomPersona(false);
       setCurrentStep(2);
       window.scrollTo({ top: 0 });
+      return;
+    }
+
+    // Multiple personas or notes — generate via AI
+    setShowPersonaModal(true);
+    setIsGeneratingPersona(true);
+    setGeneratedPersona(null);
+    setPersonaModalError(null);
+
+    try {
+      const result = await resolvePersonas(selectedPersonas, customNotes.trim() || undefined);
+      setGeneratedPersona(result.customPersona);
+      // Update name/time limit from generated persona
+      setSelectedPersonaName(result.customPersona.name ?? '');
+      if (result.customPersona.timeLimitSec) {
+        setSelectedPersonaTimeLimit(result.customPersona.timeLimitSec);
+      }
+    } catch (err) {
+      setPersonaModalError(err instanceof Error ? err.message : 'Failed to generate persona');
+    } finally {
+      setIsGeneratingPersona(false);
     }
   };
 
-  // Step 2 → Step 1 (Confirm Setup → Persona Selection)
+  // User confirms the generated persona — save to S3 and advance
+  const handleConfirmPersona = async () => {
+    if (!generatedPersona) return;
+
+    setIsGeneratingPersona(true);
+    try {
+      await confirmCustomPersona(sessionId, generatedPersona);
+      setHasCustomPersona(true);
+      setSelectedPersonaData([generatedPersona]);
+      setShowPersonaModal(false);
+      setCurrentStep(2);
+      window.scrollTo({ top: 0 });
+    } catch (err) {
+      setPersonaModalError(err instanceof Error ? err.message : 'Failed to save persona');
+    } finally {
+      setIsGeneratingPersona(false);
+    }
+  };
+
+  // User wants to change selection — close modal, stay on step 1
+  const handleChangeSelection = () => {
+    setShowPersonaModal(false);
+    setGeneratedPersona(null);
+    setPersonaModalError(null);
+  };
+
+  // Step 2 → Step 1 (Upload → Persona Selection)
   const handleBackToPersona = () => {
     setCurrentStep(1);
     window.scrollTo({ top: 0 });
   };
 
-  // Step 2 → Step 3 (Confirm Setup → Upload Content)
-  const handleContinueToUpload = () => {
+  // Step 2 → Step 3 (Upload → Practice)
+  const handleContinueFromUpload = () => {
     setCurrentStep(3);
     window.scrollTo({ top: 0 });
   };
 
-  // Step 3 → Step 2 (Upload Content → Confirm Setup)
-  const handleBackToConfirm = () => {
+  // Step 3 → Step 2 (Practice → Upload)
+  const handleBackToUpload = () => {
+    if (currentStep === 3) {
+      setPendingStep(2);
+      setIsModalOpen(true);
+      return;
+    }
     setCurrentStep(2);
     window.scrollTo({ top: 0 });
   };
 
-  // Step 3 → Step 4 (Upload Content → Practice & Record)
-  const handleContinueFromUpload = () => {
+  // Step 3 → Step 4 (Practice complete → Q&A)
+  const handlePracticeComplete = (data: SessionAnalytics, promise: Promise<AIFeedbackResponse | null>) => {
+    setSessionData(data);
+    analyticsPromiseRef.current = promise;
     setCurrentStep(4);
     window.scrollTo({ top: 0 });
   };
 
-  // Step 4 → Step 3 (Practice → Upload)
-  const handleBackToUpload = () => {
-    if (currentStep === 4) {
-      setPendingStep(3);
-      setIsModalOpen(true);
-      return;
-    }
-    setCurrentStep(3);
-    window.scrollTo({ top: 0 });
-  };
-
-  // Step 4 → Step 5 (Practice complete → Q&A)
-  const handlePracticeComplete = (data: SessionAnalytics, promise: Promise<AIFeedbackResponse | null>) => {
-    setSessionData(data);
-    analyticsPromiseRef.current = promise;
-    setCurrentStep(5);
-    window.scrollTo({ top: 0 });
-  };
-
-  // Step 5 → Step 4 (Q&A → Practice)
+  // Step 4 → Step 3 (Q&A → Practice)
   const handleBackToPractice = () => {
-    setPendingStep(4);
+    setPendingStep(3);
     setIsModalOpen(true);
   };
 
   const resolveAnalyticsAndShow = useCallback(async () => {
     setIsWaitingForAnalytics(true);
     setProcessingPhase(0);
-    setCurrentStep(6);
+    setCurrentStep(5);
     window.scrollTo({ top: 0 });
 
     const phaseTimer1 = setTimeout(() => setProcessingPhase(1), 2_000);
@@ -178,12 +227,16 @@ export default function Home() {
   const handleBackToStart = () => {
     setCurrentStep(1);
     setSelectedPersonas([]);
+    setSelectedPersonaData([]);
     setSessionData(null);
     setAiFeedback(null);
+    setGeneratedPersona(null);
+    setHasCustomPersona(false);
     analyticsPromiseRef.current = null;
     setSessionId(generateSessionId());
     setPdfUploaded(false);
     setUploadedFileName(null);
+    setCustomNotes('');
     window.scrollTo({ top: 0 });
   };
 
@@ -191,10 +244,9 @@ export default function Home() {
     if (step > currentStep) {
       if (step === 2 && selectedPersonas.length === 0) return;
       if (step === 3 && currentStep < 2) return;
-      if (step === 4 && currentStep < 3) return;
     }
 
-    if (currentStep === 4 && step !== 4) {
+    if (currentStep === 3 && step !== 3) {
       setPendingStep(step);
       setIsModalOpen(true);
       return;
@@ -267,26 +319,17 @@ export default function Home() {
             customNotes={customNotes}
             onCustomNotesChange={setCustomNotes}
             sessionId={sessionId}
-            onContinue={handleContinueToConfirm}
+            onContinue={handleContinueFromPersona}
           />
         )}
 
         {currentStep === 2 && (
-          <PersonaConfirmation
-            personas={selectedPersonaData}
-            customNotes={customNotes}
-            onConfirm={handleContinueToUpload}
-            onBack={handleBackToPersona}
-          />
-        )}
-
-        {currentStep === 3 && (
           <UploadContent
             personaName={selectedPersonaName}
             sessionId={sessionId}
             initialFileName={uploadedFileName}
             initialUploaded={pdfUploaded}
-            onBack={handleBackToConfirm}
+            onBack={handleBackToPersona}
             onContinue={handleContinueFromUpload}
             onPdfUploaded={(fileName) => {
               setPdfUploaded(true);
@@ -295,22 +338,21 @@ export default function Home() {
           />
         )}
 
-        {currentStep === 4 && (
+        {currentStep === 3 && (
           <PracticeSession
             personaTitle={selectedPersonaName}
             personaId={selectedPersonas[0] ?? ''}
-            personaIds={selectedPersonas}
             sessionId={sessionId}
             timeLimitSec={selectedPersonaTimeLimit}
             hasPresentationPdf={pdfUploaded}
-            hasPersonaCustomization={customNotes.trim().length > 0}
+            hasCustomPersona={hasCustomPersona}
             onBack={handleBackToUpload}
             onComplete={handlePracticeComplete}
             exitSessionRef={exitSessionRef}
           />
         )}
 
-        {currentStep === 5 && (
+        {currentStep === 4 && (
           <QASession
             personaId={selectedPersonas[0] || ''}
             personaName={selectedPersonaName}
@@ -322,7 +364,7 @@ export default function Home() {
           />
         )}
 
-        {currentStep === 6 && isWaitingForAnalytics && (
+        {currentStep === 5 && isWaitingForAnalytics && (
           <div className="flex min-h-[70vh] items-center justify-center px-4">
             <div className="mx-auto max-w-md text-center">
               <div className="relative mx-auto mb-8 h-24 w-24">
@@ -359,7 +401,7 @@ export default function Home() {
           </div>
         )}
 
-        {currentStep === 6 && !isWaitingForAnalytics && sessionData && (
+        {currentStep === 5 && !isWaitingForAnalytics && sessionData && (
           <ReviewAnalytics
             sessionData={sessionData}
             aiFeedback={aiFeedback}
@@ -369,7 +411,7 @@ export default function Home() {
           />
         )}
 
-        {currentStep === 6 && !isWaitingForAnalytics && !sessionData && (
+        {currentStep === 5 && !isWaitingForAnalytics && !sessionData && (
           <div className="flex min-h-[60vh] items-center justify-center">
             <div className="text-center">
               <h2 className="text-2xl font-bold text-gray-900 font-serif">Review Analytics</h2>
@@ -378,6 +420,16 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {/* Custom Persona Generation Modal */}
+      <CustomPersonaModal
+        isOpen={showPersonaModal}
+        isLoading={isGeneratingPersona}
+        persona={generatedPersona}
+        error={personaModalError}
+        onConfirm={handleConfirmPersona}
+        onChangeSelection={handleChangeSelection}
+      />
 
       {/* Confirmation Modal */}
       <ConfirmationModal

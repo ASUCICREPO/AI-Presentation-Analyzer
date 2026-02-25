@@ -58,7 +58,7 @@ export interface Persona {
   personaPrompt?: string;
   expertise: string;
   keyPriorities: string[];
-  attentionSpan: string;
+  presentationTime: string;
   communicationStyle: string;
   timeLimitSec?: number;
   bestPractices?: PersonaBestPractices;
@@ -68,22 +68,7 @@ export interface Persona {
 /** Fallback when a persona has no timeLimitSec set */
 export const DEFAULT_TIME_LIMIT_SEC = 15 * 60; // 15 minutes
 
-/** Generic defaults used when a persona has no bestPractices set.
- *
- * Sources:
- *  - WPM: 140-160 is the recommended range for professional presentations
- *    (Quantified Communications; The Speaker Lab). Research shows comprehension
- *    is unaffected within 130-190 wpm (Presentation Rate in Comprehension,
- *    Perceptual & Motor Skills, 2001).
- *  - Eye contact: 3.2s average preferred gaze duration per person (Vision
- *    Sciences Society, 2015). For a seated audience, maintaining gaze toward
- *    the camera/audience ~60-70% of the time is considered engaged delivery.
- *  - Filler words: Average speakers use ~5 fillers/min; optimal is ≤1/min
- *    (Quantified Communications). Per 30-second window ≤3 is a strong target.
- *  - Pauses: Deliberate 2-3s pauses after major points increased recall from
- *    42% to 71% (Maptive/SpeakingTimeCalculator). Avg speaker uses ~3.5
- *    pauses/min; great speakers use more. ≥4 per 30s window ≈ 8/min.
- */
+/** Generic defaults used when a persona has no bestPractices set. */
 export const DEFAULT_BEST_PRACTICES: PersonaBestPractices = {
   wpm: { min: 140, max: 160 },
   eyeContact: { min: 60 },
@@ -99,83 +84,6 @@ export const DEFAULT_SCORING_WEIGHTS: PersonaScoringWeights = {
   pauses: 0.25,
 };
 
-/** Compute median best practices from multiple personas.
- *  For each threshold, collects values from all personas that define it
- *  and returns the median. Falls back to defaults when no persona defines a field. */
-export function medianBestPractices(personas: Persona[]): PersonaBestPractices {
-  if (personas.length === 0) return DEFAULT_BEST_PRACTICES;
-  if (personas.length === 1) {
-    return personas[0].bestPractices
-      ? { ...DEFAULT_BEST_PRACTICES, ...personas[0].bestPractices }
-      : DEFAULT_BEST_PRACTICES;
-  }
-
-  const median = (vals: number[]) => {
-    if (vals.length === 0) return undefined;
-    const s = [...vals].sort((a, b) => a - b);
-    const mid = Math.floor(s.length / 2);
-    return s.length % 2 !== 0 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2);
-  };
-
-  const collect = (key: keyof PersonaBestPractices, sub: string) =>
-    personas
-      .map((p) => (p.bestPractices as Record<string, Record<string, number>> | undefined)?.[key]?.[sub])
-      .filter((v): v is number => typeof v === 'number');
-
-  return {
-    wpm: {
-      min: median(collect('wpm', 'min')) ?? DEFAULT_BEST_PRACTICES.wpm.min,
-      max: median(collect('wpm', 'max')) ?? DEFAULT_BEST_PRACTICES.wpm.max,
-    },
-    eyeContact: {
-      min: median(collect('eyeContact', 'min')) ?? DEFAULT_BEST_PRACTICES.eyeContact.min,
-    },
-    fillerWords: {
-      max: median(collect('fillerWords', 'max')) ?? DEFAULT_BEST_PRACTICES.fillerWords.max,
-    },
-    pauses: {
-      min: median(collect('pauses', 'min')) ?? DEFAULT_BEST_PRACTICES.pauses.min,
-    },
-  };
-}
-
-/** Compute median scoring weights from multiple personas. */
-export function medianScoringWeights(personas: Persona[]): PersonaScoringWeights {
-  if (personas.length === 0) return DEFAULT_SCORING_WEIGHTS;
-  if (personas.length === 1) {
-    return personas[0].scoringWeights
-      ? { ...DEFAULT_SCORING_WEIGHTS, ...personas[0].scoringWeights }
-      : DEFAULT_SCORING_WEIGHTS;
-  }
-
-  const median = (vals: number[]) => {
-    if (vals.length === 0) return undefined;
-    const s = [...vals].sort((a, b) => a - b);
-    const mid = Math.floor(s.length / 2);
-    return s.length % 2 !== 0 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-  };
-
-  const collect = (key: keyof PersonaScoringWeights) =>
-    personas.map((p) => p.scoringWeights?.[key]).filter((v): v is number => typeof v === 'number');
-
-  const raw = {
-    pace: median(collect('pace')) ?? DEFAULT_SCORING_WEIGHTS.pace,
-    eyeContact: median(collect('eyeContact')) ?? DEFAULT_SCORING_WEIGHTS.eyeContact,
-    fillerWords: median(collect('fillerWords')) ?? DEFAULT_SCORING_WEIGHTS.fillerWords,
-    pauses: median(collect('pauses')) ?? DEFAULT_SCORING_WEIGHTS.pauses,
-  };
-
-  // Normalize to sum to 1.0
-  const total = raw.pace + raw.eyeContact + raw.fillerWords + raw.pauses;
-  if (total === 0) return DEFAULT_SCORING_WEIGHTS;
-  return {
-    pace: raw.pace / total,
-    eyeContact: raw.eyeContact / total,
-    fillerWords: raw.fillerWords / total,
-    pauses: raw.pauses / total,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Session
 // ---------------------------------------------------------------------------
@@ -185,22 +93,13 @@ export function generateSessionId(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Persona Customization
-// ---------------------------------------------------------------------------
-export const PERSONA_CUSTOMIZATION = {
-  MAX_WORDS: 500,                         // Max words allowed in custom notes
-  MAX_BYTES: 10 * 1024,                   // 10 KB backend limit
-  S3_FILENAME: 'CUSTOM_PERSONA_INSTRUCTION.txt',
-};
-
-// ---------------------------------------------------------------------------
 // S3 Upload — fixed file names (no UUIDs, overwrites on re-upload)
 // ---------------------------------------------------------------------------
 export const S3_FILENAMES = {
   PRESENTATION: 'presentation.pdf',
   RECORDING: 'recording.webm',
   ANALYTICS: 'analytics.json',
-  PERSONA_CUSTOMIZATION: PERSONA_CUSTOMIZATION.S3_FILENAME,
+  CUSTOM_PERSONA: 'CUSTOM_PERSONA.json',
   TRANSCRIPT: 'transcript.json',
   SESSION_ANALYTICS: 'session_analytics.json',
   DETAILED_METRICS: 'detailed_metrics.json',
@@ -213,7 +112,6 @@ export type S3RequestType =
   | 'ppt'
   | 'session'
   | 'metric_chunk'
-  | 'persona_customization'
   | 'transcript'
   | 'session_analytics'
   | 'detailed_metrics'

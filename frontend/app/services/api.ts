@@ -7,7 +7,6 @@ export interface AIFeedbackResponse {
   status: string;
   sessionId: string;
   persona: { id: string; title: string; description: string };
-  personas?: { id: string; title: string; description: string }[];
   keyRecommendations: { title: string; description: string }[];
   performanceSummary: {
     overallAssessment: string;
@@ -126,74 +125,52 @@ export function uploadFileWithPresignedUrl(
   });
 }
 
+// ─── Persona Resolution (AI-generated custom persona) ────────────────
+
 /**
- * Upload plain text content (e.g. custom persona instructions) using a presigned URL.
+ * Resolve one or more personas into a single unified persona via AI.
+ * If a single persona with no notes, returns it as-is (no AI call).
  */
-export async function uploadTextWithPresignedUrl(
-  text: string,
-  presigned: PresignedUrlResponse,
-): Promise<void> {
-  const formData = new FormData();
-
-  Object.entries(presigned.fields).forEach(([key, value]) => {
-    formData.append(key, value);
-  });
-
-  const blob = new Blob([text], { type: 'text/plain' });
-  formData.append('file', blob);
-
-  const res = await fetch(presigned.presigned_url, {
+export async function resolvePersonas(
+  personaIds: string[],
+  customNotes?: string,
+): Promise<{ customPersona: Persona; generated: boolean }> {
+  const headers = {
+    ...(await authHeaders()),
+    'Content-Type': 'application/json',
+  };
+  const res = await fetch(`${API_BASE_URL}/personas/resolve`, {
     method: 'POST',
-    body: formData,
+    headers,
+    body: JSON.stringify({ personaIds, customNotes: customNotes ?? '' }),
   });
-
-  if (!res.ok && res.status >= 300) {
-    throw new Error('Failed to upload persona customization');
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? 'Failed to resolve personas');
   }
-}
-
-// ─── Persona Customization (read back from S3) ──────────────────────
-
-/**
- * Save persona customization text via the guardrail-gated Lambda route.
- * POST /s3_urls?action=upload_persona&session_id={id}
- */
-export async function savePersonaCustomization(
-  sessionId: string,
-  text: string,
-): Promise<{ message: string; rejected?: boolean }> {
-  const headers = await authHeaders();
-  const res = await fetch(
-    `${API_BASE_URL}/s3_urls?action=upload_persona&session_id=${sessionId}`,
-    {
-      method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    },
-  );
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.message ?? 'Failed to save persona customization');
-  return data;
-}
-
-interface PersonaCustomizationResponse {
-  customization: string | null;
-  exists: boolean;
-}
-
-/**
- * Fetch saved persona customization text for a given session.
- */
-export async function getPersonaCustomization(
-  sessionId: string,
-): Promise<PersonaCustomizationResponse> {
-  const headers = await authHeaders();
-  const res = await fetch(
-    `${API_BASE_URL}/s3_urls?action=get_persona&session_id=${sessionId}`,
-    { headers },
-  );
-  if (!res.ok) throw new Error('Failed to fetch persona customization');
   return res.json();
+}
+
+/**
+ * Confirm and save a custom persona to S3 for the given session.
+ */
+export async function confirmCustomPersona(
+  sessionId: string,
+  customPersona: Persona,
+): Promise<void> {
+  const headers = {
+    ...(await authHeaders()),
+    'Content-Type': 'application/json',
+  };
+  const res = await fetch(`${API_BASE_URL}/personas/resolve/confirm`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ sessionId, customPersona }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.message ?? data.error ?? 'Failed to save custom persona');
+  }
 }
 
 // ─── Multipart Upload (video recording) ──────────────────────────────

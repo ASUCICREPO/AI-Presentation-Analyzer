@@ -9,8 +9,6 @@ export type ManifestStatus = 'in_progress' | 'completed' | 'aborted';
 export interface SessionManifest {
   sessionId: string;
   persona: string;
-  /** Array of all selected persona IDs (multi-persona support) */
-  personas: string[];
   startTime: string;
   endTime?: string;
   status: ManifestStatus;
@@ -22,8 +20,8 @@ export interface SessionManifest {
   duration?: number;
   /** Whether a presentation PDF was uploaded before the session */
   hasPresentationPdf?: boolean;
-  /** Whether persona customization text was provided */
-  hasPersonaCustomization?: boolean;
+  /** Whether an AI-generated custom persona was saved to S3 */
+  hasCustomPersona?: boolean;
 }
 
 /**
@@ -43,24 +41,23 @@ export interface SessionManifest {
  *   await manifest.update({ videoParts: 3 });    // after each video chunk
  *   await manifest.complete(timer);              // on session end
  */
-export function useSessionManifest(sessionId: string, personaId: string, personaIds?: string[]) {
+export function useSessionManifest(sessionId: string, personaId: string) {
   const manifestRef = useRef<SessionManifest | null>(null);
   const flushingRef = useRef(false);
 
   // ─── Create — call once when the session starts ────────────────────
   const create = useCallback(
-    async (opts?: { hasPresentationPdf?: boolean; hasPersonaCustomization?: boolean }) => {
+    async (opts?: { hasPresentationPdf?: boolean; hasCustomPersona?: boolean }) => {
       const now = new Date().toISOString();
       const m: SessionManifest = {
         sessionId,
         persona: personaId,
-        personas: personaIds ?? [personaId],
         startTime: now,
         status: 'in_progress',
         videoParts: 0,
         lastUpdated: now,
         hasPresentationPdf: opts?.hasPresentationPdf ?? false,
-        hasPersonaCustomization: opts?.hasPersonaCustomization ?? false,
+        hasCustomPersona: opts?.hasCustomPersona ?? false,
       };
       manifestRef.current = m;
 
@@ -71,12 +68,12 @@ export function useSessionManifest(sessionId: string, personaId: string, persona
         console.error('[useSessionManifest] Failed to create manifest:', err);
       }
     },
-    [sessionId, personaId, personaIds],
+    [sessionId, personaId],
   );
 
   // ─── Update — merge partial fields and flush to S3 ─────────────────
   const update = useCallback(
-    async (patch: Partial<Pick<SessionManifest, 'videoParts' | 'hasPresentationPdf' | 'hasPersonaCustomization'>>) => {
+    async (patch: Partial<Pick<SessionManifest, 'videoParts' | 'hasPresentationPdf' | 'hasCustomPersona'>>) => {
       if (!manifestRef.current) return;
       // Prevent concurrent flushes from stacking up
       if (flushingRef.current) return;

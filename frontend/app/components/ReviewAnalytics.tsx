@@ -32,8 +32,6 @@ import {
   PersonaScoringWeights,
   DEFAULT_BEST_PRACTICES,
   DEFAULT_SCORING_WEIGHTS,
-  medianBestPractices,
-  medianScoringWeights,
 } from '../config/config';
 
 interface ReviewAnalyticsProps {
@@ -46,12 +44,18 @@ interface ReviewAnalyticsProps {
 
 function resolveBestPractices(personas: Persona[]): PersonaBestPractices {
   if (personas.length === 0) return DEFAULT_BEST_PRACTICES;
-  return medianBestPractices(personas);
+  const p = personas[0];
+  return p.bestPractices
+    ? { ...DEFAULT_BEST_PRACTICES, ...p.bestPractices }
+    : DEFAULT_BEST_PRACTICES;
 }
 
 function resolveScoringWeights(personas: Persona[]): PersonaScoringWeights {
   if (personas.length === 0) return DEFAULT_SCORING_WEIGHTS;
-  return medianScoringWeights(personas);
+  const p = personas[0];
+  return p.scoringWeights
+    ? { ...DEFAULT_SCORING_WEIGHTS, ...p.scoringWeights }
+    : DEFAULT_SCORING_WEIGHTS;
 }
 
 function buildBestPracticeChecks(bp: PersonaBestPractices) {

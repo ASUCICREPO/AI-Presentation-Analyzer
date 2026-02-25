@@ -25,17 +25,16 @@ import TranscriptionPanel from './practice/TranscriptionPanel';
 interface PracticeSessionProps {
   personaTitle: string;
   personaId: string;
-  personaIds?: string[];
   sessionId: string;
   timeLimitSec?: number;
   hasPresentationPdf?: boolean;
-  hasPersonaCustomization?: boolean;
+  hasCustomPersona?: boolean;
   onBack: () => void;
   onComplete: (sessionData: SessionAnalytics, analyticsPromise: Promise<AIFeedbackResponse | null>) => void;
   exitSessionRef?: MutableRefObject<(() => void) | null>;
 }
 
-export default function PracticeSession({ personaTitle, personaId, personaIds, sessionId, timeLimitSec, hasPresentationPdf, hasPersonaCustomization, onBack, onComplete, exitSessionRef }: PracticeSessionProps) {
+export default function PracticeSession({ personaTitle, personaId, sessionId, timeLimitSec, hasPresentationPdf, hasCustomPersona, onBack, onComplete, exitSessionRef }: PracticeSessionProps) {
   // Resolve the effective time cap for this session
   const maxDuration = timeLimitSec ?? DEFAULT_TIME_LIMIT_SEC;
   const [isRecording, setIsRecording] = useState(false);
@@ -103,7 +102,7 @@ export default function PracticeSession({ personaTitle, personaId, personaIds, s
   const stoppingRef = useRef(false);
 
   // Session Manifest Hook (lightweight coordination file in S3)
-  const manifest = useSessionManifest(sessionId, personaId, personaIds);
+  const manifest = useSessionManifest(sessionId, personaId);
 
   // Video Recording Hook (multipart upload) — updates manifest after each chunk
   const videoRecording = useVideoRecording(sessionId, {
@@ -535,7 +534,7 @@ export default function PracticeSession({ personaTitle, personaId, personaIds, s
       // Create session manifest in S3
       manifest.create({
         hasPresentationPdf: hasPresentationPdf ?? false,
-        hasPersonaCustomization: hasPersonaCustomization ?? false,
+        hasCustomPersona: hasCustomPersona ?? false,
       });
 
       // Start both audio analysis and vocal variety in parallel

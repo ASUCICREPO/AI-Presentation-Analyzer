@@ -18,11 +18,10 @@ interface HeaderProps {
 
 const steps: Step[] = [
   { number: 1, label: 'Select Persona' },
-  { number: 2, label: 'Confirm Setup' },
-  { number: 3, label: 'Upload Content' },
-  { number: 4, label: 'Practice & Record' },
-  { number: 5, label: 'Q&A Session' },
-  { number: 6, label: 'Review Analytics' },
+  { number: 2, label: 'Upload Content' },
+  { number: 3, label: 'Practice & Record' },
+  { number: 4, label: 'Q&A Session' },
+  { number: 5, label: 'Review Analytics' },
 ];
 
 export default function Header({ currentStep, onStepClick, sessionId }: HeaderProps) {

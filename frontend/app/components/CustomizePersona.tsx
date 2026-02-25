@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { PERSONA_CUSTOMIZATION } from '../config/config';
+
+const MAX_WORDS = 500;
 
 interface CustomizePersonaProps {
   value: string;
@@ -23,7 +24,7 @@ export default function CustomizePersona({
   const [contentHeight, setContentHeight] = useState(0);
 
   const wordCount = countWords(value);
-  const isOverLimit = wordCount > PERSONA_CUSTOMIZATION.MAX_WORDS;
+  const isOverLimit = wordCount > MAX_WORDS;
 
   useEffect(() => {
     if (contentRef.current) {
@@ -92,7 +93,7 @@ export default function CustomizePersona({
 
           <div className="mt-2.5 flex items-center justify-between 2xl:mt-3">
             <span className={`text-xs font-sans 2xl:text-sm ${isOverLimit ? 'text-red-500 font-medium' : 'text-gray-400'}`}>
-              {wordCount}/{PERSONA_CUSTOMIZATION.MAX_WORDS} words
+              {wordCount}/{MAX_WORDS} words
               {isOverLimit && <span className="ml-1">— please shorten</span>}
             </span>
           </div>

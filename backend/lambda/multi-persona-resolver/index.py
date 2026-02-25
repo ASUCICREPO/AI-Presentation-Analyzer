@@ -1,18 +1,19 @@
 """
-Multi-Persona Resolver Lambda
+Persona Resolver Lambda
 
-Resolves single or multiple persona configurations into a unified set of
-best practices and scoring weights. Used by:
-  - Frontend: to get real-time feedback thresholds for a session
-  - Post-meeting analytics: to evaluate session windows against merged thresholds
+Generates a unified custom persona from one or more selected personas using
+Bedrock AI, and saves the confirmed persona to S3 for downstream consumption
+by the post-meeting analytics Lambda.
 
 Routes:
-  POST /personas/resolve  — resolve one or more personas by ID
-    Body: { "personaIds": ["id1", "id2", ...] }
-    Returns merged best practices (median), scoring weights, and full persona details.
+  POST /personas/resolve
+    Body: { "personaIds": ["id1", ...], "customNotes": "optional" }
+    Returns a single AI-generated persona matching DynamoDB persona structure.
+    If only one persona is selected with no notes, returns it as-is.
 
-  GET  /personas/resolve?personaIds=id1,id2
-    Same as POST but via query string (convenience for simple lookups).
+  POST /personas/resolve/confirm
+    Body: { "sessionId": "...", "customPersona": { ... } }
+    Runs guardrail check, saves persona to S3 as CUSTOM_PERSONA.json.
 """
 
 import json
@@ -22,6 +23,8 @@ from decimal import Decimal
 from botocore.exceptions import ClientError
 
 dynamodb = boto3.resource('dynamodb')
+s3_client = boto3.client('s3')
+bedrock_runtime = boto3.client('bedrock-runtime')
 
 PERSONA_TABLE_NAME = os.environ.get('PERSONA_TABLE_NAME')
 if not PERSONA_TABLE_NAME:
@@ -29,13 +32,111 @@ if not PERSONA_TABLE_NAME:
 
 table = dynamodb.Table(PERSONA_TABLE_NAME)
 
+UPLOADS_BUCKET = os.environ.get('UPLOADS_BUCKET', '')
+PERSONA_GUARDRAIL_ID = os.environ.get('PERSONA_GUARDRAIL_ID', '')
+PERSONA_GUARDRAIL_VERSION = os.environ.get('PERSONA_GUARDRAIL_VERSION', '')
+BEDROCK_MODEL_ID = 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
+
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type,Authorization",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
 }
 
-# ─── Fallback thresholds ─────────────────────────────────────────────────────
+PERSONA_FIELDS = [
+    'name', 'description', 'expertise', 'keyPriorities',
+    'presentationTime', 'communicationStyle', 'personaPrompt',
+    'bestPractices', 'scoringWeights', 'timeLimitSec',
+]
+
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+class _DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, Decimal):
+            return int(o) if o == int(o) else float(o)
+        return super().default(o)
+
+
+def api_response(status_code, body):
+    return {
+        "statusCode": status_code,
+        "headers": CORS_HEADERS,
+        "body": json.dumps(body, cls=_DecimalEncoder),
+    }
+
+
+def decimal_to_float(obj):
+    if isinstance(obj, Decimal):
+        return int(obj) if obj == int(obj) else float(obj)
+    if isinstance(obj, dict):
+        return {k: decimal_to_float(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [decimal_to_float(i) for i in obj]
+    return obj
+
+
+def _s3_key(user_id, session_id, filename):
+    return f"{user_id}/{session_id}/{filename}"
+
+
+# ─── Persona fetching ────────────────────────────────────────────────────────
+
+def get_persona(identifier):
+    """Look up persona by ID, falling back to scan-by-name."""
+    try:
+        item = table.get_item(Key={'personaID': identifier}).get('Item')
+        if item:
+            return decimal_to_float(item)
+    except ClientError as e:
+        print(f"Error fetching persona by ID: {e}")
+
+    try:
+        items = table.scan(
+            FilterExpression='#n = :name',
+            ExpressionAttributeNames={'#n': 'name'},
+            ExpressionAttributeValues={':name': identifier},
+        ).get('Items', [])
+        if items:
+            return decimal_to_float(items[0])
+    except ClientError as e:
+        print(f"Error scanning persona by name: {e}")
+
+    return None
+
+
+# ─── Guardrail ────────────────────────────────────────────────────────────────
+
+def scan_persona_text(text):
+    """Run text through the Bedrock guardrail for safety screening."""
+    if not PERSONA_GUARDRAIL_ID or not PERSONA_GUARDRAIL_VERSION:
+        print("[WARN] Guardrail env vars not set — skipping scan.")
+        return {"allowed": True, "action": "NONE", "message": ""}
+
+    try:
+        response = bedrock_runtime.apply_guardrail(
+            guardrailIdentifier=PERSONA_GUARDRAIL_ID,
+            guardrailVersion=PERSONA_GUARDRAIL_VERSION,
+            source="INPUT",
+            content=[{"text": {"text": text}}],
+        )
+        action = response.get("action", "NONE")
+        if action == "GUARDRAIL_INTERVENED":
+            outputs = response.get("outputs", [])
+            message = outputs[0]["text"] if outputs else (
+                "The persona was rejected by our safety filters."
+            )
+            print("[WARN] Guardrail INTERVENED for persona text.")
+            return {"allowed": False, "action": action, "message": message}
+
+        return {"allowed": True, "action": action, "message": ""}
+    except ClientError as e:
+        print(f"[ERROR] Guardrail scan failed: {e}")
+        return {"allowed": True, "action": "ERROR", "message": ""}
+
+
+# ─── Numeric metric computation (no AI needed) ───────────────────────────────
 
 _FALLBACK_BP = {
     'wpm': {'min': 140, 'max': 160},
@@ -52,65 +153,7 @@ _FALLBACK_WEIGHTS = {
 }
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
-
-def api_response(status_code, body):
-    return {
-        "statusCode": status_code,
-        "headers": CORS_HEADERS,
-        "body": json.dumps(body, cls=_DecimalEncoder),
-    }
-
-
-class _DecimalEncoder(json.JSONEncoder):
-    """Handle Decimal types returned by DynamoDB."""
-    def default(self, o):
-        if isinstance(o, Decimal):
-            return int(o) if o == int(o) else float(o)
-        return super().default(o)
-
-
-def decimal_to_float(obj):
-    """Recursively convert Decimal values to int/float."""
-    if isinstance(obj, Decimal):
-        return int(obj) if obj == int(obj) else float(obj)
-    if isinstance(obj, dict):
-        return {k: decimal_to_float(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [decimal_to_float(i) for i in obj]
-    return obj
-
-
-# ─── Persona fetching ────────────────────────────────────────────────────────
-
-def get_persona(identifier):
-    """Look up persona by ID, falling back to scan-by-name."""
-    try:
-        item = table.get_item(Key={'personaID': identifier}).get('Item')
-        if item:
-            return decimal_to_float(item)
-    except ClientError as e:
-        print(f"Error fetching persona by ID: {e}")
-
-    # Fallback: scan by name for backward compatibility
-    try:
-        items = table.scan(
-            FilterExpression='#n = :name',
-            ExpressionAttributeNames={'#n': 'name'},
-            ExpressionAttributeValues={':name': identifier},
-        ).get('Items', [])
-        if items:
-            return decimal_to_float(items[0])
-    except ClientError as e:
-        print(f"Error scanning persona by name: {e}")
-
-    return None
-
-
-# ─── Resolution logic ────────────────────────────────────────────────────────
-
 def _median(values):
-    """Return the median of a list of numbers."""
     if not values:
         return 0
     s = sorted(values)
@@ -120,32 +163,25 @@ def _median(values):
     return (s[n // 2 - 1] + s[n // 2]) / 2
 
 
-def _resolve_best_practices_single(persona):
-    """Pull bestPractices from a single persona; fall back to defaults per field."""
-    persona_bp = persona.get('bestPractices', {}) if persona else {}
-    resolved = {}
-    for key, default in _FALLBACK_BP.items():
-        if key in persona_bp and isinstance(persona_bp[key], dict):
-            resolved[key] = {**default, **persona_bp[key]}
-        else:
-            resolved[key] = dict(default)
-    return resolved
-
-
-def resolve_best_practices(personas):
-    """Compute median best practices across multiple personas.
-    For each threshold field, collect values from all personas that define it,
-    then take the median. Falls back to defaults when no persona defines a field."""
-    if not personas:
-        return dict(_FALLBACK_BP)
+def _compute_best_practices(personas):
+    """Median best practices across personas, falling back to defaults."""
     if len(personas) == 1:
-        return _resolve_best_practices_single(personas[0])
+        bp = personas[0].get('bestPractices', {})
+        if bp:
+            resolved = {}
+            for key, default in _FALLBACK_BP.items():
+                if key in bp and isinstance(bp[key], dict):
+                    resolved[key] = {**default, **bp[key]}
+                else:
+                    resolved[key] = dict(default)
+            return resolved
+        return dict(_FALLBACK_BP)
 
     resolved = {}
     for key, default in _FALLBACK_BP.items():
-        collected = {}  # sub-key -> list of values
+        collected = {}
         for p in personas:
-            bp = p.get('bestPractices', {}) if p else {}
+            bp = p.get('bestPractices', {}) or {}
             if key in bp and isinstance(bp[key], dict):
                 for sub_key, val in bp[key].items():
                     if isinstance(val, (int, float)):
@@ -159,126 +195,163 @@ def resolve_best_practices(personas):
     return resolved
 
 
-def resolve_scoring_weights(personas):
-    """Compute median scoring weights across multiple personas, normalized to sum to 1.0."""
-    if not personas:
-        return dict(_FALLBACK_WEIGHTS)
+def _compute_scoring_weights(personas):
+    """Median scoring weights across personas, normalized to sum to 1.0."""
     if len(personas) == 1:
         w = personas[0].get('scoringWeights', {})
         if w:
             merged = {**_FALLBACK_WEIGHTS, **w}
-        else:
-            return dict(_FALLBACK_WEIGHTS)
-        total = sum(merged.values())
-        if total == 0:
-            return dict(_FALLBACK_WEIGHTS)
-        return {k: v / total for k, v in merged.items()}
+            total = sum(merged.values())
+            return {k: round(v / total, 2) for k, v in merged.items()} if total else dict(_FALLBACK_WEIGHTS)
+        return dict(_FALLBACK_WEIGHTS)
 
     raw = {}
     for key, default_val in _FALLBACK_WEIGHTS.items():
         values = []
         for p in personas:
-            sw = p.get('scoringWeights', {})
-            if sw and key in sw and isinstance(sw[key], (int, float)):
+            sw = p.get('scoringWeights', {}) or {}
+            if key in sw and isinstance(sw[key], (int, float)):
                 values.append(sw[key])
         raw[key] = _median(values) if values else default_val
 
     total = sum(raw.values())
     if total == 0:
         return dict(_FALLBACK_WEIGHTS)
-    return {k: v / total for k, v in raw.items()}
+    return {k: round(v / total, 2) for k, v in raw.items()}
 
 
-# ─── S3 persona customization ────────────────────────────────────────────────
-
-s3_client = boto3.client('s3')
-bedrock_runtime = boto3.client('bedrock-runtime')
-
-UPLOADS_BUCKET = os.environ.get('UPLOADS_BUCKET', '')
-PERSONA_GUARDRAIL_ID = os.environ.get('PERSONA_GUARDRAIL_ID', '')
-PERSONA_GUARDRAIL_VERSION = os.environ.get('PERSONA_GUARDRAIL_VERSION', '')
-MAX_PERSONA_TEXT_BYTES = 10 * 1024  # 10 KB
+def _compute_time_limit(personas):
+    """Use the minimum timeLimitSec across all personas."""
+    limits = [p.get('timeLimitSec') for p in personas if p.get('timeLimitSec')]
+    return min(limits) if limits else None
 
 
-def _s3_key(user_id, session_id, filename):
-    return f"{user_id}/{session_id}/{filename}"
+# ─── AI persona generation (text fields only, structured output) ──────────────
+
+_TEXT_SCHEMA = json.dumps({
+    "type": "object",
+    "properties": {
+        "name": {"type": "string", "description": "Short creative name, 2-4 words"},
+        "description": {"type": "string", "description": "1-2 sentence description of this audience"},
+        "expertise": {"type": "string", "description": "Brief expertise phrase"},
+        "keyPriorities": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "3-4 short priority phrases"
+        },
+        "presentationTime": {"type": "string", "description": "e.g. 10-15 minutes"},
+        "communicationStyle": {"type": "string", "description": "1 sentence communication style"},
+        "personaPrompt": {"type": "string", "description": "2-3 sentence persona behavior prompt for evaluating presentations"},
+    },
+    "required": ["name", "description", "expertise", "keyPriorities", "presentationTime", "communicationStyle", "personaPrompt"],
+    "additionalProperties": False,
+})
+
+def _build_persona_section(persona, index):
+    """Format a single persona's text fields for the AI prompt."""
+    kp = persona.get('keyPriorities', [])
+    if isinstance(kp, list):
+        if kp and isinstance(kp[0], dict) and 'S' in kp[0]:
+            kp = [item['S'] for item in kp]
+        priorities = ', '.join(kp)
+    else:
+        priorities = str(kp)
+
+    return (
+        f"Persona {index}:\n"
+        f"  Name: {persona.get('name', '')}\n"
+        f"  Description: {persona.get('description', '')}\n"
+        f"  Expertise: {persona.get('expertise', '')}\n"
+        f"  Key Priorities: {priorities}\n"
+        f"  Presentation Time: {persona.get('presentationTime', '')}\n"
+        f"  Communication Style: {persona.get('communicationStyle', '')}\n"
+        f"  Persona Prompt: {persona.get('personaPrompt', '')}\n"
+    )
 
 
-def scan_persona_text(text):
-    """Run persona customization text through the Bedrock guardrail."""
-    if not PERSONA_GUARDRAIL_ID or not PERSONA_GUARDRAIL_VERSION:
-        print("[WARN] Guardrail env vars not set — skipping persona scan.")
-        return {"allowed": True, "action": "NONE", "message": ""}
+def generate_custom_persona(personas, custom_notes=''):
+    """Generate a unified persona: Haiku structured output for text fields, median/min for numbers."""
 
-    try:
-        response = bedrock_runtime.apply_guardrail(
-            guardrailIdentifier=PERSONA_GUARDRAIL_ID,
-            guardrailVersion=PERSONA_GUARDRAIL_VERSION,
-            source="INPUT",
-            content=[{"text": {"text": text}}],
-        )
-        action = response.get("action", "NONE")
-        if action == "GUARDRAIL_INTERVENED":
-            outputs = response.get("outputs", [])
-            message = outputs[0]["text"] if outputs else (
-                "The persona customization was rejected by our safety filters."
-            )
-            print(f"[WARN] Guardrail INTERVENED for persona text.")
-            return {"allowed": False, "action": action, "message": message}
+    # ── Compute numeric fields locally ────────────────────────────────
+    best_practices = _compute_best_practices(personas)
+    scoring_weights = _compute_scoring_weights(personas)
+    time_limit = _compute_time_limit(personas)
 
-        return {"allowed": True, "action": action, "message": ""}
-    except ClientError as e:
-        print(f"[ERROR] Guardrail scan failed: {e}")
-        return {"allowed": True, "action": "ERROR", "message": ""}
+    # ── Call Haiku for text fields with structured output config ──────
+    persona_sections = '\n'.join(
+        _build_persona_section(p, i) for i, p in enumerate(personas, 1)
+    )
 
+    prompt_parts = [
+        "You are an expert at creating audience personas for presentation coaching.",
+        f"You have been given {len(personas)} audience persona(s) that a presenter has selected.",
+        "",
+        "Source Personas:",
+        persona_sections,
+    ]
 
-def upload_persona_customization(user_id, session_id, text):
-    """Write validated persona customization text to S3."""
-    key = _s3_key(user_id, session_id, 'CUSTOM_PERSONA_INSTRUCTION.txt')
-    try:
-        s3_client.put_object(
-            Bucket=UPLOADS_BUCKET, Key=key,
-            Body=text.encode('utf-8'), ContentType='text/plain',
-        )
-        print(f"[INFO] Uploaded persona customization -> {key}")
-        return True
-    except ClientError as e:
-        print(f"[ERROR] Failed to upload persona customization: {e}")
-        return False
+    if custom_notes:
+        prompt_parts.extend([
+            "",
+            "The presenter also provided these additional notes about their audience:",
+            custom_notes,
+        ])
 
+    prompt_parts.extend([
+        "",
+        "Create ONE unified audience persona blending the above. BE CONCISE:",
+        "- name: A short creative name (2-4 words max)",
+        "- description: 1-2 sentences only",
+        "- expertise: A brief phrase, not a paragraph",
+        "- keyPriorities: 3-4 short phrases",
+        "- presentationTime: e.g. '10-15 minutes'",
+        "- communicationStyle: 1 sentence max",
+        "- personaPrompt: 2-3 sentences describing how this persona evaluates presentations",
+        "- If custom notes are provided, weave them in naturally",
+        "",
+        "Keep EVERY field short and punchy. No filler, no elaboration.",
+    ])
 
-def get_persona_customization(user_id, session_id):
-    """Read persona customization text from S3."""
-    key = _s3_key(user_id, session_id, 'CUSTOM_PERSONA_INSTRUCTION.txt')
-    try:
-        obj = s3_client.get_object(Bucket=UPLOADS_BUCKET, Key=key)
-        return obj['Body'].read().decode('utf-8')
-    except s3_client.exceptions.NoSuchKey:
-        return None
-    except ClientError as e:
-        print(f"[ERROR] Failed to read persona customization: {e}")
-        return None
+    prompt = '\n'.join(prompt_parts)
+
+    print(f"[INFO] Calling Bedrock ({BEDROCK_MODEL_ID}) with structured output config")
+    response = bedrock_runtime.converse(
+        modelId=BEDROCK_MODEL_ID,
+        messages=[{'role': 'user', 'content': [{'text': prompt}]}],
+        outputConfig={
+            'textFormat': {
+                'type': 'json_schema',
+                'structure': {
+                    'jsonSchema': {
+                        'schema': _TEXT_SCHEMA,
+                        'name': 'custom_persona',
+                        'description': 'A unified audience persona blended from multiple source personas',
+                    }
+                }
+            }
+        },
+    )
+
+    raw = response['output']['message']['content'][0]['text']
+    text_fields = json.loads(raw)
+
+    # ── Merge AI text fields with computed numeric fields ─────────────
+    text_fields['bestPractices'] = best_practices
+    text_fields['scoringWeights'] = scoring_weights
+    if time_limit is not None:
+        text_fields['timeLimitSec'] = time_limit
+
+    return text_fields
 
 
 # ─── Lambda handler ──────────────────────────────────────────────────────────
 
 def lambda_handler(event, context):
-    """Routes API Gateway requests for persona resolution and customization.
+    """Routes API Gateway requests for persona resolution and confirmation.
 
     Routes:
-      POST /personas/resolve
-        Body: { "personaIds": ["id1", ...] }
-        Returns resolved best practices, scoring weights, and persona details.
-
-      GET  /personas/resolve?personaIds=id1,id2
-        Same as POST via query string.
-
-      POST /personas/customization?session_id={id}
-        Body: { "text": "..." }
-        Scans text with Bedrock guardrail, saves to S3 if safe.
-
-      GET  /personas/customization?session_id={id}
-        Returns saved persona customization text.
+      POST /personas/resolve          — generate unified persona via AI
+      POST /personas/resolve/confirm   — save confirmed persona to S3
     """
     print(f"Event: {json.dumps(event)}")
 
@@ -286,30 +359,25 @@ def lambda_handler(event, context):
     if method == 'OPTIONS':
         return api_response(200, {'message': 'OK'})
 
-    # Auth
     claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
     user_id = claims.get('sub')
     if not user_id:
         return api_response(401, {'error': 'Unauthorized'})
 
-    qs = event.get('queryStringParameters') or {}
     path = event.get('resource', '')
 
-    # ─── /personas/resolve ────────────────────────────────────────────
-    if path.endswith('/resolve'):
-        if method == 'POST':
-            body = json.loads(event.get('body') or '{}')
-            persona_ids = body.get('personaIds', [])
-        elif method == 'GET':
-            raw = qs.get('personaIds', '')
-            persona_ids = [p.strip() for p in raw.split(',') if p.strip()]
-        else:
+    # ─── POST /personas/resolve ───────────────────────────────────────
+    if path.endswith('/resolve') and not path.endswith('/confirm'):
+        if method != 'POST':
             return api_response(400, {'error': f'Unsupported method: {method}'})
+
+        body = json.loads(event.get('body') or '{}')
+        persona_ids = body.get('personaIds', [])
+        custom_notes = body.get('customNotes', '').strip()
 
         if not persona_ids:
             return api_response(400, {'error': 'personaIds is required'})
 
-        # Fetch all personas
         personas = []
         not_found = []
         for pid in persona_ids:
@@ -325,78 +393,75 @@ def lambda_handler(event, context):
         if not_found:
             print(f"[WARN] Personas not found: {not_found}")
 
-        best_practices = resolve_best_practices(personas)
-        scoring_weights = resolve_scoring_weights(personas)
+        # Single persona with no notes — return as-is, skip AI
+        if len(personas) == 1 and not custom_notes:
+            p = personas[0]
+            persona_out = {field: p.get(field) for field in PERSONA_FIELDS}
+            persona_out['personaID'] = p.get('personaID', '')
+            return api_response(200, {
+                'customPersona': persona_out,
+                'generated': False,
+                'notFound': not_found,
+            })
 
-        return api_response(200, {
-            'resolved': {
-                'bestPractices': best_practices,
-                'scoringWeights': scoring_weights,
-            },
-            'personas': [
-                {
-                    'personaID': p.get('personaID', ''),
-                    'name': p.get('name', ''),
-                    'description': p.get('description', ''),
-                    'communicationStyle': p.get('communicationStyle', ''),
-                    'attentionSpan': p.get('attentionSpan', ''),
-                    'expertise': p.get('expertise', ''),
-                    'keyPriorities': p.get('keyPriorities', []),
-                    'bestPractices': p.get('bestPractices'),
-                    'scoringWeights': p.get('scoringWeights'),
-                    'timeLimitSec': p.get('timeLimitSec'),
-                }
-                for p in personas
-            ],
-            'notFound': not_found,
-        })
+        # Multiple personas or notes present — generate via AI
+        try:
+            custom_persona = generate_custom_persona(personas, custom_notes)
+            return api_response(200, {
+                'customPersona': custom_persona,
+                'generated': True,
+                'notFound': not_found,
+            })
+        except Exception as e:
+            print(f"[ERROR] Failed to generate custom persona: {e}")
+            import traceback
+            traceback.print_exc()
+            return api_response(500, {'error': f'Failed to generate custom persona: {str(e)}'})
 
-    # ─── /personas/customization ──────────────────────────────────────
-    if path.endswith('/customization'):
-        session_id = qs.get('session_id')
-        if not session_id:
-            return api_response(400, {'error': "Missing 'session_id' query parameter"})
+    # ─── POST /personas/resolve/confirm ───────────────────────────────
+    if path.endswith('/confirm'):
+        if method != 'POST':
+            return api_response(400, {'error': f'Unsupported method: {method}'})
 
         if not UPLOADS_BUCKET:
             return api_response(500, {'error': 'S3 bucket not configured'})
 
-        if method == 'POST':
-            body = json.loads(event.get('body') or '{}')
-            text = body.get('text', '')
+        body = json.loads(event.get('body') or '{}')
+        session_id = body.get('sessionId')
+        custom_persona = body.get('customPersona')
 
-            if not text or not text.strip():
-                return api_response(400, {'error': 'Persona customization text cannot be empty.'})
-            if len(text.encode('utf-8')) > MAX_PERSONA_TEXT_BYTES:
-                return api_response(400, {
-                    'error': f'Text exceeds the {MAX_PERSONA_TEXT_BYTES // 1024} KB limit.',
-                })
+        if not session_id:
+            return api_response(400, {'error': 'sessionId is required'})
+        if not custom_persona or not isinstance(custom_persona, dict):
+            return api_response(400, {'error': 'customPersona object is required'})
 
-            scan_result = scan_persona_text(text)
+        # Run guardrail on the persona's text content
+        scannable = ' '.join(filter(None, [
+            custom_persona.get('description', ''),
+            custom_persona.get('personaPrompt', ''),
+            custom_persona.get('communicationStyle', ''),
+        ]))
+        if scannable.strip():
+            scan_result = scan_persona_text(scannable)
             if not scan_result['allowed']:
                 return api_response(400, {
                     'message': scan_result['message'],
                     'rejected': True,
                 })
 
-            success = upload_persona_customization(user_id, session_id, text)
-            if not success:
-                return api_response(500, {'error': 'Failed to save persona customization.'})
-
-            return api_response(200, {'message': 'Persona customization saved successfully.'})
-
-        if method == 'GET':
-            text = get_persona_customization(user_id, session_id)
-            if text is None:
-                return api_response(200, {'customization': None, 'exists': False})
-
-            scan_result = scan_persona_text(text)
-            if not scan_result['allowed']:
-                return api_response(400, {
-                    'message': scan_result['message'],
-                    'exists': True,
-                    'rejected': True,
-                })
-
-            return api_response(200, {'customization': text, 'exists': True})
+        # Save to S3
+        key = _s3_key(user_id, session_id, 'CUSTOM_PERSONA.json')
+        try:
+            s3_client.put_object(
+                Bucket=UPLOADS_BUCKET,
+                Key=key,
+                Body=json.dumps(custom_persona, indent=2),
+                ContentType='application/json',
+            )
+            print(f"[INFO] Saved custom persona -> {key}")
+            return api_response(200, {'message': 'Custom persona saved successfully.'})
+        except ClientError as e:
+            print(f"[ERROR] Failed to save custom persona: {e}")
+            return api_response(500, {'error': 'Failed to save custom persona.'})
 
     return api_response(400, {'error': f'Unknown route: {method} {path}'})

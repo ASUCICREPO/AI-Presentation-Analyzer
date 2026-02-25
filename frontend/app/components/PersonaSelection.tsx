@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import PersonaCard from './PersonaCard';
 import CustomizePersona from './CustomizePersona';
 import { Persona } from '../config/config';
-import { fetchPersonas, savePersonaCustomization } from '../services/api';
+import { fetchPersonas } from '../services/api';
 
 interface PersonaSelectionProps {
   selectedPersonas: string[];
@@ -18,11 +18,9 @@ interface PersonaSelectionProps {
   onContinue: () => void;
 }
 
-// ─── Skeleton loader that mirrors PersonaCard layout ─────────────────
 function PersonaCardSkeleton() {
   return (
     <div className="w-full animate-pulse rounded-xl border-2 border-gray-200 bg-white p-5 sm:p-6 2xl:p-10">
-      {/* Header */}
       <div className="mb-4 flex items-center gap-4 2xl:mb-8 2xl:gap-6">
         <div className="h-10 w-10 rounded-lg bg-gray-200 2xl:h-14 2xl:w-14" />
         <div className="flex-1">
@@ -30,7 +28,6 @@ function PersonaCardSkeleton() {
           <div className="mt-2 h-4 w-28 rounded bg-gray-100 2xl:h-5 2xl:w-36" />
         </div>
       </div>
-      {/* Content grid */}
       <div className="grid grid-cols-2 gap-x-8 gap-y-4 2xl:gap-x-12 2xl:gap-y-8">
         <div>
           <div className="mb-2 h-4 w-24 rounded bg-gray-200 2xl:h-5" />
@@ -45,7 +42,6 @@ function PersonaCardSkeleton() {
           <div className="h-3 w-28 rounded bg-gray-100 pl-6 2xl:h-4" />
         </div>
       </div>
-      {/* Communication style */}
       <div className="mt-4 2xl:mt-8">
         <div className="mb-2 h-4 w-36 rounded bg-gray-200 2xl:h-5" />
         <div className="h-3 w-full max-w-md rounded bg-gray-100 pl-6 2xl:h-4" />
@@ -68,8 +64,6 @@ export default function PersonaSelection({
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchPersonas()
@@ -79,29 +73,12 @@ export default function PersonaSelection({
   }, []);
 
   const isPersonaSelected = selectedPersonas.length > 0;
+  const isMultiSelected = selectedPersonas.length > 1;
+  const hasNotes = customNotes.trim().length > 0;
 
-  const handleContinue = async () => {
-    if (selectedPersonas.length === 0) return;
-    const hasNotes = customNotes.trim().length > 0;
-    if (hasNotes) {
-      setSaving(true);
-      setSaveError(null);
-      try {
-        const result = await savePersonaCustomization(sessionId, customNotes.trim());
-        if (result.rejected) {
-          setSaveError('Your notes were flagged as inappropriate. Please revise and try again.');
-          setSaving(false);
-          return;
-        }
-      } catch (err) {
-        setSaveError(err instanceof Error ? err.message : 'Failed to save notes');
-        setSaving(false);
-        return;
-      }
-      setSaving(false);
-    }
-    onContinue();
-  };
+  const buttonText = isMultiSelected || hasNotes
+    ? 'Generate Custom Persona'
+    : 'Continue to Content Upload';
 
   return (
     <div className="mx-auto w-full max-w-[800px] px-4 py-6 sm:px-6 sm:py-8 xl:max-w-[900px] 2xl:max-w-[1280px] 2xl:py-16">
@@ -118,9 +95,7 @@ export default function PersonaSelection({
       {/* Persona Cards */}
       <div className="mb-6 2xl:mb-8 space-y-4">
         {loading ? (
-          <>
-            <PersonaCardSkeleton />
-          </>
+          <PersonaCardSkeleton />
         ) : error ? (
           <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-600 font-sans">
             Failed to load personas. Please try again.
@@ -132,7 +107,7 @@ export default function PersonaSelection({
               name={persona.name}
               expertise={persona.expertise}
               keyPriorities={persona.keyPriorities}
-              attentionSpan={persona.attentionSpan}
+              presentationTime={persona.presentationTime}
               communicationStyle={persona.communicationStyle}
               isSelected={selectedPersonas.includes(persona.personaID)}
               onSelect={() => {
@@ -145,7 +120,6 @@ export default function PersonaSelection({
                 }
                 onSelectPersonas(newSelected);
 
-                // Derive combined name, min time limit, and full persona data
                 const selectedData = personas.filter((p) => newSelected.includes(p.personaID));
                 const combinedName = selectedData.map((p) => p.name).join(' & ');
                 onPersonaNameChange(newSelected.length === 0 ? '' : combinedName);
@@ -154,7 +128,6 @@ export default function PersonaSelection({
                   onTimeLimitChange(undefined);
                   onPersonaDataChange([]);
                 } else {
-                  // Use the minimum time limit across all selected personas
                   const timeLimits = selectedData
                     .map((p) => p.timeLimitSec)
                     .filter((t): t is number => t !== undefined);
@@ -184,7 +157,7 @@ export default function PersonaSelection({
         />
       </div>
 
-      {/* Continue Button - Only visible when persona is selected */}
+      {/* Continue Button */}
       <div
         className={`
           flex flex-col items-end gap-2 transition-all duration-400 ease-out
@@ -194,46 +167,30 @@ export default function PersonaSelection({
           }
         `}
       >
-        {saveError && (
-          <p className="text-sm text-red-500 font-sans">{saveError}</p>
-        )}
         <button
-          onClick={handleContinue}
-          disabled={saving}
+          onClick={onContinue}
           className={`
             group flex items-center gap-2 rounded-lg bg-maroon px-5 py-2.5 
             text-sm font-medium text-white shadow-sm font-sans
             transition-all duration-200 ease-out
             hover:bg-maroon-dark hover:shadow-md
             active:scale-[0.98]
-            disabled:opacity-80 disabled:cursor-wait
             2xl:px-8 2xl:py-4 2xl:text-lg 2xl:rounded-xl
           `}
         >
-          {saving ? (
-            <>
-              <svg className="h-4 w-4 animate-spin 2xl:h-5 2xl:w-5" viewBox="0 0 24 24" fill="none">
-                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="31.4 31.4" strokeLinecap="round" />
-              </svg>
-              Saving Notes…
-            </>
-          ) : (
-            <>
-              Continue to Review
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                className="transition-transform duration-200 group-hover:translate-x-0.5 2xl:h-6 2xl:w-6"
-              >
-                <path
-                  d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"
-                  fill="currentColor"
-                />
-              </svg>
-            </>
-          )}
+          {buttonText}
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            className="transition-transform duration-200 group-hover:translate-x-0.5 2xl:h-6 2xl:w-6"
+          >
+            <path
+              d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6-1.41-1.41z"
+              fill="currentColor"
+            />
+          </svg>
         </button>
       </div>
     </div>
