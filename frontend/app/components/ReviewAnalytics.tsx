@@ -22,7 +22,10 @@ import {
   Clock,
   Play,
   RotateCcw,
+  Loader2,
 } from 'lucide-react';
+import { pdf } from '@react-pdf/renderer';
+import { ReportDocument } from './ReportPDF';
 
 import { CustomVideoPlayer, CustomVideoPlayerHandle } from './CustomVideoPlayer';
 
@@ -37,25 +40,18 @@ import {
 interface ReviewAnalyticsProps {
   sessionData: SessionAnalytics;
   aiFeedback: AIFeedbackResponse | null;
-  personas: Persona[];
-  onDownload: () => void;
+  persona: Persona | null;
   onBackToStart: () => void;
 }
 
-function resolveBestPractices(personas: Persona[]): PersonaBestPractices {
-  if (personas.length === 0) return DEFAULT_BEST_PRACTICES;
-  const p = personas[0];
-  return p.bestPractices
-    ? { ...DEFAULT_BEST_PRACTICES, ...p.bestPractices }
-    : DEFAULT_BEST_PRACTICES;
+function resolveBestPractices(persona: Persona | null): PersonaBestPractices {
+  if (!persona?.bestPractices) return DEFAULT_BEST_PRACTICES;
+  return { ...DEFAULT_BEST_PRACTICES, ...persona.bestPractices };
 }
 
-function resolveScoringWeights(personas: Persona[]): PersonaScoringWeights {
-  if (personas.length === 0) return DEFAULT_SCORING_WEIGHTS;
-  const p = personas[0];
-  return p.scoringWeights
-    ? { ...DEFAULT_SCORING_WEIGHTS, ...p.scoringWeights }
-    : DEFAULT_SCORING_WEIGHTS;
+function resolveScoringWeights(persona: Persona | null): PersonaScoringWeights {
+  if (!persona?.scoringWeights) return DEFAULT_SCORING_WEIGHTS;
+  return { ...DEFAULT_SCORING_WEIGHTS, ...persona.scoringWeights };
 }
 
 function buildBestPracticeChecks(bp: PersonaBestPractices) {
@@ -122,11 +118,12 @@ function MetricBar({ value, max, color }: { value: number; max: number; color: s
   );
 }
 
-export default function ReviewAnalytics({ sessionData, aiFeedback, personas, onDownload, onBackToStart }: ReviewAnalyticsProps) {
+export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onBackToStart }: ReviewAnalyticsProps) {
   const { windows } = sessionData;
   const [showWindows, setShowWindows] = useState(false);
   const [dismissedBanner, setDismissedBanner] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [isPdfLoading, setIsPdfLoading] = useState(false);
   const videoRef = useRef<CustomVideoPlayerHandle>(null);
 
   // Fetch video playback URL on mount
@@ -134,8 +131,8 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, personas, onD
     getVideoPlaybackUrl(sessionData.sessionId).then(setVideoUrl);
   }, [sessionData.sessionId]);
 
-  const bp = resolveBestPractices(personas);
-  const weights = resolveScoringWeights(personas);
+  const bp = resolveBestPractices(persona);
+  const weights = resolveScoringWeights(persona);
   const BEST_PRACTICES = buildBestPracticeChecks(bp);
 
   const stats = (() => {
@@ -192,10 +189,35 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, personas, onD
     return score >= bp.eyeContact.min ? 'text-green-600' : score >= bp.eyeContact.min - 20 ? 'text-yellow-600' : 'text-red-600';
   };
 
-  const feedbackPersonas: { id: string; title: string; description: string }[] =
-    (aiFeedback as AIFeedbackResponse & { personas?: { id: string; title: string; description: string }[] })?.personas
-    ?? (aiFeedback?.persona ? [aiFeedback.persona] : []);
-  const feedbackPersonaLabel = feedbackPersonas.map((p: { title: string }) => p.title).join(' & ');
+  const feedbackPersona = aiFeedback?.persona;
+
+  const handleDownloadPdf = async () => {
+    if (isPdfLoading) return;
+    setIsPdfLoading(true);
+    try {
+      const blob = await pdf(
+        <ReportDocument
+          sessionData={sessionData}
+          aiFeedback={aiFeedback}
+          stats={stats}
+          overallScore={overallScore}
+          feedbackPersonaLabel={feedbackPersona?.title || "Persona"}
+          bp={bp}
+          BEST_PRACTICES={BEST_PRACTICES}
+        />
+      ).toBlob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `presentation_report_${sessionData.sessionId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsPdfLoading(false);
+    }
+  };
 
   return (
     <div className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6">
@@ -218,12 +240,12 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, personas, onD
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Presentation Analysis</h1>
-          {feedbackPersonaLabel && (
+          {feedbackPersona && (
             <p className="mt-1 text-sm text-gray-600">
-              Feedback tailored for: <span className="font-semibold text-maroon">{feedbackPersonaLabel}</span>
+              Feedback tailored for: <span className="font-semibold text-maroon">{feedbackPersona.title}</span>
             </p>
           )}
-          {!feedbackPersonaLabel && (
+          {!feedbackPersona && (
             <p className="mt-1 text-sm text-gray-600">
               {sessionData.personaTitle} &middot; {windows.length} windows recorded
             </p>
@@ -231,11 +253,14 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, personas, onD
         </div>
         <div className="flex gap-3">
           <button
-            onClick={onDownload}
-            className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50 transition-colors"
+            onClick={handleDownloadPdf}
+            disabled={isPdfLoading}
+            className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
           >
-            <Download className="h-4 w-4" />
-            Download JSON
+            {isPdfLoading
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Download className="h-4 w-4" />}
+            {isPdfLoading ? 'Generating PDF...' : 'Download PDF'}
           </button>
           <button
             onClick={onBackToStart}
@@ -464,7 +489,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, personas, onD
         {aiFeedback && aiFeedback.keyRecommendations.length > 0 && (
           <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
             <h2 className="mb-5 text-lg font-semibold text-gray-900">
-              Key Recommendations{feedbackPersonaLabel ? ` for ${feedbackPersonaLabel}` : ''}
+              Key Recommendations{feedbackPersona ? ` for ${feedbackPersona.title}` : ''}
             </h2>
             <div className="space-y-4">
               {aiFeedback.keyRecommendations.map((rec, i) => (

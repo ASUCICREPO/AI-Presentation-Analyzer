@@ -20,8 +20,8 @@ export interface SessionManifest {
   duration?: number;
   /** Whether a presentation PDF was uploaded before the session */
   hasPresentationPdf?: boolean;
-  /** Whether an AI-generated custom persona was saved to S3 */
-  hasCustomPersona?: boolean;
+  /** Whether persona customization text was provided */
+  hasPersonaCustomization?: boolean;
 }
 
 /**
@@ -47,7 +47,7 @@ export function useSessionManifest(sessionId: string, personaId: string) {
 
   // ─── Create — call once when the session starts ────────────────────
   const create = useCallback(
-    async (opts?: { hasPresentationPdf?: boolean; hasCustomPersona?: boolean }) => {
+    async (opts?: { hasPresentationPdf?: boolean; hasPersonaCustomization?: boolean }) => {
       const now = new Date().toISOString();
       const m: SessionManifest = {
         sessionId,
@@ -57,7 +57,7 @@ export function useSessionManifest(sessionId: string, personaId: string) {
         videoParts: 0,
         lastUpdated: now,
         hasPresentationPdf: opts?.hasPresentationPdf ?? false,
-        hasCustomPersona: opts?.hasCustomPersona ?? false,
+        hasPersonaCustomization: opts?.hasPersonaCustomization ?? false,
       };
       manifestRef.current = m;
 
@@ -73,7 +73,7 @@ export function useSessionManifest(sessionId: string, personaId: string) {
 
   // ─── Update — merge partial fields and flush to S3 ─────────────────
   const update = useCallback(
-    async (patch: Partial<Pick<SessionManifest, 'videoParts' | 'hasPresentationPdf' | 'hasCustomPersona'>>) => {
+    async (patch: Partial<Pick<SessionManifest, 'videoParts' | 'hasPresentationPdf' | 'hasPersonaCustomization'>>) => {
       if (!manifestRef.current) return;
       // Prevent concurrent flushes from stacking up
       if (flushingRef.current) return;

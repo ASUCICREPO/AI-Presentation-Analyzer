@@ -334,9 +334,10 @@ export class AIPresentationCoachStack extends cdk.Stack {
     });
 
     // ──────────────────────────────────────────────
-    // Lambda layer with latest boto3
-    // Required for Bedrock structured outputs / Converse API outputConfig
+    // Post-Meeting Analytics Lambda
     // ──────────────────────────────────────────────
+
+    // Lambda layer with latest boto3 (required for Bedrock structured outputs / Converse API)
     const boto3Layer = new lambda.LayerVersion(this, 'Boto3LatestLayer', {
       code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'layers', 'boto3-latest'), {
         bundling: {
@@ -365,54 +366,6 @@ export class AIPresentationCoachStack extends cdk.Stack {
       compatibleRuntimes: [lambda.Runtime.PYTHON_3_13],
       description: 'Latest boto3/botocore for Bedrock structured outputs support',
     });
-
-    // ──────────────────────────────────────────────
-    // Persona Resolver Lambda
-    // Generates a unified custom persona from one or
-    // more selections via Bedrock AI, saves confirmed
-    // persona to S3 for post-meeting analytics.
-    // ──────────────────────────────────────────────
-    const multiPersonaResolverLambda = new lambda.Function(this, 'MultiPersonaResolverLambda', {
-      runtime: lambda.Runtime.PYTHON_3_13,
-      handler: 'index.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', 'lambda', 'multi-persona-resolver')),
-      timeout: cdk.Duration.seconds(30),
-      layers: [boto3Layer],
-      role: new iam.Role(this, 'MultiPersonaResolverLambdaRole', {
-        assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-        managedPolicies: [
-          iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
-        ],
-      }),
-      environment: {
-        'PERSONA_TABLE_NAME': personasTable.tableName,
-        'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
-      },
-    });
-
-    // Grant DynamoDB read access (resolve personas by ID)
-    personasTable.grantReadData(multiPersonaResolverLambda);
-
-    // Grant S3 read/write for persona customization text
-    presentationAndSessionUploadsBucket.grantReadWrite(multiPersonaResolverLambda);
-
-    // /personas/resolve resource (POST only — generates custom persona via AI)
-    const personaResolveResource = personas_resource.addResource('resolve');
-    personaResolveResource.addMethod('POST', new apigateway.LambdaIntegration(multiPersonaResolverLambda), {
-      authorizer,
-      authorizationType: apigateway.AuthorizationType.COGNITO,
-    });
-
-    // /personas/resolve/confirm resource (POST only — saves confirmed persona to S3)
-    const personaResolveConfirmResource = personaResolveResource.addResource('confirm');
-    personaResolveConfirmResource.addMethod('POST', new apigateway.LambdaIntegration(multiPersonaResolverLambda), {
-      authorizer,
-      authorizationType: apigateway.AuthorizationType.COGNITO,
-    });
-
-    // ──────────────────────────────────────────────
-    // Post-Meeting Analytics Lambda
-    // ──────────────────────────────────────────────
 
     const postMeetingAnalyticsLambda = new lambda.Function(this, 'PostMeetingAnalyticsLambda', {
       runtime: lambda.Runtime.PYTHON_3_13,
@@ -469,13 +422,18 @@ export class AIPresentationCoachStack extends cdk.Stack {
       blockedInputMessaging: 'The uploaded persona customization failed our security checks and has been rejected. Please review the content and try again.',
       blockedOutputsMessaging: 'The generated persona response has been blocked by our security filters due to harmful content. Please modify your persona customization and try again.',
       contentPolicyConfig: {
+        // Content filters set to HIGH for maximum scrutiny on both inputs and outputs.
+        // To allow more permissive configs, consider:
+        // LOW: Most permissive — only blocks extremely harmful content (least recommended).
+        // MEDIUM: Moderately permissive — blocks harmful content but allows edge cases
+        //         (recommended if students may present on political, explicit, or sensitive topics).
         filtersConfig: [
-          { type: 'HATE', inputStrength: 'MEDIUM', outputStrength: 'MEDIUM' },
-          { type: 'INSULTS', inputStrength: 'MEDIUM', outputStrength: 'MEDIUM' },
-          { type: 'SEXUAL', inputStrength: 'MEDIUM', outputStrength: 'MEDIUM' },
-          { type: 'VIOLENCE', inputStrength: 'MEDIUM', outputStrength: 'MEDIUM' },
-          { type: 'MISCONDUCT', inputStrength: 'MEDIUM', outputStrength: 'MEDIUM' },
-          { type: 'PROMPT_ATTACK', inputStrength: 'LOW', outputStrength: 'NONE' },
+          { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+          { type: 'INSULTS', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+          { type: 'SEXUAL', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+          { type: 'VIOLENCE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+          { type: 'MISCONDUCT', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+          { type: 'PROMPT_ATTACK', inputStrength: 'HIGH', outputStrength: 'NONE' },
         ],
       },
     });
@@ -486,25 +444,15 @@ export class AIPresentationCoachStack extends cdk.Stack {
       description: 'Default Version',
     });
 
-    // Pass guardrail identifiers to the persona-resolver Lambda
-    multiPersonaResolverLambda.addEnvironment('PERSONA_GUARDRAIL_ID', personaCustomizationGuardrail.attrGuardrailId);
-    multiPersonaResolverLambda.addEnvironment('PERSONA_GUARDRAIL_VERSION', personaGuardrailVersion.attrVersion);
+    // Pass guardrail identifiers to the presigned-URL Lambda so it can call ApplyGuardrail
+    s3UrlIssuerLambda.addEnvironment('PERSONA_GUARDRAIL_ID', personaCustomizationGuardrail.attrGuardrailId);
+    s3UrlIssuerLambda.addEnvironment('PERSONA_GUARDRAIL_VERSION', personaGuardrailVersion.attrVersion);
 
-    // Grant the multi-persona-resolver Lambda permission to invoke the guardrail
-    multiPersonaResolverLambda.addToRolePolicy(new iam.PolicyStatement({
+    // Grant the presigned-URL Lambda permission to invoke the guardrail
+    s3UrlIssuerLambda.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['bedrock:ApplyGuardrail'],
       resources: [personaCustomizationGuardrail.attrGuardrailArn],
-    }));
-
-    // Grant the multi-persona-resolver Lambda permission to invoke Bedrock models for AI persona generation
-    multiPersonaResolverLambda.addToRolePolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: ['bedrock:InvokeModel', 'bedrock:GetInferenceProfile'],
-      resources: [
-        'arn:aws:bedrock:*::foundation-model/*',
-        `arn:aws:bedrock:*:${this.account}:inference-profile/*`,
-      ],
     }));
 
     // ──────────────────────────────────────────────
@@ -560,9 +508,6 @@ export class AIPresentationCoachStack extends cdk.Stack {
     NagSuppressions.addResourceSuppressions(personaCrudLambda.role!, [
       { id: 'AwsSolutions-IAM4', reason: 'AWSLambdaBasicExecutionRole is the standard AWS managed policy required for CloudWatch Logs integration.', appliesTo: ['Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'] },
     ]);
-    NagSuppressions.addResourceSuppressions(multiPersonaResolverLambda.role!, [
-      { id: 'AwsSolutions-IAM4', reason: 'AWSLambdaBasicExecutionRole is the standard AWS managed policy required for CloudWatch Logs integration.', appliesTo: ['Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'] },
-    ]);
     NagSuppressions.addResourceSuppressions(postMeetingAnalyticsLambda.role!, [
       { id: 'AwsSolutions-IAM4', reason: 'AWSLambdaBasicExecutionRole is the standard AWS managed policy required for CloudWatch Logs integration.', appliesTo: ['Policy::arn:<AWS::Partition>:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'] },
     ]);
@@ -575,9 +520,6 @@ export class AIPresentationCoachStack extends cdk.Stack {
       { id: 'AwsSolutions-L1', reason: 'Python 3.13 is the latest stable Lambda runtime. Python 3.14 is not yet generally available.' },
     ]);
     NagSuppressions.addResourceSuppressions(personaCrudLambda, [
-      { id: 'AwsSolutions-L1', reason: 'Python 3.13 is the latest stable Lambda runtime. Python 3.14 is not yet generally available.' },
-    ]);
-    NagSuppressions.addResourceSuppressions(multiPersonaResolverLambda, [
       { id: 'AwsSolutions-L1', reason: 'Python 3.13 is the latest stable Lambda runtime. Python 3.14 is not yet generally available.' },
     ]);
     NagSuppressions.addResourceSuppressions(postMeetingAnalyticsLambda, [
@@ -594,12 +536,6 @@ export class AIPresentationCoachStack extends cdk.Stack {
       { id: 'AwsSolutions-IAM5', reason: 'Resource wildcard is scoped to objects within the uploads bucket via CDK grantReadWrite().', appliesTo: ['Resource::<AIPresentationCoachPresentationsVideos1B0D776E.Arn>/*'] },
       { id: 'AwsSolutions-IAM5', reason: 'DynamoDB read actions require wildcard for table indexes.', appliesTo: ['Action::dynamodb:BatchGet*', 'Action::dynamodb:DescribeStream', 'Action::dynamodb:DescribeTable', 'Action::dynamodb:Get*', 'Action::dynamodb:Query', 'Action::dynamodb:Scan'] },
       { id: 'AwsSolutions-IAM5', reason: 'Bedrock InvokeModel wildcard allows easy model switching for analytics feedback generation. Cross-region inference profiles route to multiple regions.', appliesTo: ['Resource::arn:aws:bedrock:*::foundation-model/*', `Resource::arn:aws:bedrock:*:<AWS::AccountId>:inference-profile/*`] },
-    ], true);
-    NagSuppressions.addResourceSuppressions(multiPersonaResolverLambda.role!, [
-      { id: 'AwsSolutions-IAM5', reason: 'Wildcard S3 actions generated by CDK grantReadWrite(), scoped to the uploads bucket for custom persona storage.', appliesTo: ['Action::s3:Abort*', 'Action::s3:DeleteObject*', 'Action::s3:GetBucket*', 'Action::s3:GetObject*', 'Action::s3:List*'] },
-      { id: 'AwsSolutions-IAM5', reason: 'Resource wildcard is scoped to objects within the uploads bucket via CDK grantReadWrite().', appliesTo: ['Resource::<AIPresentationCoachPresentationsVideos1B0D776E.Arn>/*'] },
-      { id: 'AwsSolutions-IAM5', reason: 'DynamoDB read actions require wildcard for table indexes.', appliesTo: ['Action::dynamodb:BatchGet*', 'Action::dynamodb:DescribeStream', 'Action::dynamodb:DescribeTable', 'Action::dynamodb:Get*', 'Action::dynamodb:Query', 'Action::dynamodb:Scan'] },
-      { id: 'AwsSolutions-IAM5', reason: 'Bedrock InvokeModel wildcard allows AI persona generation with flexible model selection.', appliesTo: ['Resource::arn:aws:bedrock:*::foundation-model/*', `Resource::arn:aws:bedrock:*:<AWS::AccountId>:inference-profile/*`] },
     ], true);
 
     // AwsSolutions-IAM5: Transcribe streaming APIs do not support resource-level permissions; wildcard is required

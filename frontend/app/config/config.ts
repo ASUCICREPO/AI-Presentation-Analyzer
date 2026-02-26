@@ -68,7 +68,22 @@ export interface Persona {
 /** Fallback when a persona has no timeLimitSec set */
 export const DEFAULT_TIME_LIMIT_SEC = 15 * 60; // 15 minutes
 
-/** Generic defaults used when a persona has no bestPractices set. */
+/** Generic defaults used when a persona has no bestPractices set.
+ *
+ * Sources:
+ *  - WPM: 140-160 is the recommended range for professional presentations
+ *    (Quantified Communications; The Speaker Lab). Research shows comprehension
+ *    is unaffected within 130-190 wpm (Presentation Rate in Comprehension,
+ *    Perceptual & Motor Skills, 2001).
+ *  - Eye contact: 3.2s average preferred gaze duration per person (Vision
+ *    Sciences Society, 2015). For a seated audience, maintaining gaze toward
+ *    the camera/audience ~60-70% of the time is considered engaged delivery.
+ *  - Filler words: Average speakers use ~5 fillers/min; optimal is ≤1/min
+ *    (Quantified Communications). Per 30-second window ≤3 is a strong target.
+ *  - Pauses: Deliberate 2-3s pauses after major points increased recall from
+ *    42% to 71% (Maptive/SpeakingTimeCalculator). Avg speaker uses ~3.5
+ *    pauses/min; great speakers use more. ≥4 per 30s window ≈ 8/min.
+ */
 export const DEFAULT_BEST_PRACTICES: PersonaBestPractices = {
   wpm: { min: 140, max: 160 },
   eyeContact: { min: 60 },
@@ -93,13 +108,22 @@ export function generateSessionId(): string {
 }
 
 // ---------------------------------------------------------------------------
+// Persona Customization
+// ---------------------------------------------------------------------------
+export const PERSONA_CUSTOMIZATION = {
+  MAX_WORDS: 500,                         // Max words allowed in custom notes
+  MAX_BYTES: 10 * 1024,                   // 10 KB backend limit
+  S3_FILENAME: 'CUSTOM_PERSONA_INSTRUCTION.txt',
+};
+
+// ---------------------------------------------------------------------------
 // S3 Upload — fixed file names (no UUIDs, overwrites on re-upload)
 // ---------------------------------------------------------------------------
 export const S3_FILENAMES = {
   PRESENTATION: 'presentation.pdf',
   RECORDING: 'recording.webm',
   ANALYTICS: 'analytics.json',
-  CUSTOM_PERSONA: 'CUSTOM_PERSONA.json',
+  PERSONA_CUSTOMIZATION: PERSONA_CUSTOMIZATION.S3_FILENAME,
   TRANSCRIPT: 'transcript.json',
   SESSION_ANALYTICS: 'session_analytics.json',
   DETAILED_METRICS: 'detailed_metrics.json',
@@ -112,6 +136,7 @@ export type S3RequestType =
   | 'ppt'
   | 'session'
   | 'metric_chunk'
+  | 'persona_customization'
   | 'transcript'
   | 'session_analytics'
   | 'detailed_metrics'
