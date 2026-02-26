@@ -41,7 +41,6 @@ interface ReviewAnalyticsProps {
   sessionData: SessionAnalytics;
   aiFeedback: AIFeedbackResponse | null;
   persona: Persona | null;
-  onDownload: () => void;
   onBackToStart: () => void;
 }
 

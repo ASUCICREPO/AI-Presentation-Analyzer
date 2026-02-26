@@ -367,7 +367,7 @@ const styles = StyleSheet.create({
 function ScoreRingSvg({ score }: { score: number }) {
   const color = scoreColor(score);
   return (
-    <View style={{ alignItems: 'center', width: 90 }}>
+    <View style={{ width: 90, height: 90 }}>
       <Svg viewBox="0 0 128 128" width={90} height={90}>
         <Circle cx="64" cy="64" r="54" fill="none" stroke="#E5E7EB" strokeWidth="8" />
         <Path
@@ -378,13 +378,10 @@ function ScoreRingSvg({ score }: { score: number }) {
           strokeLinecap="round"
         />
       </Svg>
-      {/* Score number overlay — positioned relative to SVG */}
-      <Text style={{ fontSize: 20, fontFamily: 'Helvetica-Bold', color: '#111827', marginTop: -58, textAlign: 'center' }}>
-        {score}
-      </Text>
-      <Text style={{ fontSize: 7, color: '#6B7280', marginTop: 38, textAlign: 'center' }}>
-        Overall Score
-      </Text>
+      <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ fontSize: 20, fontFamily: 'Helvetica-Bold', color: '#111827' }}>{score}</Text>
+        <Text style={{ fontSize: 7, color: '#6B7280', marginTop: 2 }}>Overall Score</Text>
+      </View>
     </View>
   );
 }
@@ -604,7 +601,7 @@ export function ReportDocument({
 
         {/* ── Content Strengths ──────────────────────────────────────────── */}
         {aiFeedback && aiFeedback.performanceSummary.contentStrengths.length > 0 && (
-          <View style={styles.sectionContainer}>
+          <View style={styles.sectionContainer} wrap={false}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionHeaderTitle}>Content Strengths</Text>
             </View>
