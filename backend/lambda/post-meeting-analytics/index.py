@@ -264,26 +264,60 @@ def generate_feedback(persona, transcript, persona_customization=None,
         f"Use a {communication_style} tone throughout your feedback.",
         "Be constructive and encouraging while being honest about areas needing work.",
         "Prioritize brevity and clarity — avoid verbose explanations.",
-        "",
-        "You MUST respond with ONLY valid JSON matching this exact structure — no"
-        " markdown fences, no commentary before or after the JSON:",
-        json.dumps({
-            "keyRecommendations": [
-                {"title": "<short title>", "description": "<detailed recommendation>"}
-            ],
-            "performanceSummary": {
-                "overallAssessment": "<2-3 sentence assessment>",
-                "contentStrengths": ["<strength 1>", "<strength 2>"],
-                "deliveryFeedback": {
-                    "speakingPace": "<assessment>",
-                    "volume": "<assessment>",
-                    "eyeContact": "<assessment>",
-                    "fillerWords": "<assessment>",
-                    "pauses": "<assessment>",
-                },
-            },
-        }, indent=2),
     ])
+
+    tool_config = {
+        "tools": [
+            {
+                "toolSpec": {
+                    "name": "provide_feedback",
+                    "description": "Provide structured post-presentation feedback",
+                    "inputSchema": {
+                        "json": {
+                            "type": "object",
+                            "properties": {
+                                "keyRecommendations": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "title": {"type": "string"},
+                                            "description": {"type": "string"}
+                                        },
+                                        "required": ["title", "description"]
+                                    }
+                                },
+                                "performanceSummary": {
+                                    "type": "object",
+                                    "properties": {
+                                        "overallAssessment": {"type": "string"},
+                                        "contentStrengths": {
+                                            "type": "array",
+                                            "items": {"type": "string"}
+                                        },
+                                        "deliveryFeedback": {
+                                            "type": "object",
+                                            "properties": {
+                                                "speakingPace": {"type": "string"},
+                                                "volume": {"type": "string"},
+                                                "eyeContact": {"type": "string"},
+                                                "fillerWords": {"type": "string"},
+                                                "pauses": {"type": "string"}
+                                            },
+                                            "required": ["speakingPace", "volume", "eyeContact", "fillerWords", "pauses"]
+                                        }
+                                    },
+                                    "required": ["overallAssessment", "contentStrengths", "deliveryFeedback"]
+                                }
+                            },
+                            "required": ["keyRecommendations", "performanceSummary"]
+                        }
+                    }
+                }
+            }
+        ],
+        "toolChoice": {"tool": {"name": "provide_feedback"}}
+    }
 
     prompt = "\n".join(parts)
 
@@ -305,23 +339,11 @@ def generate_feedback(persona, transcript, persona_customization=None,
 
     response = bedrock_runtime.converse(
         modelId=BEDROCK_MODEL_ID,
-        messages=[{'role': 'user', 'content': message_content}]
+        messages=[{'role': 'user', 'content': message_content}],
+        toolConfig=tool_config
     )
 
-    raw = response['output']['message']['content'][0]['text']
-
-    text = raw.strip()
-    # Strip markdown code fences if present (e.g. ```json ... ```)
-    if text.startswith('```'):
-        newline_idx = text.find('\n')
-        if newline_idx != -1:
-            text = text[newline_idx + 1:]
-        else:
-            text = text[3:]
-    if text.endswith('```'):
-        text = text[:-3]
-
-    return json.loads(text.strip())
+    return response['output']['message']['content'][0]['toolUse']['input']
 
 
 # ─── Main handler ────────────────────────────────────────────────────────────
