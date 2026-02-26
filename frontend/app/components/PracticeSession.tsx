@@ -28,13 +28,13 @@ interface PracticeSessionProps {
   sessionId: string;
   timeLimitSec?: number;
   hasPresentationPdf?: boolean;
-  hasCustomPersona?: boolean;
+  hasPersonaCustomization?: boolean;
   onBack: () => void;
   onComplete: (sessionData: SessionAnalytics, analyticsPromise: Promise<AIFeedbackResponse | null>) => void;
   exitSessionRef?: MutableRefObject<(() => void) | null>;
 }
 
-export default function PracticeSession({ personaTitle, personaId, sessionId, timeLimitSec, hasPresentationPdf, hasCustomPersona, onBack, onComplete, exitSessionRef }: PracticeSessionProps) {
+export default function PracticeSession({ personaTitle, personaId, sessionId, timeLimitSec, hasPresentationPdf, hasPersonaCustomization, onBack, onComplete, exitSessionRef }: PracticeSessionProps) {
   // Resolve the effective time cap for this session
   const maxDuration = timeLimitSec ?? DEFAULT_TIME_LIMIT_SEC;
   const [isRecording, setIsRecording] = useState(false);
@@ -534,7 +534,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
       // Create session manifest in S3
       manifest.create({
         hasPresentationPdf: hasPresentationPdf ?? false,
-        hasCustomPersona: hasCustomPersona ?? false,
+        hasPersonaCustomization: hasPersonaCustomization ?? false,
       });
 
       // Start both audio analysis and vocal variety in parallel

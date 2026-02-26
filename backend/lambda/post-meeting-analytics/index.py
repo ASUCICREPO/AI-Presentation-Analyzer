@@ -22,13 +22,6 @@ CORS_HEADERS = {
     "Access-Control-Allow-Methods": "GET,OPTIONS",
 }
 
-_FALLBACK_BP = {
-    'wpm': {'min': 140, 'max': 160},
-    'eyeContact': {'min': 60},
-    'fillerWords': {'max': 3},
-    'pauses': {'min': 4},
-}
-
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -106,11 +99,18 @@ def get_persona(identifier):
 
     return None
 
-
 # ─── Timestamped feedback from session analytics windows ──────────────────────
 
+# Fallback thresholds — only used when the persona has no bestPractices.
+_FALLBACK_BP = {
+    'wpm': {'min': 140, 'max': 160},
+    'eyeContact': {'min': 60},
+    'fillerWords': {'max': 3},
+    'pauses': {'min': 4},
+}
+
 def _resolve_best_practices(persona):
-    """Pull bestPractices from a single persona; fall back to defaults per field."""
+    """Pull bestPractices from the persona; fall back to defaults per field."""
     persona_bp = persona.get('bestPractices', {}) if persona else {}
     resolved = {}
     for key, default in _FALLBACK_BP.items():
@@ -120,7 +120,6 @@ def _resolve_best_practices(persona):
             resolved[key] = dict(default)
     return resolved
 
-
 def _window_timestamp(window_number):
     """Convert a 1-based window number to a MM:SS - MM:SS range (each window = 30s)."""
     start_secs = (window_number - 1) * 30
@@ -129,8 +128,7 @@ def _window_timestamp(window_number):
     end = f"{end_secs // 60:02d}:{end_secs % 60:02d}"
     return f"{start} - {end}"
 
-
-def generate_timestamped_feedback(session_analytics, persona):
+def generate_timestamped_feedback(session_analytics, persona=None):
     """Check each 30-second window against the persona's best-practice
     thresholds. Returns events only where a metric is below standard."""
     windows = session_analytics.get('windows', [])
@@ -164,13 +162,14 @@ def generate_timestamped_feedback(session_analytics, persona):
     return events
 
 
-# ─── Bedrock feedback generation ─────────────────────────────────────────────
 
-def generate_feedback(persona, transcript, pdf_bytes=None, session_analytics=None):
-    """Generate AI feedback using a single persona's context."""
-    name = persona.get('name', persona.get('title', 'a professional evaluator'))
+# ─── Bedrock feedback generation (prompt-based JSON, no outputConfig) ─────────
+
+def generate_feedback(persona, transcript, persona_customization=None,
+                      pdf_bytes=None, session_analytics=None):
+    persona_name = persona.get('name', persona.get('title', 'a professional evaluator'))
     description = persona.get('description', '')
-    communication_style = persona.get('communicationStyle', 'professional')
+    communication_style = persona.get('communicationStyle', '')
     presentation_time = persona.get('presentationTime', '')
     expertise = persona.get('expertise', '')
 
@@ -183,19 +182,25 @@ def generate_feedback(persona, transcript, pdf_bytes=None, session_analytics=Non
         priorities_text = str(key_priorities)
 
     parts = [
-        f"You are providing post-presentation feedback from the perspective of {name}.",
+        f"You are providing post-presentation feedback as a {persona_name}.",
         "",
-        "Audience Persona:",
-        f"  Name: {name}",
-        f"  Description: {description}",
-        f"  Communication Style: {communication_style}",
+        "Persona Context:",
+        f"- Role: {persona_name}",
+        f"- Description: {description}",
+        f"- Communication Style: {communication_style}",
         f"  Presentation Time: {presentation_time}",
-        f"  Expertise: {expertise}",
-        f"  Key Priorities: {priorities_text}",
+        f"- Expertise: {expertise}",
+        f"- Key Priorities: {priorities_text}",
+    ]
+
+    if persona_customization:
+        parts.extend(["", "Additional Custom Instructions:", persona_customization])
+
+    parts.extend([
         "",
         "Presentation Transcript (with timestamps):",
         transcript if transcript else 'No transcript available',
-    ]
+    ])
 
     if session_analytics:
         final_avg = session_analytics.get('finalAverage', {})
@@ -229,7 +234,7 @@ def generate_feedback(persona, transcript, pdf_bytes=None, session_analytics=Non
 
     parts.extend([
         "",
-        f"Based on your perspective as {name}, the transcript,"
+        f"Based on your role as {persona_name}, the transcript,"
         " and the presentation materials (if PDF is provided), provide structured feedback.",
         "",
         "IMPORTANT: Keep ALL feedback concise. Brevity is mandatory.",
@@ -306,6 +311,7 @@ def generate_feedback(persona, transcript, pdf_bytes=None, session_analytics=Non
     raw = response['output']['message']['content'][0]['text']
 
     text = raw.strip()
+    # Strip markdown code fences if present (e.g. ```json ... ```)
     if text.startswith('```'):
         newline_idx = text.find('\n')
         if newline_idx != -1:
@@ -348,6 +354,7 @@ def lambda_handler(event, context):
             status = json.loads(status_str)
 
             if status.get('status') == 'failed':
+                # Clear the failed status so this invocation can retry generation
                 print(f"Previous generation failed, retrying: {status.get('error')}")
                 try:
                     s3.delete_object(Bucket=BUCKET_NAME, Key=status_key)
@@ -360,6 +367,7 @@ def lambda_handler(event, context):
                     elapsed = (datetime.now(timezone.utc)
                                - datetime.fromisoformat(started)).total_seconds()
                     if elapsed > STALE_THRESHOLD_SEC:
+                        # Clear stale processing status so next poll retries
                         try:
                             s3.delete_object(Bucket=BUCKET_NAME, Key=status_key)
                         except Exception:
@@ -368,6 +376,9 @@ def lambda_handler(event, context):
                 return api_response(202, {"status": "processing"})
 
         # ── 3. Nothing cached, no active job → generate synchronously ────
+        #    API Gateway may 504 after 29s, but Lambda keeps running up to
+        #    its own 120s timeout and saves the result to S3 regardless.
+        #    Next poll from the client picks up the cached result.
         now = datetime.now(timezone.utc).isoformat()
         write_s3_json(status_key, {'status': 'processing', 'startedAt': now})
 
@@ -383,22 +394,15 @@ def lambda_handler(event, context):
             manifest = json.loads(manifest_str)
             print(f"Manifest loaded: {json.dumps(manifest)}")
 
-            # Resolve persona: custom persona from S3 takes priority, else DynamoDB
-            persona = None
-            if manifest.get('hasCustomPersona'):
-                custom_str = read_s3_text(f"{prefix}CUSTOM_PERSONA.json")
-                if custom_str:
-                    persona = json.loads(custom_str)
-                    print(f"Using custom persona from S3: {persona.get('name')}")
+            persona_id = manifest.get('persona')
+            if not persona_id:
+                raise ValueError("Persona not found in manifest")
 
+            # Persona
+            persona = get_persona(persona_id)
             if not persona:
-                persona_id = manifest.get('persona')
-                if not persona_id:
-                    raise ValueError("No persona found in manifest")
-                persona = get_persona(persona_id)
-                if not persona:
-                    raise ValueError(f"Persona {persona_id} not found in DynamoDB")
-                print(f"Using DynamoDB persona: {persona.get('name')}")
+                raise ValueError(f"Persona {persona_id} not found in DynamoDB")
+            print(f"Persona loaded: {persona.get('name')}")
 
             # Transcript
             transcript_str = read_s3_text(f"{prefix}transcript.json")
@@ -413,6 +417,11 @@ def lambda_handler(event, context):
             print(f"Transcript: {len(transcript)} chars")
 
             # Optional files
+            persona_customization = None
+            if manifest.get('hasPersonaCustomization'):
+                persona_customization = read_s3_text(
+                    f"{prefix}CUSTOM_PERSONA_INSTRUCTION.txt")
+
             pdf_bytes = None
             if manifest.get('hasPresentationPdf'):
                 pdf_bytes = read_s3_bytes(f"{prefix}presentation.pdf")
@@ -429,7 +438,8 @@ def lambda_handler(event, context):
 
             # Generate AI feedback
             feedback = generate_feedback(
-                persona, transcript, pdf_bytes, session_analytics,
+                persona, transcript, persona_customization,
+                pdf_bytes, session_analytics,
             )
 
             # Generate timestamped feedback from window data + persona thresholds
@@ -441,7 +451,7 @@ def lambda_handler(event, context):
                 'status': 'completed',
                 'sessionId': session_id,
                 'persona': {
-                    'id': persona.get('personaID', manifest.get('persona', '')),
+                    'id': persona_id,
                     'title': persona.get('name'),
                     'description': persona.get('description'),
                 },
@@ -453,7 +463,7 @@ def lambda_handler(event, context):
                 'includedFiles': {
                     'transcript': True,
                     'presentationPdf': pdf_bytes is not None,
-                    'customPersona': manifest.get('hasCustomPersona', False),
+                    'personaCustomization': persona_customization is not None,
                     'sessionAnalytics': session_analytics is not None,
                 },
             }
