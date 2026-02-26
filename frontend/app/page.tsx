@@ -319,7 +319,6 @@ export default function Home() {
             sessionData={sessionData}
             aiFeedback={aiFeedback}
             persona={selectedPersonaData}
-            onDownload={handleDownloadSessionData}
             onBackToStart={handleBackToStart}
           />
         )}
