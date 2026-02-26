@@ -150,6 +150,7 @@ export default function Home() {
     setSessionId(generateSessionId());
     setPdfUploaded(false);
     setUploadedFileName(null);
+    setCustomNotes('');
     window.scrollTo({ top: 0 });
   };
 
