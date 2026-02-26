@@ -142,20 +142,6 @@ export default function Home() {
     resolveAnalyticsAndShow();
   };
 
-  const handleDownloadSessionData = () => {
-    if (sessionData) {
-      const blob = new Blob([JSON.stringify(sessionData, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `session_analytics_${sessionData.sessionId}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }
-  };
-
   const handleBackToStart = () => {
     setCurrentStep(1);
     setSessionData(null);
@@ -334,7 +320,6 @@ export default function Home() {
             sessionData={sessionData}
             aiFeedback={aiFeedback}
             persona={selectedPersonaData}
-            onDownload={handleDownloadSessionData}
             onBackToStart={handleBackToStart}
           />
         )}
