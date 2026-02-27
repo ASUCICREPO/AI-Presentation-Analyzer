@@ -19,6 +19,7 @@ import aioboto3
 import os
 import json
 import logging
+from jinja2 import Template
 
 logger = logging.getLogger("agentcore.qa")
 
@@ -43,37 +44,25 @@ SESSION_DURATION_SEC = int(os.getenv("SESSION_DURATION_SEC", "300"))  # 5 minute
 QA_ANALYTICS_MODEL_ID = os.getenv("QA_ANALYTICS_MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
 
 
-def build_qa_system_prompt(persona_name: str, persona_prompt: str, custom_instructions: str, transcript_text: str) -> str:
+def build_qa_system_prompt(persona_name: str, persona_prompt: str, custom_instructions: str, transcript_text: str, session_duration: float) -> str:
     """Build a QA-focused system prompt from persona and presentation context."""
-    return f"""You are {persona_name}, an engaged audience member at a presentation Q&A session.
+    
+    qa_duration = session_duration // 60
+    if qa_duration <= 0:
+        qa_duration = 2 # Default to 2 minutes of QA
+    if qa_duration > 5:
+        qa_duration = 5 # Cap at 5 minutes
 
-PERSONA CHARACTERISTICS:
-{persona_prompt}
-
-CUSTOM INSTRUCTIONS:
-{custom_instructions or "Focus on understanding and challenging the presented ideas."}
-
-YOUR GOALS:
-1. Ask clarifying questions about unclear or complex points
-2. Challenge assumptions and conclusions with critical thinking
-3. Explore practical applications of presented concepts
-4. Help the presenter think deeper about their topic
-5. Maintain the conversation for approximately {SESSION_DURATION_SEC // 60} minutes
-
-BEHAVIOR GUIDELINES:
-- Start by briefly acknowledging the presentation, then ask your first question
-- Ask one focused question at a time
-- Listen actively to responses before asking follow-ups
-- Reference specific parts of the presentation when possible
-- Maintain your persona's communication style
-- Be respectful but intellectually rigorous
-- Vary question types between clarification, critical analysis, and practical application
-- If the presenter gives a short or unclear response, ask a follow-up to dig deeper
-- As time progresses, move toward more challenging or synthesizing questions
-
-PRESENTATION TRANSCRIPT:
-{transcript_text}
-"""
+    
+    template_file = open("qa_system_prompt.jinja2", "r").read()
+    template = Template(template_file)
+    return template.render(
+        persona_name=persona_name,
+        persona_prompt=persona_prompt,
+        custom_instructions=custom_instructions if custom_instructions else None,
+        transcript_text=transcript_text,
+        qa_limit=qa_duration
+    )
 
 
 def create_nova_sonic_model(voice_id: str = None) -> BidiNovaSonicModel:
@@ -443,7 +432,8 @@ async def websocket_handler(websocket, context: RequestContext):
             persona_name=persona_data.get('name', 'Interviewer'),
             persona_prompt=persona_data.get('personaPrompt', ''),
             custom_instructions=persona_data.get('description', ''),
-            transcript_text=transcript_text
+            transcript_text=transcript_text,
+            session_duration=SESSION_DURATION_SEC
         )
 
         model = create_nova_sonic_model(voice_id)
