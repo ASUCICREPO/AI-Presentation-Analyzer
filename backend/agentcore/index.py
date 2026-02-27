@@ -485,12 +485,34 @@ async def websocket_handler(websocket, context: RequestContext):
             except Exception:
                 pass
 
-        # Generate and save QA analytics from collected transcript
+        # Generate QA analytics and send via WebSocket + save to S3
         if ws_output and ws_output.transcript_entries:
             try:
                 logger.info("[WebSocket] Generating QA analytics (%d transcript entries)", len(ws_output.transcript_entries))
                 feedback = await generate_qa_analytics(ws_output.transcript_entries, persona_data)
-                await save_qa_analytics(user_id, session_id, ws_output.transcript_entries, feedback)
+                total_questions = sum(1 for e in ws_output.transcript_entries if e['role'] == 'assistant')
+                total_responses = sum(1 for e in ws_output.transcript_entries if e['role'] == 'user')
+
+                qa_result = {
+                    "type": "qa_analytics",
+                    "qaFeedback": feedback,
+                    "totalQuestions": total_questions,
+                    "totalResponses": total_responses,
+                }
+
+                # Send analytics to frontend via WebSocket before closing
+                try:
+                    await websocket.send_json(qa_result)
+                    logger.info("[WebSocket] QA analytics sent to client")
+                except Exception:
+                    pass
+
+                # Also persist to S3 for future access
+                try:
+                    await save_qa_analytics(user_id, session_id, ws_output.transcript_entries, feedback)
+                except Exception as e:
+                    logger.warning("[WebSocket] Failed to save QA analytics to S3: %s", e)
+
             except Exception as e:
                 logger.warning("[WebSocket] Failed to generate QA analytics: %s", e)
 
