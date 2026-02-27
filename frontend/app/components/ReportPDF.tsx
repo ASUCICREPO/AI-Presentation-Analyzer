@@ -477,6 +477,13 @@ export function ReportDocument({
 
         <View style={styles.divider} />
 
+        {/* Disclaimer */}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#EFF6FF', borderRadius: 6, borderWidth: 1, borderColor: '#BFDBFE', paddingHorizontal: 10, paddingVertical: 6, marginBottom: 10 }}>
+          <Text style={{ fontSize: 8, color: '#1E40AF', lineHeight: 1.5 }}>
+            ℹ This analysis evaluates presentation delivery (pace, eye contact, volume, filler words, pauses) and content quality (structure, clarity, arguments). It does not judge the factual accuracy of your content.
+          </Text>
+        </View>
+
         {/* ── Performance Summary ────────────────────────────────────────── */}
         {stats && (
           <View style={styles.card}>

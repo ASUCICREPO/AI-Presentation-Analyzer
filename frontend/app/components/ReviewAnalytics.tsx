@@ -23,6 +23,7 @@ import {
   Play,
   RotateCcw,
   Loader2,
+  Info,
 } from 'lucide-react';
 import { pdf } from '@react-pdf/renderer';
 import { ReportDocument } from './ReportPDF';
@@ -270,6 +271,15 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, persona, onBa
             New Practice Session
           </button>
         </div>
+      </div>
+
+      {/* Disclaimer */}
+      <div className="mb-6 flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+        <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-500" />
+        <p className="text-xs leading-relaxed text-blue-800">
+          This analysis evaluates presentation delivery (pace, eye contact, volume, filler words, pauses) and content quality (structure, clarity, arguments).
+          It does not judge the factual accuracy of your content.
+        </p>
       </div>
 
       {/* Performance Summary Card */}
