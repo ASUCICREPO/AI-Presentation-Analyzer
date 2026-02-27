@@ -56,13 +56,15 @@ def build_qa_system_prompt(persona_name: str, persona_prompt: str, custom_instru
     
     template_file = open("qa_system_prompt.jinja2", "r").read()
     template = Template(template_file)
-    return template.render(
+    prompt = template.render(
         persona_name=persona_name,
         persona_prompt=persona_prompt,
         custom_instructions=custom_instructions if custom_instructions else None,
         transcript_text=transcript_text,
         qa_limit=qa_duration
     )
+    print(prompt)
+    return prompt
 
 
 def create_nova_sonic_model(voice_id: str = None) -> BidiNovaSonicModel:
