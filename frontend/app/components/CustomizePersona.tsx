@@ -76,7 +76,7 @@ export default function CustomizePersona({
           <textarea
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            placeholder="Add any specific details about your audience that will help tailor the feedback (e.g., specific technical background, time constraints, cultural considerations...)"
+            placeholder={`e.g., "My audience is a group of non-technical executives. Focus on whether my explanations avoid jargon and keep the pitch under 5 minutes."\n\ne.g., "This is a 10-minute thesis defense for a computer science panel. Prioritize logical flow and how well I handle potential counterarguments."`}
             className={`
               min-h-[100px] w-full resize-none rounded-xl border
               bg-gray-50 p-4 text-sm text-gray-600 placeholder-gray-400

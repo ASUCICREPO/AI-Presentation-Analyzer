@@ -322,7 +322,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
     const isSurprised = eyesWide > 0.4;
 
     const { SURPRISE_MULTIPLIER } = ANALYSIS_CONFIG.GAZE_THRESHOLDS;
-    const lookUpThreshold = isSurprised ? SURPRISE_MULTIPLIER.LOOK_UP : 0.3;
+    const lookUpThreshold = isSurprised ? SURPRISE_MULTIPLIER.LOOK_UP : ANALYSIS_CONFIG.GAZE_THRESHOLDS.LOOK_UP;
 
     const lookLeft = (scores.eyeLookInRight + scores.eyeLookOutLeft) / 2;
     const lookRight = (scores.eyeLookInLeft + scores.eyeLookOutRight) / 2;
