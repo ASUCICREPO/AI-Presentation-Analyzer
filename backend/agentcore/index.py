@@ -19,8 +19,10 @@ import aioboto3
 import os
 import json
 import logging
+import sys
 from jinja2 import Template
 
+logging.basicConfig(level=logging.INFO, stream=sys.stdout, force=True)
 logger = logging.getLogger("agentcore.qa")
 
 '''
@@ -63,7 +65,7 @@ def build_qa_system_prompt(persona_name: str, persona_prompt: str, custom_instru
         transcript_text=transcript_text,
         qa_limit=qa_duration
     )
-    print(prompt)
+    logger.info("Rendered QA system prompt:\n%s", prompt)
     return prompt
 
 
@@ -183,24 +185,22 @@ async def load_persona(persona_id: str) -> dict:
     """Load persona configuration from DynamoDB."""
     table_name = os.getenv('PERSONA_TABLE_NAME')
     if not table_name:
-        print("[Error] PERSONA_TABLE_NAME environment variable not set")
+        logger.error("PERSONA_TABLE_NAME environment variable not set")
         return {}
-    
+
     try:
         session = aioboto3.Session()
         async with session.resource('dynamodb', region_name=REGION) as dynamodb:
             table = await dynamodb.Table(table_name)
             response = await table.get_item(Key={'personaID': persona_id})
-            
+
             if 'Item' not in response:
-                print(f"[Error] Persona {persona_id} not found in DynamoDB")
+                logger.warning("Persona %s not found in DynamoDB", persona_id)
                 return {}
-            
+
             return response['Item']
     except Exception as e:
-        print(f"[Error] Failed to load persona {persona_id}: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("Failed to load persona %s: %s", persona_id, e)
         return {}
 
 
@@ -208,21 +208,22 @@ async def load_transcript(user_id: str, date_str: str, session_id: str) -> str:
     """Load presentation transcript from S3."""
     bucket_name = os.getenv('UPLOADS_BUCKET')
     if not bucket_name:
-        print("[Error] UPLOADS_BUCKET environment variable not set")
+        logger.error("UPLOADS_BUCKET environment variable not set")
         return ""
-    
+
     # S3 key format: {userId}/{dateStr}/{sessionId}/transcript.json
     s3_key = f"{user_id}/{date_str}/{session_id}/transcript.json"
-    
+    logger.info("Loading transcript from s3://%s/%s", bucket_name, s3_key)
+
     try:
         session = aioboto3.Session()
         async with session.client('s3', region_name=REGION) as s3:
             response = await s3.get_object(Bucket=bucket_name, Key=s3_key)
             content = await response['Body'].read()
-            
+
             # Parse transcript JSON
             transcript_data = json.loads(content)
-            
+
             # Extract text from transcript entries
             if isinstance(transcript_data, list):
                 # Format: [{"text": "...", "timestamp": ...}, ...]
@@ -232,11 +233,13 @@ async def load_transcript(user_id: str, date_str: str, session_id: str) -> str:
                 transcript_text = " ".join([entry.get('text', '') for entry in transcript_data['entries']])
             else:
                 transcript_text = str(transcript_data)
-            
-            return transcript_text.strip()
-            
+
+            transcript_text = transcript_text.strip()
+            logger.info("Loaded transcript (%d chars) from s3://%s/%s", len(transcript_text), bucket_name, s3_key)
+            return transcript_text
+
     except Exception as e:
-        print(f"[Warning] Failed to load transcript from s3://{bucket_name}/{s3_key}: {e}")
+        logger.warning("Failed to load transcript from s3://%s/%s: %s", bucket_name, s3_key, e)
         return ""
 
 
@@ -453,9 +456,34 @@ async def websocket_handler(websocket, context: RequestContext):
         
         ws_input = WebSocketBidiInput(websocket)
         ws_output = WebSocketBidiOutput(websocket)
-        
+
         logger.info("[WebSocket] Starting BidiAgent for session %s", session_id)
-        await agent.run(inputs=[ws_input], outputs=[ws_output])
+        await agent.start()
+        await ws_input.start(agent)
+        await ws_output.start(agent)
+
+        # Trigger the agent to open the conversation without waiting for user input
+        await agent.send("Please begin the Q&A session now.")
+
+        async def _run_inputs() -> None:
+            while True:
+                event = await ws_input()
+                await agent.send(event)
+
+        async def _run_outputs(inputs_task: asyncio.Task) -> None:
+            async for event in agent.receive():
+                await ws_output(event)
+            inputs_task.cancel()
+
+        input_task = asyncio.create_task(_run_inputs())
+        output_task = asyncio.create_task(_run_outputs(input_task))
+        try:
+            await asyncio.gather(input_task, output_task)
+        finally:
+            if not input_task.done():
+                input_task.cancel()
+            if not output_task.done():
+                output_task.cancel()
         
     except WebSocketDisconnect:
         logger.info("[WebSocket] Client disconnected")

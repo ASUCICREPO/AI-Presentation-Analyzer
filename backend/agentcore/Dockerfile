@@ -11,10 +11,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt requirements.txt
 RUN pip install -r requirements.txt
 
-RUN pip install aws-opentelemetry-distro>=0.10.1
+RUN pip install "aws-opentelemetry-distro>=0.10.1"
 
 # Signal that this is running in Docker for host binding logic
 ENV DOCKER_CONTAINER=1
+# Disable Python output buffering so logs appear immediately in CloudWatch
+ENV PYTHONUNBUFFERED=1
 
 # All AWS environment variables (AWS_REGION, KNOWLEDGE_BASE_ID, etc.) 
 # will be provided by AgentCore at runtime
