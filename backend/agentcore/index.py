@@ -330,10 +330,11 @@ Use a {communication_style} tone. Be concise — no long paragraphs."""
 
     bedrock = boto3.client('bedrock-runtime', region_name=REGION)
     response = await asyncio.to_thread(
-        bedrock.converse,
-        modelId=QA_ANALYTICS_MODEL_ID,
-        messages=[{'role': 'user', 'content': [{'text': prompt}]}],
-        toolConfig=tool_config
+        lambda: bedrock.converse(
+            modelId=QA_ANALYTICS_MODEL_ID,
+            messages=[{'role': 'user', 'content': [{'text': prompt}]}],
+            toolConfig=tool_config
+        )
     )
 
     return response['output']['message']['content'][0]['toolUse']['input']
