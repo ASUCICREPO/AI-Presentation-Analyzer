@@ -25,6 +25,32 @@ export interface AIFeedbackResponse {
   timestampedFeedback?: { timestamp: string; message: string }[];
 }
 
+// ─── QA Analytics Types ──────────────────────────────────────────────
+
+export interface QAQuestionBreakdown {
+  question: string;
+  rating: 'Strong' | 'Adequate' | 'Weak';
+  note: string;
+}
+
+export interface QAFeedback {
+  overallSummary: string;
+  responseQuality: 'Excellent' | 'Good' | 'Needs Improvement';
+  strengths: string[];
+  improvements: string[];
+  questionBreakdown: QAQuestionBreakdown[];
+}
+
+export interface QAAnalyticsResponse {
+  status: string;
+  sessionId: string;
+  qaFeedback: QAFeedback;
+  totalQuestions: number;
+  totalResponses: number;
+  generatedAt: string;
+  model: string;
+}
+
 export class AnalyticsProcessingError extends Error {
   constructor() {
     super('Analytics still processing');
@@ -427,4 +453,44 @@ export async function pollAnalytics(
     }
   }
   throw new Error('Analytics timed out — the AI analysis is taking longer than expected');
+}
+
+// ─── QA Analytics API ─────────────────────────────────────────────────
+
+const QA_POLL_INTERVAL_MS = 2_000;
+const QA_POLL_MAX_ATTEMPTS = 30; // ~60 seconds
+
+/**
+ * Fetch QA analytics from S3 via the presigned URL endpoint.
+ * The agentcore generates and saves qa_analytics.json after each QA session.
+ */
+export async function fetchQAAnalytics(
+  sessionId: string,
+): Promise<QAAnalyticsResponse | null> {
+  const headers = await authHeaders();
+  try {
+    const res = await fetch(
+      `${API_BASE_URL}/s3_urls?action=get_qa_analytics&session_id=${sessionId}`,
+      { headers },
+    );
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Poll for QA analytics with retries — the agentcore may still be generating
+ * the analytics when the frontend first requests them.
+ */
+export async function pollQAAnalytics(
+  sessionId: string,
+): Promise<QAAnalyticsResponse | null> {
+  for (let attempt = 0; attempt < QA_POLL_MAX_ATTEMPTS; attempt++) {
+    const result = await fetchQAAnalytics(sessionId);
+    if (result) return result;
+    await new Promise((r) => setTimeout(r, QA_POLL_INTERVAL_MS));
+  }
+  return null;
 }

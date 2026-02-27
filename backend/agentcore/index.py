@@ -12,6 +12,7 @@ from strands.experimental.bidi.models import BidiNovaSonicModel
 from strands.experimental.bidi.tools import stop_conversation
 from bedrock_agentcore import BedrockAgentCoreApp, RequestContext
 from typing import Literal
+from datetime import datetime, timezone
 import asyncio
 import boto3
 import aioboto3
@@ -39,6 +40,7 @@ if DEFAULT_VOICE_ID not in VALID_VOICES:
     raise ValueError(f"Invalid VOICE_ID '{DEFAULT_VOICE_ID}'. Must be one of: {VALID_VOICES}.")
 MODEL_ID=os.getenv("MODEL_ID", "amazon.nova-2-sonic-v1:0") #Nova 2 Sonic default for best performance.
 SESSION_DURATION_SEC = int(os.getenv("SESSION_DURATION_SEC", "300"))  # 5 minutes default
+QA_ANALYTICS_MODEL_ID = os.getenv("QA_ANALYTICS_MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
 
 
 def build_qa_system_prompt(persona_name: str, persona_prompt: str, custom_instructions: str, transcript_text: str) -> str:
@@ -141,10 +143,13 @@ class WebSocketBidiOutput(BidiOutput):
     - audio  -> {"type": "audio", "data": "<base64 PCM>"}
     - transcript -> {"type": "transcript", "role": ..., "text": ..., "is_partial": ...}
     - interruption -> {"type": "interruption"}
+
+    Also collects finalized transcript entries for post-session analytics.
     """
 
     def __init__(self, websocket: WebSocket):
         self._ws = websocket
+        self.transcript_entries: list[dict] = []
 
     async def start(self, agent: BidiAgent) -> None:
         pass
@@ -161,6 +166,12 @@ class WebSocketBidiOutput(BidiOutput):
                     "text": event.text,
                     "is_partial": not event.is_final,
                 })
+                # Collect finalized transcripts for analytics
+                if event.is_final and event.text and event.text.strip():
+                    self.transcript_entries.append({
+                        "role": event.role,
+                        "text": event.text.strip(),
+                    })
 
             elif isinstance(event, BidiInterruptionEvent):
                 await self._ws.send_json({"type": "interruption"})
@@ -240,6 +251,131 @@ async def load_transcript(user_id: str, date_str: str, session_id: str) -> str:
 
 app = BedrockAgentCoreApp()
 
+
+async def generate_qa_analytics(transcript_entries: list[dict], persona_data: dict) -> dict:
+    """Generate a concise QA response quality summary using Bedrock."""
+    if not transcript_entries:
+        return {}
+
+    persona_name = persona_data.get('name', 'Interviewer')
+    communication_style = persona_data.get('communicationStyle', 'professional')
+
+    # Build the Q&A conversation text
+    conversation = "\n".join(
+        f"{'Question' if e['role'] == 'assistant' else 'Answer'}: {e['text']}"
+        for e in transcript_entries
+    )
+
+    prompt = f"""You are evaluating a Q&A session where {persona_name} asked questions and the presenter responded.
+
+Q&A Transcript:
+{conversation}
+
+Evaluate how well the presenter answered each question. Focus on:
+- Clarity and directness of responses
+- Depth of understanding demonstrated
+- Ability to handle challenging questions
+- Confidence and composure
+
+Use a {communication_style} tone. Be concise — no long paragraphs."""
+
+    tool_config = {
+        "tools": [{
+            "toolSpec": {
+                "name": "provide_qa_feedback",
+                "description": "Provide structured Q&A session feedback",
+                "inputSchema": {
+                    "json": {
+                        "type": "object",
+                        "properties": {
+                            "overallSummary": {
+                                "type": "string",
+                                "description": "2-3 sentence overall assessment of Q&A performance"
+                            },
+                            "responseQuality": {
+                                "type": "string",
+                                "description": "One of: Excellent, Good, Needs Improvement"
+                            },
+                            "strengths": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "2-3 short bullet points on what the presenter did well"
+                            },
+                            "improvements": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "2-3 short bullet points on what could be improved"
+                            },
+                            "questionBreakdown": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "question": {"type": "string", "description": "Brief paraphrase of the question (under 15 words)"},
+                                        "rating": {"type": "string", "description": "One of: Strong, Adequate, Weak"},
+                                        "note": {"type": "string", "description": "One sentence on the response quality"}
+                                    },
+                                    "required": ["question", "rating", "note"]
+                                },
+                                "description": "Per-question assessment"
+                            }
+                        },
+                        "required": ["overallSummary", "responseQuality", "strengths", "improvements", "questionBreakdown"]
+                    }
+                }
+            }
+        }],
+        "toolChoice": {"tool": {"name": "provide_qa_feedback"}}
+    }
+
+    bedrock = boto3.client('bedrock-runtime', region_name=REGION)
+    response = await asyncio.to_thread(
+        bedrock.converse,
+        modelId=QA_ANALYTICS_MODEL_ID,
+        messages=[{'role': 'user', 'content': [{'text': prompt}]}],
+        toolConfig=tool_config
+    )
+
+    return response['output']['message']['content'][0]['toolUse']['input']
+
+
+async def save_qa_analytics(user_id: str, session_id: str, transcript_entries: list[dict], feedback: dict):
+    """Save QA transcript and analytics to S3."""
+    bucket_name = os.getenv('UPLOADS_BUCKET')
+    if not bucket_name:
+        logger.error("[QA Analytics] UPLOADS_BUCKET not set")
+        return
+
+    s3_prefix = f"{user_id}/{session_id}"
+
+    session = aioboto3.Session()
+    async with session.client('s3', region_name=REGION) as s3_client:
+        # Save QA transcript
+        await s3_client.put_object(
+            Bucket=bucket_name,
+            Key=f"{s3_prefix}/qa_transcript.json",
+            Body=json.dumps(transcript_entries, indent=2),
+            ContentType='application/json',
+        )
+
+        # Save QA analytics feedback
+        result = {
+            "status": "completed",
+            "sessionId": session_id,
+            "qaFeedback": feedback,
+            "totalQuestions": sum(1 for e in transcript_entries if e['role'] == 'assistant'),
+            "totalResponses": sum(1 for e in transcript_entries if e['role'] == 'user'),
+            "generatedAt": datetime.now(timezone.utc).isoformat(),
+            "model": QA_ANALYTICS_MODEL_ID,
+        }
+        await s3_client.put_object(
+            Bucket=bucket_name,
+            Key=f"{s3_prefix}/qa_analytics.json",
+            Body=json.dumps(result, indent=2),
+            ContentType='application/json',
+        )
+        logger.info("[QA Analytics] Saved to s3://%s/%s/qa_analytics.json", bucket_name, s3_prefix)
+
 @app.websocket
 async def websocket_handler(websocket, context: RequestContext):
     """WebSocket handler for Q&A sessions.
@@ -287,6 +423,8 @@ async def websocket_handler(websocket, context: RequestContext):
         return
     
     agent = None
+    ws_output = None
+    persona_data = {}
 
     try:
         persona_data = await load_persona(persona_id)
@@ -345,6 +483,16 @@ async def websocket_handler(websocket, context: RequestContext):
                 await agent.stop()
             except Exception:
                 pass
+
+        # Generate and save QA analytics from collected transcript
+        if ws_output and ws_output.transcript_entries:
+            try:
+                logger.info("[WebSocket] Generating QA analytics (%d transcript entries)", len(ws_output.transcript_entries))
+                feedback = await generate_qa_analytics(ws_output.transcript_entries, persona_data)
+                await save_qa_analytics(user_id, session_id, ws_output.transcript_entries, feedback)
+            except Exception as e:
+                logger.warning("[WebSocket] Failed to generate QA analytics: %s", e)
+
         try:
             await websocket.send_json({"type": "session_ended", "reason": "server_complete"})
         except Exception:
