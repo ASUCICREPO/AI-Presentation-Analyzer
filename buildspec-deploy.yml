@@ -26,7 +26,7 @@ phases:
       - echo "Installing npm dependencies..."
       - npm install
       - echo "Checking if CDK bootstrap is needed..."
-      - npx cdk bootstrap --require-approval never
+      - npx cdk bootstrap -c branchName=$BRANCH_NAME --require-approval never
     finally:
       - echo "Pre-build phase completed"
 
@@ -35,9 +35,9 @@ phases:
     commands:
       - echo "Deploying CDK stack..."
       - echo "Listing available stacks..."
-      - npx cdk list
+      - npx cdk list -c branchName=$BRANCH_NAME
       - echo "Deploying stack - $STACK_NAME"
-      - npx cdk deploy $STACK_NAME --require-approval never --verbose
+      - npx cdk deploy --all -c branchName=$BRANCH_NAME --require-approval never --verbose
     finally:
       - echo "Build phase completed"
 
