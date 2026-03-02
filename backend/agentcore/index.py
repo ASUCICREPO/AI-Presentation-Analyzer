@@ -18,9 +18,6 @@ import boto3
 import aioboto3
 import os
 import json
-import logging
-
-logger = logging.getLogger("agentcore.qa")
 
 '''
 A quick note on voice selection:
@@ -40,7 +37,7 @@ if DEFAULT_VOICE_ID not in VALID_VOICES:
     raise ValueError(f"Invalid VOICE_ID '{DEFAULT_VOICE_ID}'. Must be one of: {VALID_VOICES}.")
 MODEL_ID=os.getenv("MODEL_ID", "amazon.nova-2-sonic-v1:0") #Nova 2 Sonic default for best performance.
 SESSION_DURATION_SEC = int(os.getenv("SESSION_DURATION_SEC", "300"))  # 5 minutes default
-QA_ANALYTICS_MODEL_ID = os.getenv("QA_ANALYTICS_MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+QA_ANALYTICS_MODEL_ID = os.getenv("QA_ANALYTICS_MODEL_ID", "global.amazon.nova-2-lite-v1:0")
 
 
 def build_qa_system_prompt(persona_name: str, persona_prompt: str, custom_instructions: str, transcript_text: str) -> str:
@@ -182,7 +179,7 @@ class WebSocketBidiOutput(BidiOutput):
         except WebSocketDisconnect:
             pass
         except Exception as e:
-            logger.warning("Failed to send output event: %s", e)
+            print(f"[Warning] Failed to send output event: {e}", flush=True)
 
     async def stop(self) -> None:
         pass
@@ -213,15 +210,14 @@ async def load_persona(persona_id: str) -> dict:
         return {}
 
 
-async def load_transcript(user_id: str, date_str: str, session_id: str) -> str:
+async def load_transcript(user_id: str, session_id: str) -> str:
     """Load presentation transcript from S3."""
     bucket_name = os.getenv('UPLOADS_BUCKET')
     if not bucket_name:
         print("[Error] UPLOADS_BUCKET environment variable not set")
         return ""
     
-    # S3 key format: {userId}/{dateStr}/{sessionId}/transcript.json
-    s3_key = f"{user_id}/{date_str}/{session_id}/transcript.json"
+    s3_key = f"{user_id}/{session_id}/transcript.json"
     
     try:
         session = aioboto3.Session()
@@ -344,7 +340,7 @@ async def save_qa_analytics(user_id: str, session_id: str, transcript_entries: l
     """Save QA transcript and analytics to S3."""
     bucket_name = os.getenv('UPLOADS_BUCKET')
     if not bucket_name:
-        logger.error("[QA Analytics] UPLOADS_BUCKET not set")
+        print("[Error] [QA Analytics] UPLOADS_BUCKET not set", flush=True)
         return
 
     s3_prefix = f"{user_id}/{session_id}"
@@ -375,7 +371,7 @@ async def save_qa_analytics(user_id: str, session_id: str, transcript_entries: l
             Body=json.dumps(result, indent=2),
             ContentType='application/json',
         )
-        logger.info("[QA Analytics] Saved to s3://%s/%s/qa_analytics.json", bucket_name, s3_prefix)
+        print(f"[QA Analytics] Saved to s3://{bucket_name}/{s3_prefix}/qa_analytics.json", flush=True)
 
 @app.websocket
 async def websocket_handler(websocket, context: RequestContext):
@@ -395,30 +391,29 @@ async def websocket_handler(websocket, context: RequestContext):
     try:
         raw = await asyncio.wait_for(websocket.receive_json(), timeout=10)
     except asyncio.TimeoutError:
-        logger.warning("[WebSocket] Timed out waiting for setup message")
+        print("[WebSocket] Timed out waiting for setup message", flush=True)
         await websocket.send_json({"type": "error", "message": "Setup message not received within 10 s"})
         await websocket.close()
         return
     except WebSocketDisconnect:
-        logger.info("[WebSocket] Client disconnected before sending setup")
+        print("[WebSocket] Client disconnected before sending setup", flush=True)
         return
 
     if raw.get("action") != "setup":
-        logger.warning("[WebSocket] Expected setup message, got: %s", raw.get("action"))
+        print(f"[WebSocket] Expected setup message, got: {raw.get('action')}", flush=True)
         await websocket.send_json({"type": "error", "message": "First message must be {action: 'setup', ...}"})
         await websocket.close()
         return
 
     persona_id = raw.get("personaId", "")
     user_id    = raw.get("userId", "")
-    date_str   = raw.get("dateStr", "")
     voice_id   = raw.get("voiceId", DEFAULT_VOICE_ID)
     session_id = raw.get("sessionId", "") or (context.session_id or "")
 
-    logger.info("[WebSocket] Setup from user=%s persona=%s session=%s", user_id, persona_id, session_id)
+    print(f"[WebSocket] Setup from user={user_id} persona={persona_id} session={session_id}", flush=True)
 
     if not persona_id or not user_id or not session_id:
-        logger.warning("[WebSocket] Missing required params: persona=%s user=%s session=%s", persona_id, user_id, session_id)
+        print(f"[WebSocket] Missing required params: persona={persona_id} user={user_id} session={session_id}", flush=True)
         await websocket.send_json({"type": "error", "message": "Setup missing personaId, userId, or sessionId"})
         await websocket.close()
         return
@@ -434,9 +429,9 @@ async def websocket_handler(websocket, context: RequestContext):
             await websocket.close()
             return
 
-        transcript_text = await load_transcript(user_id, date_str, session_id)
+        transcript_text = await load_transcript(user_id, session_id)
         if not transcript_text:
-            logger.info("[WebSocket] No transcript for session %s, using placeholder", session_id)
+            print(f"[WebSocket] No transcript for session {session_id}, using placeholder", flush=True)
             transcript_text = "No presentation transcript available."
 
         system_prompt = build_qa_system_prompt(
@@ -462,22 +457,17 @@ async def websocket_handler(websocket, context: RequestContext):
         ws_input = WebSocketBidiInput(websocket)
         ws_output = WebSocketBidiOutput(websocket)
         
-        logger.info("[WebSocket] Starting BidiAgent for session %s", session_id)
+        print(f"[WebSocket] Starting BidiAgent for session {session_id}", flush=True)
         await agent.run(inputs=[ws_input], outputs=[ws_output])
         
     except WebSocketDisconnect:
-        logger.info("[WebSocket] Client disconnected")
+        print("[WebSocket] Client disconnected", flush=True)
     except asyncio.CancelledError:
-        logger.info("[WebSocket] Session cancelled (client ended or disconnected)")
+        print("[WebSocket] Session cancelled (client ended or disconnected)", flush=True)
     except Exception as e:
-        logger.exception("[WebSocket] Handler error: %s", e)
-        try:
-            await websocket.send_json({
-                "type": "error",
-                "message": str(e)
-            })
-        except Exception:
-            pass
+        print(f"[WebSocket] Handler error: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
     finally:
         if agent:
             try:
@@ -488,7 +478,7 @@ async def websocket_handler(websocket, context: RequestContext):
         # Generate QA analytics and send via WebSocket + save to S3
         if ws_output and ws_output.transcript_entries:
             try:
-                logger.info("[WebSocket] Generating QA analytics (%d transcript entries)", len(ws_output.transcript_entries))
+                print(f"[WebSocket] Generating QA analytics ({len(ws_output.transcript_entries)} transcript entries)", flush=True)
                 feedback = await generate_qa_analytics(ws_output.transcript_entries, persona_data)
                 total_questions = sum(1 for e in ws_output.transcript_entries if e['role'] == 'assistant')
                 total_responses = sum(1 for e in ws_output.transcript_entries if e['role'] == 'user')
@@ -503,18 +493,22 @@ async def websocket_handler(websocket, context: RequestContext):
                 # Send analytics to frontend via WebSocket before closing
                 try:
                     await websocket.send_json(qa_result)
-                    logger.info("[WebSocket] QA analytics sent to client")
-                except Exception:
-                    pass
+                    print("[WebSocket] QA analytics sent to client", flush=True)
+                except Exception as send_err:
+                    print(f"[WebSocket] Failed to send QA analytics to client: {send_err}", flush=True)
 
                 # Also persist to S3 for future access
                 try:
                     await save_qa_analytics(user_id, session_id, ws_output.transcript_entries, feedback)
                 except Exception as e:
-                    logger.warning("[WebSocket] Failed to save QA analytics to S3: %s", e)
+                    print(f"[WebSocket] Failed to save QA analytics to S3: {e}", flush=True)
 
             except Exception as e:
-                logger.warning("[WebSocket] Failed to generate QA analytics: %s", e)
+                print(f"[WebSocket] Failed to generate QA analytics: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
+        else:
+            print(f"[WebSocket] Skipping QA analytics — ws_output={ws_output is not None}, entries={len(ws_output.transcript_entries) if ws_output else 0}", flush=True)
 
         try:
             await websocket.send_json({"type": "session_ended", "reason": "server_complete"})
