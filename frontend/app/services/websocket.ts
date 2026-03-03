@@ -126,6 +126,10 @@ export class QAWebSocketClient {
     this.send({ action: 'text', text });
   }
 
+  requestAnalytics(): void {
+    this.send({ action: 'get_analytics' });
+  }
+
   endSession(): void {
     this.send({ action: 'end' });
   }

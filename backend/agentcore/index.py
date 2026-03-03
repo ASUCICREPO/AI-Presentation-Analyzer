@@ -99,11 +99,15 @@ class WebSocketBidiInput(BidiInput):
     The browser sends JSON frames: {"action": "audio", "data": "<base64 PCM>"}
     This converts them into BidiAudioInputEvent objects the agent understands.
     The frontend already base64-encodes 16-bit PCM at 16 kHz mono.
+
+    When the client requests analytics, we generate and send them while the
+    agent is still running (keeping the WS alive), then the client sends "end".
     """
 
     def __init__(self, websocket: WebSocket):
         self._ws = websocket
         self._stopped = False
+        self._analytics_requested = asyncio.Event()
 
     async def start(self, agent: BidiAgent) -> None:
         self._stopped = False
@@ -124,6 +128,8 @@ class WebSocketBidiInput(BidiInput):
                     sample_rate=16000,
                     channels=1,
                 )
+            elif action == "get_analytics":
+                self._analytics_requested.set()
             elif action == "end":
                 self._stopped = True
                 raise asyncio.CancelledError("client ended session")
@@ -420,7 +426,9 @@ async def websocket_handler(websocket, context: RequestContext):
     
     agent = None
     ws_output = None
+    ws_input = None
     persona_data = {}
+    client_disconnected = False
 
     try:
         persona_data = await load_persona(persona_id)
@@ -453,17 +461,76 @@ async def websocket_handler(websocket, context: RequestContext):
             "persona_name": persona_data.get('name', 'Interviewer'),
             "session_id": session_id
         })
-        
+
         ws_input = WebSocketBidiInput(websocket)
         ws_output = WebSocketBidiOutput(websocket)
-        
+
+        async def analytics_watcher():
+            """Wait for client to request analytics, generate and send them
+            while the agent (and WS) are still alive."""
+            await ws_input._analytics_requested.wait()
+            if not ws_output.transcript_entries:
+                print("[WebSocket] Analytics requested but no transcript entries", flush=True)
+                return
+            try:
+                print(f"[WebSocket] Generating QA analytics ({len(ws_output.transcript_entries)} entries)", flush=True)
+                feedback = await generate_qa_analytics(ws_output.transcript_entries, persona_data)
+                total_q = sum(1 for e in ws_output.transcript_entries if e['role'] == 'assistant')
+                total_r = sum(1 for e in ws_output.transcript_entries if e['role'] == 'user')
+                await websocket.send_json({
+                    "type": "qa_analytics",
+                    "qaFeedback": feedback,
+                    "totalQuestions": total_q,
+                    "totalResponses": total_r,
+                })
+                print("[WebSocket] QA analytics sent to client", flush=True)
+                await save_qa_analytics(user_id, session_id, ws_output.transcript_entries, feedback)
+            except Exception as e:
+                print(f"[WebSocket] Analytics watcher error: {e}", flush=True)
+
         print(f"[WebSocket] Starting BidiAgent for session {session_id}", flush=True)
-        await agent.run(inputs=[ws_input], outputs=[ws_output])
-        
-    except WebSocketDisconnect:
-        print("[WebSocket] Client disconnected", flush=True)
-    except asyncio.CancelledError:
-        print("[WebSocket] Session cancelled (client ended or disconnected)", flush=True)
+
+        try:
+            analytics_task = asyncio.create_task(analytics_watcher())
+            await agent.run(inputs=[ws_input], outputs=[ws_output])
+        except WebSocketDisconnect:
+            print("[WebSocket] Client disconnected", flush=True)
+            client_disconnected = True
+        except asyncio.CancelledError:
+            print("[WebSocket] Session cancelled (client ended or disconnected)", flush=True)
+        except Exception as e:
+            print(f"[WebSocket] Agent run error: {e}", flush=True)
+        finally:
+            analytics_task.cancel()
+            try:
+                await analytics_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        # Fallback: if analytics were never requested but we have transcript data
+        # (e.g. session timed out without the client requesting analytics)
+        if not ws_input._analytics_requested.is_set() and ws_output and ws_output.transcript_entries and not client_disconnected:
+            feedback = None
+            try:
+                print(f"[WebSocket] Generating fallback QA analytics ({len(ws_output.transcript_entries)} entries)", flush=True)
+                feedback = await generate_qa_analytics(ws_output.transcript_entries, persona_data)
+                total_q = sum(1 for e in ws_output.transcript_entries if e['role'] == 'assistant')
+                total_r = sum(1 for e in ws_output.transcript_entries if e['role'] == 'user')
+                await websocket.send_json({
+                    "type": "qa_analytics",
+                    "qaFeedback": feedback,
+                    "totalQuestions": total_q,
+                    "totalResponses": total_r,
+                })
+                print("[WebSocket] Fallback QA analytics sent to client", flush=True)
+            except Exception as e:
+                print(f"[WebSocket] Failed to send fallback analytics: {e}", flush=True)
+            if feedback:
+                try:
+                    await save_qa_analytics(user_id, session_id, ws_output.transcript_entries, feedback)
+                except Exception as e:
+                    print(f"[WebSocket] Failed to save QA analytics to S3: {e}", flush=True)
+
     except Exception as e:
         print(f"[WebSocket] Handler error: {e}", flush=True)
         import traceback
@@ -474,41 +541,6 @@ async def websocket_handler(websocket, context: RequestContext):
                 await agent.stop()
             except Exception:
                 pass
-
-        # Generate QA analytics and send via WebSocket + save to S3
-        if ws_output and ws_output.transcript_entries:
-            try:
-                print(f"[WebSocket] Generating QA analytics ({len(ws_output.transcript_entries)} transcript entries)", flush=True)
-                feedback = await generate_qa_analytics(ws_output.transcript_entries, persona_data)
-                total_questions = sum(1 for e in ws_output.transcript_entries if e['role'] == 'assistant')
-                total_responses = sum(1 for e in ws_output.transcript_entries if e['role'] == 'user')
-
-                qa_result = {
-                    "type": "qa_analytics",
-                    "qaFeedback": feedback,
-                    "totalQuestions": total_questions,
-                    "totalResponses": total_responses,
-                }
-
-                # Send analytics to frontend via WebSocket before closing
-                try:
-                    await websocket.send_json(qa_result)
-                    print("[WebSocket] QA analytics sent to client", flush=True)
-                except Exception as send_err:
-                    print(f"[WebSocket] Failed to send QA analytics to client: {send_err}", flush=True)
-
-                # Also persist to S3 for future access
-                try:
-                    await save_qa_analytics(user_id, session_id, ws_output.transcript_entries, feedback)
-                except Exception as e:
-                    print(f"[WebSocket] Failed to save QA analytics to S3: {e}", flush=True)
-
-            except Exception as e:
-                print(f"[WebSocket] Failed to generate QA analytics: {e}", flush=True)
-                import traceback
-                traceback.print_exc()
-        else:
-            print(f"[WebSocket] Skipping QA analytics — ws_output={ws_output is not None}, entries={len(ws_output.transcript_entries) if ws_output else 0}", flush=True)
 
         try:
             await websocket.send_json({"type": "session_ended", "reason": "server_complete"})

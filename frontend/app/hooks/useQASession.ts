@@ -125,6 +125,8 @@ export function useQASession(
           analyticsResolveRef.current(analyticsReceivedRef.current);
           analyticsResolveRef.current = null;
         }
+        // Analytics received — now tell the server to end the session
+        wsClientRef.current?.endSession();
         break;
 
       case 'session_ended':
@@ -340,9 +342,12 @@ export function useQASession(
       playbackGainRef.current.disconnect();
     }
 
-    wsClientRef.current?.endSession();
     stopAudioCapture();
     stopTimer();
+
+    // Request analytics while the agent is still running (WS stays open).
+    // Once we receive qa_analytics, the handler sends "end" to close the session.
+    wsClientRef.current?.requestAnalytics();
 
     return new Promise<QAAnalyticsResponse | null>((resolve) => {
       analyticsResolveRef.current = resolve;
@@ -352,6 +357,7 @@ export function useQASession(
           analyticsResolveRef.current(analyticsReceivedRef.current);
           analyticsResolveRef.current = null;
         }
+        wsClientRef.current?.endSession();
         wsClientRef.current?.disconnect();
         wsClientRef.current = null;
         endingRef.current = false;

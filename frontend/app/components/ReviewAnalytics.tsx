@@ -201,6 +201,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
         <ReportDocument
           sessionData={sessionData}
           aiFeedback={aiFeedback}
+          qaAnalytics={qaAnalytics}
           stats={stats}
           overallScore={overallScore}
           feedbackPersonaLabel={feedbackPersona?.title || "Persona"}
