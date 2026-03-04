@@ -18,12 +18,8 @@ import boto3
 import aioboto3
 import os
 import json
-import logging
 import sys
 from jinja2 import Template
-
-logging.basicConfig(level=logging.INFO, stream=sys.stdout, force=True)
-logger = logging.getLogger("agentcore.qa")
 
 '''
 A quick note on voice selection:
@@ -67,7 +63,7 @@ def build_qa_system_prompt(persona_name: str, persona_prompt: str, custom_instru
         transcript_text=transcript_text,
         qa_limit=qa_duration
     )
-    logger.info("Rendered QA system prompt:\n%s", prompt)
+    print("Rendered QA system prompt:\n%s", prompt)
     return prompt
 
 
@@ -193,7 +189,7 @@ async def load_persona(persona_id: str) -> dict:
     """Load persona configuration from DynamoDB."""
     table_name = os.getenv('PERSONA_TABLE_NAME')
     if not table_name:
-        logger.error("PERSONA_TABLE_NAME environment variable not set")
+        print("PERSONA_TABLE_NAME environment variable not set")
         return {}
 
     try:
@@ -203,12 +199,12 @@ async def load_persona(persona_id: str) -> dict:
             response = await table.get_item(Key={'personaID': persona_id})
 
             if 'Item' not in response:
-                logger.warning("Persona %s not found in DynamoDB", persona_id)
+                print("Persona %s not found in DynamoDB", persona_id)
                 return {}
 
             return response['Item']
     except Exception as e:
-        logger.exception("Failed to load persona %s: %s", persona_id, e)
+        print("Failed to load persona %s: %s", persona_id, e)
         return {}
 
 
@@ -216,7 +212,7 @@ async def load_transcript(user_id: str, session_id: str) -> str:
     """Load presentation transcript from S3."""
     bucket_name = os.getenv('UPLOADS_BUCKET')
     if not bucket_name:
-        logger.error("UPLOADS_BUCKET environment variable not set")
+        print("UPLOADS_BUCKET environment variable not set")
         return ""
     
     s3_key = f"{user_id}/{session_id}/transcript.json"
@@ -241,11 +237,11 @@ async def load_transcript(user_id: str, session_id: str) -> str:
                 transcript_text = str(transcript_data)
 
             transcript_text = transcript_text.strip()
-            logger.info("Loaded transcript (%d chars) from s3://%s/%s", len(transcript_text), bucket_name, s3_key)
+            print("Loaded transcript (%d chars) from s3://%s/%s", len(transcript_text), bucket_name, s3_key)
             return transcript_text
 
     except Exception as e:
-        logger.warning("Failed to load transcript from s3://%s/%s: %s", bucket_name, s3_key, e)
+        print("Failed to load transcript from s3://%s/%s: %s", bucket_name, s3_key, e)
         return ""
 
 
@@ -260,7 +256,7 @@ def health_check():
 async def log_system_prompt_to_cloudwatch(session_id: str, system_prompt: str) -> None:
     """Write the rendered system prompt to a dedicated CloudWatch log stream."""
     if not CLOUDWATCH_LOG_GROUP:
-        logger.warning("[SystemPromptLog] CLOUDWATCH_LOG_GROUP not set; skipping dedicated log stream")
+        print("[SystemPromptLog] CLOUDWATCH_LOG_GROUP not set; skipping dedicated log stream")
         return
     stream_name = f"system-prompts/{session_id}"
     try:
@@ -278,9 +274,9 @@ async def log_system_prompt_to_cloudwatch(session_id: str, system_prompt: str) -
                     'message': system_prompt,
                 }]
             )
-        logger.info("[SystemPromptLog] Prompt logged to stream: %s/%s", CLOUDWATCH_LOG_GROUP, stream_name)
+        print("[SystemPromptLog] Prompt logged to stream: %s/%s", CLOUDWATCH_LOG_GROUP, stream_name)
     except Exception as e:
-        logger.warning("[SystemPromptLog] Failed to write to CloudWatch: %s", e)
+        print("[SystemPromptLog] Failed to write to CloudWatch: %s", e)
 
 
 async def generate_qa_analytics(transcript_entries: list[dict], persona_data: dict) -> dict:
