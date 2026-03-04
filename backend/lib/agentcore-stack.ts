@@ -43,13 +43,15 @@ export class AgentCoreStack extends cdk.Stack {
         'UPLOADS_BUCKET': props.uploadsBucket.bucketName,
         // AgentCore auto-creates this log group; passing it lets the container
         // write the rendered system prompt to a dedicated log stream per session.
-        'CLOUDWATCH_LOG_GROUP': cdk.Fn.join('', [
-          '/aws/bedrock-agentcore/runtimes/',
-          cdk.Fn.select(1, cdk.Fn.split('/',
-            cdk.Fn.select(5, cdk.Fn.split(':', agentCoreRuntime.agentRuntimeArn))
-          )),
-          '-DEFAULT',
-        ]),
+        'CLOUDWATCH_LOG_GROUP': cdk.Lazy.string({
+          produce: () => cdk.Fn.join('', [
+            '/aws/bedrock-agentcore/runtimes/',
+            cdk.Fn.select(1, cdk.Fn.split('/',
+              cdk.Fn.select(5, cdk.Fn.split(':', agentCoreRuntime.agentRuntimeArn))
+            )),
+            '-DEFAULT',
+          ]),
+        }),
       },
       lifecycleConfiguration: {
         idleRuntimeSessionTimeout: cdk.Duration.minutes(10),
