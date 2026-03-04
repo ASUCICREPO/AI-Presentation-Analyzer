@@ -28,7 +28,7 @@ export class AgentCoreStack extends cdk.Stack {
       platform: ecrAssets.Platform.LINUX_ARM64,
     });
 
-    const agentCoreRuntime = new agentcore.Runtime(this, 'LiveQAAgentRuntime', {
+    const agentCoreRuntime: agentcore.Runtime = new agentcore.Runtime(this, 'LiveQAAgentRuntime', {
       description: 'Bidirectional voice agent for live Q&A sessions with WebSocket support',
       agentRuntimeArtifact: agentcore.AgentRuntimeArtifact.fromEcrRepository(
         agentCoreImage.repository,
@@ -44,7 +44,7 @@ export class AgentCoreStack extends cdk.Stack {
         // AgentCore auto-creates this log group; passing it lets the container
         // write the rendered system prompt to a dedicated log stream per session.
         'CLOUDWATCH_LOG_GROUP': cdk.Lazy.string({
-          produce: () => cdk.Fn.join('', [
+          produce: (): string => cdk.Fn.join('', [
             '/aws/bedrock-agentcore/runtimes/',
             cdk.Fn.select(1, cdk.Fn.split('/',
               cdk.Fn.select(5, cdk.Fn.split(':', agentCoreRuntime.agentRuntimeArn))
