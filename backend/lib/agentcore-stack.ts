@@ -72,8 +72,11 @@ export class AgentCoreStack extends cdk.Stack {
     // attachToRole() creates AWS::IAM::Policy here, referencing the role by name
     // (a cross-stack import from AIPresentationCoachStack, same direction as all
     // other props). AIPresentationCoachStack has zero references to this stack.
-    const authRolePolicy = new iam.CfnPolicy(this, 'AuthRoleAgentCorePolicy', {
-      policyName: 'AgentCoreInvokeWebSocket',
+    // ManagedPolicy instead of Policy to avoid implicit CloudFormation dependency:
+    // AWS::BedrockAgentCore::Runtime implicitly depends on all AWS::IAM::Policy
+    // resources in the stack. Using AWS::IAM::ManagedPolicy breaks that cycle.
+    const authRolePolicy = new iam.CfnManagedPolicy(this, 'AuthRoleAgentCorePolicy', {
+      managedPolicyName: `AgentCoreInvokeWebSocket-${this.stackName}`,
       policyDocument: {
         Version: '2012-10-17',
         Statement: [{
