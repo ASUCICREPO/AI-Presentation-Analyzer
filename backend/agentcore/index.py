@@ -18,7 +18,6 @@ import boto3
 import aioboto3
 import os
 import json
-import sys
 from jinja2 import Template
 
 '''
@@ -63,7 +62,7 @@ def build_qa_system_prompt(persona_name: str, persona_prompt: str, custom_instru
         transcript_text=transcript_text,
         qa_limit=qa_duration
     )
-    print("Rendered QA system prompt:\n%s", prompt)
+    print(f"Rendered QA system prompt:\n{prompt}")
     return prompt
 
 
@@ -199,12 +198,12 @@ async def load_persona(persona_id: str) -> dict:
             response = await table.get_item(Key={'personaID': persona_id})
 
             if 'Item' not in response:
-                print("Persona %s not found in DynamoDB", persona_id)
+                print(f"Persona {persona_id} not found in DynamoDB")
                 return {}
 
             return response['Item']
     except Exception as e:
-        print("Failed to load persona %s: %s", persona_id, e)
+        print(f"Failed to load persona {persona_id}: {e}")
         return {}
 
 
@@ -237,11 +236,11 @@ async def load_transcript(user_id: str, session_id: str) -> str:
                 transcript_text = str(transcript_data)
 
             transcript_text = transcript_text.strip()
-            print("Loaded transcript (%d chars) from s3://%s/%s", len(transcript_text), bucket_name, s3_key)
+            print(f"Loaded transcript ({len(transcript_text)} chars) from s3://{bucket_name}/{s3_key}")
             return transcript_text
 
     except Exception as e:
-        print("Failed to load transcript from s3://%s/%s: %s", bucket_name, s3_key, e)
+        print(f"Failed to load transcript from s3://{bucket_name}/{s3_key}: {e}")
         return ""
 
 
@@ -274,9 +273,9 @@ async def log_system_prompt_to_cloudwatch(session_id: str, system_prompt: str) -
                     'message': system_prompt,
                 }]
             )
-        print("[SystemPromptLog] Prompt logged to stream: %s/%s", CLOUDWATCH_LOG_GROUP, stream_name)
+        print(f"[SystemPromptLog] Prompt logged to stream: {CLOUDWATCH_LOG_GROUP}/{stream_name}")
     except Exception as e:
-        print("[SystemPromptLog] Failed to write to CloudWatch: %s", e)
+        print(f"[SystemPromptLog] Failed to write to CloudWatch: {e}")
 
 
 async def generate_qa_analytics(transcript_entries: list[dict], persona_data: dict) -> dict:
