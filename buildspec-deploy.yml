@@ -42,7 +42,6 @@ phases:
   build:
     on-failure: ABORT
     commands:
-      - cd backend
       - echo "Deploying CDK stack..."
       - echo "Listing available stacks..."
       - npx cdk list $CDK_CONTEXT
