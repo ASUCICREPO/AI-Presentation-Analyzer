@@ -41,16 +41,11 @@ export class AgentCoreStack extends cdk.Stack {
         'SESSION_DURATION_SEC': '300',
         'PERSONA_TABLE_NAME': props.personasTable.tableName,
         'UPLOADS_BUCKET': props.uploadsBucket.bucketName,
-        // AgentCore auto-creates this log group; passing it lets the container
-        // write the rendered system prompt to a dedicated log stream per session.
-        'CLOUDWATCH_LOG_GROUP': cdk.Lazy.string({
-          produce: (): string => cdk.Fn.join('', [
-            '/aws/bedrock-agentcore/runtimes/',
-            cdk.Fn.select(1, cdk.Fn.split('/',
-              cdk.Fn.select(5, cdk.Fn.split(':', agentCoreRuntime.agentRuntimeArn))
-            )),
-            '-DEFAULT',
-          ]),
+        // The container constructs the log-group path at runtime from the name.
+        // We cannot use agentRuntimeArn here — it would create a Fn::GetAtt
+        // self-reference that CloudFormation rejects as a circular dependency.
+        'AGENT_RUNTIME_NAME': cdk.Lazy.string({
+          produce: () => agentCoreRuntime.agentRuntimeName,
         }),
       },
       lifecycleConfiguration: {

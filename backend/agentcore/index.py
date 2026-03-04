@@ -39,7 +39,8 @@ if DEFAULT_VOICE_ID not in VALID_VOICES:
 MODEL_ID=os.getenv("MODEL_ID", "amazon.nova-2-sonic-v1:0") #Nova 2 Sonic default for best performance.
 SESSION_DURATION_SEC = int(os.getenv("SESSION_DURATION_SEC", "300"))  # 5 minutes default
 QA_ANALYTICS_MODEL_ID = os.getenv("QA_ANALYTICS_MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
-CLOUDWATCH_LOG_GROUP = os.getenv("CLOUDWATCH_LOG_GROUP", "")
+_runtime_name = os.getenv("AGENT_RUNTIME_NAME", "")
+CLOUDWATCH_LOG_GROUP = f"/aws/bedrock-agentcore/runtimes/{_runtime_name}-DEFAULT" if _runtime_name else ""
 
 
 def build_qa_system_prompt(persona_name: str, persona_prompt: str, custom_instructions: str, transcript_text: str, session_duration: float) -> str:
