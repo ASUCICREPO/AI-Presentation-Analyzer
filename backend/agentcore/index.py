@@ -10,7 +10,7 @@ from strands.experimental.bidi.types.events import (
 from strands.experimental.bidi.types.io import BidiInput, BidiOutput, BidiOutputEvent
 from strands.experimental.bidi.models import BidiNovaSonicModel
 from strands.experimental.bidi.tools import stop_conversation
-from bedrock_agentcore import BedrockAgentCoreApp, RequestContext
+from bedrock_agentcore import BedrockAgentCoreApp, RequestContext, PingStatus
 from typing import Literal
 from datetime import datetime, timezone
 import asyncio
@@ -44,6 +44,7 @@ if DEFAULT_VOICE_ID not in VALID_VOICES:
 MODEL_ID=os.getenv("MODEL_ID", "amazon.nova-2-sonic-v1:0") #Nova 2 Sonic default for best performance.
 SESSION_DURATION_SEC = int(os.getenv("SESSION_DURATION_SEC", "300"))  # 5 minutes default
 QA_ANALYTICS_MODEL_ID = os.getenv("QA_ANALYTICS_MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+CLOUDWATCH_LOG_GROUP = os.getenv("CLOUDWATCH_LOG_GROUP", "")
 
 
 def build_qa_system_prompt(persona_name: str, persona_prompt: str, custom_instructions: str, transcript_text: str, session_duration: float) -> str:
@@ -56,7 +57,8 @@ def build_qa_system_prompt(persona_name: str, persona_prompt: str, custom_instru
         qa_duration = 5 # Cap at 5 minutes
 
     
-    template_file = open("qa_system_prompt.jinja2", "r").read()
+    with open("qa_system_prompt.jinja2", "r") as f:
+        template_file = f.read()
     template = Template(template_file)
     prompt = template.render(
         persona_name=persona_name,
@@ -244,6 +246,37 @@ async def load_transcript(user_id: str, date_str: str, session_id: str) -> str:
 
 
 app = BedrockAgentCoreApp()
+
+
+@app.ping
+def health_check():
+    return PingStatus.HEALTHY
+
+
+async def log_system_prompt_to_cloudwatch(session_id: str, system_prompt: str) -> None:
+    """Write the rendered system prompt to a dedicated CloudWatch log stream."""
+    if not CLOUDWATCH_LOG_GROUP:
+        logger.warning("[SystemPromptLog] CLOUDWATCH_LOG_GROUP not set; skipping dedicated log stream")
+        return
+    stream_name = f"system-prompts/{session_id}"
+    try:
+        session = aioboto3.Session()
+        async with session.client('logs', region_name=REGION) as logs:
+            try:
+                await logs.create_log_stream(logGroupName=CLOUDWATCH_LOG_GROUP, logStreamName=stream_name)
+            except logs.exceptions.ResourceAlreadyExistsException:
+                pass
+            await logs.put_log_events(
+                logGroupName=CLOUDWATCH_LOG_GROUP,
+                logStreamName=stream_name,
+                logEvents=[{
+                    'timestamp': int(datetime.now(timezone.utc).timestamp() * 1000),
+                    'message': system_prompt,
+                }]
+            )
+        logger.info("[SystemPromptLog] Prompt logged to stream: %s/%s", CLOUDWATCH_LOG_GROUP, stream_name)
+    except Exception as e:
+        logger.warning("[SystemPromptLog] Failed to write to CloudWatch: %s", e)
 
 
 async def generate_qa_analytics(transcript_entries: list[dict], persona_data: dict) -> dict:
@@ -440,6 +473,7 @@ async def websocket_handler(websocket, context: RequestContext):
             transcript_text=transcript_text,
             session_duration=SESSION_DURATION_SEC
         )
+        await log_system_prompt_to_cloudwatch(session_id, system_prompt)
 
         model = create_nova_sonic_model(voice_id)
         agent = BidiAgent(
@@ -461,9 +495,6 @@ async def websocket_handler(websocket, context: RequestContext):
         await agent.start()
         await ws_input.start(agent)
         await ws_output.start(agent)
-
-        # Trigger the agent to open the conversation without waiting for user input
-        await agent.send("Please begin the Q&A session now.")
 
         async def _run_inputs() -> None:
             while True:
