@@ -97,11 +97,15 @@ class WebSocketBidiInput(BidiInput):
     The browser sends JSON frames: {"action": "audio", "data": "<base64 PCM>"}
     This converts them into BidiAudioInputEvent objects the agent understands.
     The frontend already base64-encodes 16-bit PCM at 16 kHz mono.
+
+    When the client requests analytics, we generate and send them while the
+    agent is still running (keeping the WS alive), then the client sends "end".
     """
 
     def __init__(self, websocket: WebSocket):
         self._ws = websocket
         self._stopped = False
+        self._analytics_requested = asyncio.Event()
 
     async def start(self, agent: BidiAgent) -> None:
         self._stopped = False
@@ -122,6 +126,8 @@ class WebSocketBidiInput(BidiInput):
                     sample_rate=16000,
                     channels=1,
                 )
+            elif action == "get_analytics":
+                self._analytics_requested.set()
             elif action == "end":
                 self._stopped = True
                 raise asyncio.CancelledError("client ended session")
@@ -177,7 +183,7 @@ class WebSocketBidiOutput(BidiOutput):
         except WebSocketDisconnect:
             pass
         except Exception as e:
-            logger.warning("Failed to send output event: %s", e)
+            print(f"[Warning] Failed to send output event: {e}", flush=True)
 
     async def stop(self) -> None:
         pass
@@ -206,17 +212,15 @@ async def load_persona(persona_id: str) -> dict:
         return {}
 
 
-async def load_transcript(user_id: str, date_str: str, session_id: str) -> str:
+async def load_transcript(user_id: str, session_id: str) -> str:
     """Load presentation transcript from S3."""
     bucket_name = os.getenv('UPLOADS_BUCKET')
     if not bucket_name:
         logger.error("UPLOADS_BUCKET environment variable not set")
         return ""
-
-    # S3 key format: {userId}/{dateStr}/{sessionId}/transcript.json
-    s3_key = f"{user_id}/{date_str}/{session_id}/transcript.json"
-    logger.info("Loading transcript from s3://%s/%s", bucket_name, s3_key)
-
+    
+    s3_key = f"{user_id}/{session_id}/transcript.json"
+    
     try:
         session = aioboto3.Session()
         async with session.client('s3', region_name=REGION) as s3:
@@ -371,7 +375,7 @@ async def save_qa_analytics(user_id: str, session_id: str, transcript_entries: l
     """Save QA transcript and analytics to S3."""
     bucket_name = os.getenv('UPLOADS_BUCKET')
     if not bucket_name:
-        logger.error("[QA Analytics] UPLOADS_BUCKET not set")
+        print("[Error] [QA Analytics] UPLOADS_BUCKET not set", flush=True)
         return
 
     s3_prefix = f"{user_id}/{session_id}"
@@ -402,7 +406,7 @@ async def save_qa_analytics(user_id: str, session_id: str, transcript_entries: l
             Body=json.dumps(result, indent=2),
             ContentType='application/json',
         )
-        logger.info("[QA Analytics] Saved to s3://%s/%s/qa_analytics.json", bucket_name, s3_prefix)
+        print(f"[QA Analytics] Saved to s3://{bucket_name}/{s3_prefix}/qa_analytics.json", flush=True)
 
 @app.websocket
 async def websocket_handler(websocket, context: RequestContext):
@@ -422,37 +426,38 @@ async def websocket_handler(websocket, context: RequestContext):
     try:
         raw = await asyncio.wait_for(websocket.receive_json(), timeout=10)
     except asyncio.TimeoutError:
-        logger.warning("[WebSocket] Timed out waiting for setup message")
+        print("[WebSocket] Timed out waiting for setup message", flush=True)
         await websocket.send_json({"type": "error", "message": "Setup message not received within 10 s"})
         await websocket.close()
         return
     except WebSocketDisconnect:
-        logger.info("[WebSocket] Client disconnected before sending setup")
+        print("[WebSocket] Client disconnected before sending setup", flush=True)
         return
 
     if raw.get("action") != "setup":
-        logger.warning("[WebSocket] Expected setup message, got: %s", raw.get("action"))
+        print(f"[WebSocket] Expected setup message, got: {raw.get('action')}", flush=True)
         await websocket.send_json({"type": "error", "message": "First message must be {action: 'setup', ...}"})
         await websocket.close()
         return
 
     persona_id = raw.get("personaId", "")
     user_id    = raw.get("userId", "")
-    date_str   = raw.get("dateStr", "")
     voice_id   = raw.get("voiceId", DEFAULT_VOICE_ID)
     session_id = raw.get("sessionId", "") or (context.session_id or "")
 
-    logger.info("[WebSocket] Setup from user=%s persona=%s session=%s", user_id, persona_id, session_id)
+    print(f"[WebSocket] Setup from user={user_id} persona={persona_id} session={session_id}", flush=True)
 
     if not persona_id or not user_id or not session_id:
-        logger.warning("[WebSocket] Missing required params: persona=%s user=%s session=%s", persona_id, user_id, session_id)
+        print(f"[WebSocket] Missing required params: persona={persona_id} user={user_id} session={session_id}", flush=True)
         await websocket.send_json({"type": "error", "message": "Setup missing personaId, userId, or sessionId"})
         await websocket.close()
         return
     
     agent = None
     ws_output = None
+    ws_input = None
     persona_data = {}
+    client_disconnected = False
 
     try:
         persona_data = await load_persona(persona_id)
@@ -461,9 +466,9 @@ async def websocket_handler(websocket, context: RequestContext):
             await websocket.close()
             return
 
-        transcript_text = await load_transcript(user_id, date_str, session_id)
+        transcript_text = await load_transcript(user_id, session_id)
         if not transcript_text:
-            logger.info("[WebSocket] No transcript for session %s, using placeholder", session_id)
+            print(f"[WebSocket] No transcript for session {session_id}, using placeholder", flush=True)
             transcript_text = "No presentation transcript available."
 
         system_prompt = build_qa_system_prompt(
@@ -487,85 +492,86 @@ async def websocket_handler(websocket, context: RequestContext):
             "persona_name": persona_data.get('name', 'Interviewer'),
             "session_id": session_id
         })
-        
+
         ws_input = WebSocketBidiInput(websocket)
         ws_output = WebSocketBidiOutput(websocket)
 
-        logger.info("[WebSocket] Starting BidiAgent for session %s", session_id)
-        await agent.start()
-        await ws_input.start(agent)
-        await ws_output.start(agent)
+        async def analytics_watcher():
+            """Wait for client to request analytics, generate and send them
+            while the agent (and WS) are still alive."""
+            await ws_input._analytics_requested.wait()
+            if not ws_output.transcript_entries:
+                print("[WebSocket] Analytics requested but no transcript entries", flush=True)
+                return
+            try:
+                print(f"[WebSocket] Generating QA analytics ({len(ws_output.transcript_entries)} entries)", flush=True)
+                feedback = await generate_qa_analytics(ws_output.transcript_entries, persona_data)
+                total_q = sum(1 for e in ws_output.transcript_entries if e['role'] == 'assistant')
+                total_r = sum(1 for e in ws_output.transcript_entries if e['role'] == 'user')
+                await websocket.send_json({
+                    "type": "qa_analytics",
+                    "qaFeedback": feedback,
+                    "totalQuestions": total_q,
+                    "totalResponses": total_r,
+                })
+                print("[WebSocket] QA analytics sent to client", flush=True)
+                await save_qa_analytics(user_id, session_id, ws_output.transcript_entries, feedback)
+            except Exception as e:
+                print(f"[WebSocket] Analytics watcher error: {e}", flush=True)
 
-        async def _run_inputs() -> None:
-            while True:
-                event = await ws_input()
-                await agent.send(event)
+        print(f"[WebSocket] Starting BidiAgent for session {session_id}", flush=True)
 
-        async def _run_outputs(inputs_task: asyncio.Task) -> None:
-            async for event in agent.receive():
-                await ws_output(event)
-            inputs_task.cancel()
-
-        input_task = asyncio.create_task(_run_inputs())
-        output_task = asyncio.create_task(_run_outputs(input_task))
         try:
-            await asyncio.gather(input_task, output_task)
+            analytics_task = asyncio.create_task(analytics_watcher())
+            await agent.run(inputs=[ws_input], outputs=[ws_output])
+        except WebSocketDisconnect:
+            print("[WebSocket] Client disconnected", flush=True)
+            client_disconnected = True
+        except asyncio.CancelledError:
+            print("[WebSocket] Session cancelled (client ended or disconnected)", flush=True)
+        except Exception as e:
+            print(f"[WebSocket] Agent run error: {e}", flush=True)
         finally:
-            if not input_task.done():
-                input_task.cancel()
-            if not output_task.done():
-                output_task.cancel()
-        
-    except WebSocketDisconnect:
-        logger.info("[WebSocket] Client disconnected")
-    except asyncio.CancelledError:
-        logger.info("[WebSocket] Session cancelled (client ended or disconnected)")
+            analytics_task.cancel()
+            try:
+                await analytics_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        # Fallback: if analytics were never requested but we have transcript data
+        # (e.g. session timed out without the client requesting analytics)
+        if not ws_input._analytics_requested.is_set() and ws_output and ws_output.transcript_entries and not client_disconnected:
+            feedback = None
+            try:
+                print(f"[WebSocket] Generating fallback QA analytics ({len(ws_output.transcript_entries)} entries)", flush=True)
+                feedback = await generate_qa_analytics(ws_output.transcript_entries, persona_data)
+                total_q = sum(1 for e in ws_output.transcript_entries if e['role'] == 'assistant')
+                total_r = sum(1 for e in ws_output.transcript_entries if e['role'] == 'user')
+                await websocket.send_json({
+                    "type": "qa_analytics",
+                    "qaFeedback": feedback,
+                    "totalQuestions": total_q,
+                    "totalResponses": total_r,
+                })
+                print("[WebSocket] Fallback QA analytics sent to client", flush=True)
+            except Exception as e:
+                print(f"[WebSocket] Failed to send fallback analytics: {e}", flush=True)
+            if feedback:
+                try:
+                    await save_qa_analytics(user_id, session_id, ws_output.transcript_entries, feedback)
+                except Exception as e:
+                    print(f"[WebSocket] Failed to save QA analytics to S3: {e}", flush=True)
+
     except Exception as e:
-        logger.exception("[WebSocket] Handler error: %s", e)
-        try:
-            await websocket.send_json({
-                "type": "error",
-                "message": str(e)
-            })
-        except Exception:
-            pass
+        print(f"[WebSocket] Handler error: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
     finally:
         if agent:
             try:
                 await agent.stop()
             except Exception:
                 pass
-
-        # Generate QA analytics and send via WebSocket + save to S3
-        if ws_output and ws_output.transcript_entries:
-            try:
-                logger.info("[WebSocket] Generating QA analytics (%d transcript entries)", len(ws_output.transcript_entries))
-                feedback = await generate_qa_analytics(ws_output.transcript_entries, persona_data)
-                total_questions = sum(1 for e in ws_output.transcript_entries if e['role'] == 'assistant')
-                total_responses = sum(1 for e in ws_output.transcript_entries if e['role'] == 'user')
-
-                qa_result = {
-                    "type": "qa_analytics",
-                    "qaFeedback": feedback,
-                    "totalQuestions": total_questions,
-                    "totalResponses": total_responses,
-                }
-
-                # Send analytics to frontend via WebSocket before closing
-                try:
-                    await websocket.send_json(qa_result)
-                    logger.info("[WebSocket] QA analytics sent to client")
-                except Exception:
-                    pass
-
-                # Also persist to S3 for future access
-                try:
-                    await save_qa_analytics(user_id, session_id, ws_output.transcript_entries, feedback)
-                except Exception as e:
-                    logger.warning("[WebSocket] Failed to save QA analytics to S3: %s", e)
-
-            except Exception as e:
-                logger.warning("[WebSocket] Failed to generate QA analytics: %s", e)
 
         try:
             await websocket.send_json({"type": "session_ended", "reason": "server_complete"})

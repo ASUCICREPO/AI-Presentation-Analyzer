@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { QAWebSocketClient, QAWebSocketConfig, QAWebSocketEvent, QATranscriptEntry } from '../services/websocket';
 import { QA_SESSION_CONFIG } from '../config/config';
+import { QAAnalyticsResponse } from '../services/api';
 
 export type AgentState = null | 'thinking' | 'listening' | 'talking';
 
@@ -17,11 +18,12 @@ export interface QASessionState {
   isMuted: boolean;
   agentState: AgentState;
   botAudioTrack: MediaStreamTrack | null;
+  qaAnalytics: QAAnalyticsResponse | null;
 }
 
 export interface UseQASessionReturn extends QASessionState {
   startSession: () => Promise<void>;
-  endSession: () => void;
+  endSession: () => Promise<QAAnalyticsResponse | null>;
   toggleMute: () => void;
 }
 
@@ -39,6 +41,7 @@ export function useQASession(
   const [isMuted, setIsMuted] = useState(false);
   const [agentState, setAgentState] = useState<AgentState>(null);
   const [botAudioTrack, setBotAudioTrack] = useState<MediaStreamTrack | null>(null);
+  const [qaAnalytics, setQaAnalytics] = useState<QAAnalyticsResponse | null>(null);
 
   const wsClientRef = useRef<QAWebSocketClient | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -47,6 +50,15 @@ export function useQASession(
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const isMutedRef = useRef(false);
   const startTimerRef = useRef<(() => void) | null>(null);
+  const safetyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Promise-based analytics delivery: endSession() returns a promise that
+  // resolves when qa_analytics arrives (or on timeout / session_ended).
+  // The WS client ref is deliberately NOT cleaned up on unmount while
+  // this promise is pending — the safety timeout handles final cleanup.
+  const analyticsResolveRef = useRef<((v: QAAnalyticsResponse | null) => void) | null>(null);
+  const analyticsReceivedRef = useRef<QAAnalyticsResponse | null>(null);
+  const endingRef = useRef(false);
 
   // Audio playback queue
   const playbackContextRef = useRef<AudioContext | null>(null);
@@ -66,7 +78,7 @@ export function useQASession(
         break;
 
       case 'audio':
-        if (event.data) {
+        if (event.data && !endingRef.current) {
           const pcmBytes = Uint8Array.from(atob(event.data as string), c => c.charCodeAt(0));
           const int16 = new Int16Array(pcmBytes.buffer);
           const float32 = new Float32Array(int16.length);
@@ -105,7 +117,31 @@ export function useQASession(
         setAgentState('listening');
         break;
 
+      case 'qa_analytics':
+        console.log('[useQASession] Received qa_analytics from server');
+        analyticsReceivedRef.current = event as unknown as QAAnalyticsResponse;
+        setQaAnalytics(analyticsReceivedRef.current);
+        if (analyticsResolveRef.current) {
+          analyticsResolveRef.current(analyticsReceivedRef.current);
+          analyticsResolveRef.current = null;
+        }
+        // Analytics received — now tell the server to end the session
+        wsClientRef.current?.endSession();
+        break;
+
       case 'session_ended':
+        console.log('[useQASession] session_ended — analytics received:', !!analyticsReceivedRef.current);
+        if (safetyTimeoutRef.current) {
+          clearTimeout(safetyTimeoutRef.current);
+          safetyTimeoutRef.current = null;
+        }
+        if (analyticsResolveRef.current) {
+          analyticsResolveRef.current(analyticsReceivedRef.current);
+          analyticsResolveRef.current = null;
+        }
+        wsClientRef.current?.disconnect();
+        wsClientRef.current = null;
+        endingRef.current = false;
         setStatus('ended');
         setAgentState(null);
         stopAudioCapture();
@@ -295,17 +331,39 @@ export function useQASession(
     }
   }, [config, getToken, handleEvent, startAudioCapture, startTimer]);
 
-  const endSession = useCallback(() => {
+  const endSession = useCallback((): Promise<QAAnalyticsResponse | null> => {
     setStatus('ending');
-    wsClientRef.current?.endSession();
+    endingRef.current = true;
+
+    playbackQueueRef.current = [];
+    isPlayingRef.current = false;
+    if (playbackGainRef.current) {
+      playbackGainRef.current.gain.value = 0;
+      playbackGainRef.current.disconnect();
+    }
+
     stopAudioCapture();
     stopTimer();
-    // Allow time for the server to respond with session_ended
-    setTimeout(() => {
-      wsClientRef.current?.disconnect();
-      wsClientRef.current = null;
-      setStatus('ended');
-    }, 1000);
+
+    // Request analytics while the agent is still running (WS stays open).
+    // Once we receive qa_analytics, the handler sends "end" to close the session.
+    wsClientRef.current?.requestAnalytics();
+
+    return new Promise<QAAnalyticsResponse | null>((resolve) => {
+      analyticsResolveRef.current = resolve;
+
+      safetyTimeoutRef.current = setTimeout(() => {
+        if (analyticsResolveRef.current) {
+          analyticsResolveRef.current(analyticsReceivedRef.current);
+          analyticsResolveRef.current = null;
+        }
+        wsClientRef.current?.endSession();
+        wsClientRef.current?.disconnect();
+        wsClientRef.current = null;
+        endingRef.current = false;
+        setStatus('ended');
+      }, 30_000);
+    });
   }, [stopAudioCapture, stopTimer]);
 
   const toggleMute = useCallback(() => {
@@ -315,10 +373,13 @@ export function useQASession(
     });
   }, []);
 
-  // Cleanup on unmount
+  // Cleanup on unmount — skip WS disconnect if ending (safety timeout owns it)
   useEffect(() => {
     return () => {
-      wsClientRef.current?.disconnect();
+      if (!endingRef.current) {
+        if (safetyTimeoutRef.current) clearTimeout(safetyTimeoutRef.current);
+        wsClientRef.current?.disconnect();
+      }
       stopAudioCapture();
       stopTimer();
     };
@@ -335,6 +396,7 @@ export function useQASession(
     isMuted,
     agentState,
     botAudioTrack,
+    qaAnalytics,
     startSession,
     endSession,
     toggleMute,

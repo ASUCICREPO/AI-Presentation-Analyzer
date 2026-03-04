@@ -12,7 +12,7 @@ import {
   StyleSheet,
 } from '@react-pdf/renderer';
 import { SessionAnalytics } from '../hooks/useSessionAnalytics';
-import { AIFeedbackResponse } from '../services/api';
+import { AIFeedbackResponse, QAAnalyticsResponse } from '../services/api';
 import { PersonaBestPractices } from '../config/config';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -27,6 +27,7 @@ interface BestPracticeChecks {
 export interface ReportDocumentProps {
   sessionData: SessionAnalytics;
   aiFeedback: AIFeedbackResponse | null;
+  qaAnalytics: QAAnalyticsResponse | null;
   stats: {
     avgWpm: number;
     avgVolume: number;
@@ -360,6 +361,36 @@ const styles = StyleSheet.create({
   sectionBody: {
     padding: 14,
   },
+  // QA feedback
+  qaRatingBadge: {
+    fontSize: 8,
+    fontFamily: 'Helvetica-Bold',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  qaQuestionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 6,
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F3F4F6',
+    alignItems: 'flex-start',
+  },
+  qaQuestionBadge: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  qaQuestionBadgeText: {
+    fontSize: 7,
+    fontFamily: 'Helvetica-Bold',
+    color: '#ffffff',
+  },
 });
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -421,6 +452,7 @@ function MetricBarRow({
 export function ReportDocument({
   sessionData,
   aiFeedback,
+  qaAnalytics,
   stats,
   overallScore,
   feedbackPersonaLabel,
@@ -480,7 +512,7 @@ export function ReportDocument({
         {/* Disclaimer */}
         <View style={{ flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#EFF6FF', borderRadius: 6, borderWidth: 1, borderColor: '#BFDBFE', paddingHorizontal: 10, paddingVertical: 6, marginBottom: 10 }}>
           <Text style={{ fontSize: 8, color: '#1E40AF', lineHeight: 1.5 }}>
-            ℹ This analysis evaluates presentation delivery (pace, eye contact, volume, filler words, pauses) and content quality (structure, clarity, arguments). It does not judge the factual accuracy of your content.
+            This analysis evaluates presentation delivery (pace, eye contact, volume, filler words, pauses) and content quality (structure, clarity, arguments). It does not judge the factual accuracy of your content.
           </Text>
         </View>
 
@@ -636,6 +668,83 @@ export function ReportDocument({
                   <Text style={styles.feedbackMsg}>{event.message}</Text>
                 </View>
               ))}
+            </View>
+          </View>
+        )}
+
+        {/* ── Q&A Session Feedback ─────────────────────────────────────── */}
+        {qaAnalytics?.qaFeedback && (
+          <View style={styles.sectionContainer} wrap={false}>
+            <View style={styles.sectionHeader}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={styles.sectionHeaderTitle}>Q&A Session Feedback</Text>
+                <Text style={[styles.qaRatingBadge, {
+                  backgroundColor: qaAnalytics.qaFeedback.responseQuality === 'Excellent' ? '#DCFCE7'
+                    : qaAnalytics.qaFeedback.responseQuality === 'Good' ? '#DBEAFE' : '#FEF9C3',
+                  color: qaAnalytics.qaFeedback.responseQuality === 'Excellent' ? '#166534'
+                    : qaAnalytics.qaFeedback.responseQuality === 'Good' ? '#1E40AF' : '#713F12',
+                }]}>
+                  {qaAnalytics.qaFeedback.responseQuality}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.sectionBody}>
+              <Text style={{ fontSize: 9, color: '#374151', lineHeight: 1.5, marginBottom: 10 }}>
+                {qaAnalytics.qaFeedback.overallSummary}
+              </Text>
+
+              {/* Strengths & Improvements side by side */}
+              <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#166534', marginBottom: 4 }}>Strengths</Text>
+                  {qaAnalytics.qaFeedback.strengths.map((s, i) => (
+                    <View key={i} style={styles.strengthRow}>
+                      <Text style={styles.strengthCheck}>✓</Text>
+                      <Text style={styles.strengthText}>{s}</Text>
+                    </View>
+                  ))}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#92400E', marginBottom: 4 }}>Areas to Improve</Text>
+                  {qaAnalytics.qaFeedback.improvements.map((imp, i) => (
+                    <View key={i} style={styles.strengthRow}>
+                      <Text style={{ fontSize: 9, color: '#ca8a04', flexShrink: 0, marginTop: 1 }}>⚠</Text>
+                      <Text style={styles.strengthText}>{imp}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+
+              {/* Per-question breakdown */}
+              {qaAnalytics.qaFeedback.questionBreakdown.length > 0 && (
+                <View>
+                  <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#374151', marginBottom: 6 }}>Per-Question Breakdown</Text>
+                  {qaAnalytics.qaFeedback.questionBreakdown.map((q, i) => (
+                    <View key={i} style={styles.qaQuestionRow}>
+                      <View style={[styles.qaQuestionBadge, {
+                        backgroundColor: q.rating === 'Strong' ? '#22c55e'
+                          : q.rating === 'Adequate' ? '#3b82f6' : '#f59e0b',
+                      }]}>
+                        <Text style={styles.qaQuestionBadgeText}>{i + 1}</Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 8, fontFamily: 'Helvetica-Bold', color: '#111827' }}>{q.question}</Text>
+                        <Text style={{ fontSize: 7, color: '#6B7280', marginTop: 1, lineHeight: 1.4 }}>{q.note}</Text>
+                      </View>
+                      <Text style={{
+                        fontSize: 7, fontFamily: 'Helvetica-Bold', flexShrink: 0,
+                        color: q.rating === 'Strong' ? '#16a34a' : q.rating === 'Adequate' ? '#2563eb' : '#d97706',
+                      }}>
+                        {q.rating}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              <Text style={{ fontSize: 7, color: '#9CA3AF', marginTop: 6 }}>
+                Based on {qaAnalytics.totalQuestions} question{qaAnalytics.totalQuestions !== 1 ? 's' : ''} and {qaAnalytics.totalResponses} response{qaAnalytics.totalResponses !== 1 ? 's' : ''}
+              </Text>
             </View>
           </View>
         )}

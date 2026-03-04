@@ -23,6 +23,7 @@ export type QAWebSocketEventType =
   | 'audio'
   | 'transcript'
   | 'interruption'
+  | 'qa_analytics'
   | 'session_ended'
   | 'error';
 
@@ -39,6 +40,8 @@ export class QAWebSocketClient {
   private eventHandler: QAWebSocketEventHandler;
   private reconnectAttempts = 0;
   private _isConnected = false;
+
+  private _closing = false;
 
   constructor(config: QAWebSocketConfig, onEvent: QAWebSocketEventHandler) {
     this.config = config;
@@ -94,7 +97,9 @@ export class QAWebSocketClient {
       this.ws.onclose = (event) => {
         console.log(`[QA WebSocket] Closed: code=${event.code}, reason=${event.reason}`);
         this._isConnected = false;
-        this.eventHandler({ type: 'session_ended', reason: 'connection_closed' });
+        if (!this._closing) {
+          this.eventHandler({ type: 'session_ended', reason: 'connection_closed' });
+        }
       };
 
       this.ws.onerror = (error) => {
@@ -121,12 +126,17 @@ export class QAWebSocketClient {
     this.send({ action: 'text', text });
   }
 
+  requestAnalytics(): void {
+    this.send({ action: 'get_analytics' });
+  }
+
   endSession(): void {
     this.send({ action: 'end' });
   }
 
   disconnect(): void {
     if (this.ws) {
+      this._closing = true;
       this.ws.close(1000, 'Client disconnect');
       this.ws = null;
       this._isConnected = false;

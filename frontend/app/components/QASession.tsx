@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useMemo, useEffect, useRef } from 'react';
+import React, { useMemo, useEffect, useRef, useCallback } from 'react';
 import { ArrowLeft, AlertCircle, MessageSquareText } from 'lucide-react';
 import { useQASession } from '../hooks/useQASession';
 import { QAWebSocketConfig } from '../services/websocket';
+import { QAAnalyticsResponse } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { QA_SESSION_CONFIG } from '../config/config';
 import QACameraView from './qa/QACameraView';
@@ -16,7 +17,7 @@ interface QASessionProps {
   userId: string;
   voiceId?: string;
   onBack: () => void;
-  onComplete: () => void;
+  onComplete: (qaPromise: Promise<QAAnalyticsResponse | null>) => void;
   onSkip: () => void;
 }
 
@@ -64,13 +65,19 @@ export default function QASession({
   const isWarning = remaining <= QA_SESSION_CONFIG.WARNING_AT_SEC;
   const isCritical = remaining <= QA_SESSION_CONFIG.FINAL_WARNING_AT_SEC;
 
+  const handleEndSession = useCallback(() => {
+    if (autoNavigatedRef.current) return;
+    autoNavigatedRef.current = true;
+    const promise = qa.endSession();
+    onComplete(promise);
+  }, [qa.endSession, onComplete]);
+
   useEffect(() => {
     if (qa.status === 'ended' && !autoNavigatedRef.current) {
       autoNavigatedRef.current = true;
-      const timeout = setTimeout(() => onComplete(), 1500);
-      return () => clearTimeout(timeout);
+      onComplete(Promise.resolve(qa.qaAnalytics));
     }
-  }, [qa.status, onComplete]);
+  }, [qa.status, qa.qaAnalytics, onComplete]);
 
   useEffect(() => {
     if (transcriptScrollRef.current) {
@@ -143,7 +150,7 @@ export default function QASession({
             isMuted={qa.isMuted}
             botAudioTrack={qa.botAudioTrack}
             onStart={qa.startSession}
-            onEnd={qa.endSession}
+            onEnd={handleEndSession}
             onToggleMute={qa.toggleMute}
             onSkip={onSkip}
           />

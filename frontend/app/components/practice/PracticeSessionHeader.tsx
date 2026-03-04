@@ -26,8 +26,8 @@ export default function PracticeSessionHeader({
   };
 
   const remaining = maxDurationSec - timer;
-  const isNearEnd = remaining <= PRESENTATION_LIMITS.FINAL_WARNING_REMAINING_SEC;
-  const isWarning = remaining <= PRESENTATION_LIMITS.WARNING_REMAINING_SEC;
+  const isNearEnd = remaining <= PRESENTATION_LIMITS.FINAL_WARNING_REMAINING_SEC && timer > 0;
+  const isWarning = remaining <= PRESENTATION_LIMITS.WARNING_REMAINING_SEC && remaining < maxDurationSec;
 
   return (
     <div className="mb-3 flex items-center justify-between 2xl:mb-6">
