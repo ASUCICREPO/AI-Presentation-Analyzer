@@ -77,18 +77,20 @@ export class AgentCoreStack extends cdk.Stack {
     // attachToRole() creates AWS::IAM::Policy here, referencing the role by name
     // (a cross-stack import from AIPresentationCoachStack, same direction as all
     // other props). AIPresentationCoachStack has zero references to this stack.
-    const authRolePolicy = new iam.Policy(this, 'AuthRoleAgentCorePolicy', {
-      statements: [
-        new iam.PolicyStatement({
-          effect: iam.Effect.ALLOW,
-          actions: ['bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream'],
-          resources: [
+    const authRolePolicy = new iam.CfnPolicy(this, 'AuthRoleAgentCorePolicy', {
+      policyName: 'AgentCoreInvokeWebSocket',
+      policyDocument: {
+        Version: '2012-10-17',
+        Statement: [{
+          Effect: 'Allow',
+          Action: ['bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream'],
+          Resource: [
             agentCoreRuntime.agentRuntimeArn,
-            `${agentCoreRuntime.agentRuntimeArn}/*`,
+            cdk.Fn.join('', [agentCoreRuntime.agentRuntimeArn, '/*']),
           ],
-        }),
-      ],
-      roles: [props.authenticatedRole],
+        }],
+      },
+      roles: [props.authenticatedRole.roleName],
     });
 
     this.webSocketUrl = `wss://bedrock-agentcore.${this.region}.amazonaws.com/runtimes/${agentCoreRuntime.agentRuntimeArn}/ws`;
@@ -122,8 +124,8 @@ export class AgentCoreStack extends cdk.Stack {
       { id: 'AwsSolutions-IAM5', reason: 'Bedrock inference profiles route to multiple regions for availability. Wildcard required for cross-region inference routing.', appliesTo: ['Resource::arn:aws:bedrock:*:<AWS::AccountId>:inference-profile/*'] },
     ], true);
 
-    NagSuppressions.addResourceSuppressions(authRolePolicy, [
-      { id: 'AwsSolutions-IAM5', reason: 'AgentCore WebSocket invocation checks IAM against runtime-endpoint sub-resources (e.g. runtime/<id>/runtime-endpoint/DEFAULT). Wildcard required to cover all endpoint sub-resources.', appliesTo: ['Resource::<LiveQAAgentRuntime36D5E8ED.AgentRuntimeArn>/*'] },
-    ], true);
+    NagSuppressions.addResourceSuppressionsByPath(this, `${this.stackName}/AuthRoleAgentCorePolicy`, [
+      { id: 'AwsSolutions-IAM5', reason: 'AgentCore WebSocket invocation checks IAM against runtime-endpoint sub-resources (e.g. runtime/<id>/runtime-endpoint/DEFAULT). Wildcard required to cover all endpoint sub-resources.' },
+    ]);
   }
 }
