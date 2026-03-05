@@ -3,6 +3,7 @@ from strands.experimental.bidi import BidiAgent
 from strands.experimental.bidi.types.events import (
     BidiAudioInputEvent,
     BidiAudioStreamEvent,
+    BidiTextInputEvent,
     BidiTranscriptStreamEvent,
     BidiInterruptionEvent,
     BidiResponseCompleteEvent,
@@ -105,6 +106,11 @@ class WebSocketBidiInput(BidiInput):
 
     async def start(self, agent: BidiAgent) -> None:
         self._stopped = False
+        self._agent = agent
+        await agent.send(BidiTextInputEvent(
+            text="Please introduce yourself and begin the Q&A session.",
+            role="user"
+        ))
 
     async def __call__(self) -> BidiAudioInputEvent:
         while not self._stopped:
