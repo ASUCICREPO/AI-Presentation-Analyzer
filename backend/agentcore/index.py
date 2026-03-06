@@ -12,6 +12,7 @@ from strands.experimental.bidi.types.io import BidiInput, BidiOutput, BidiOutput
 from strands.experimental.bidi.models import BidiNovaSonicModel
 from strands.experimental.bidi.tools import stop_conversation
 from bedrock_agentcore import BedrockAgentCoreApp, RequestContext, PingStatus
+from strands import tool
 from typing import Literal
 from datetime import datetime, timezone
 import asyncio
@@ -19,6 +20,7 @@ import boto3
 import aioboto3
 import os
 import json
+import time
 from jinja2 import Template
 
 '''
@@ -86,6 +88,33 @@ def create_nova_sonic_model(voice_id: str = None) -> BidiNovaSonicModel:
             "boto_session": boto3.Session(region_name=REGION),
         }
     )
+
+
+class SessionTimer:
+    def __init__(self, duration_sec: int):
+        self._start = time.monotonic()
+        self._duration = duration_sec
+
+    @tool
+    def check_session_time(self) -> str:
+        """Check how much time has elapsed and how much remains in the Q&A session.
+
+        Call this after every 2-3 questions to monitor the session clock.
+        """
+        elapsed = time.monotonic() - self._start
+        remaining = max(0, self._duration - elapsed)
+
+        if remaining <= 0:
+            return (
+                f"TIME EXPIRED. Elapsed: {elapsed/60:.1f} min. "
+                "You MUST wrap up NOW — thank the presenter and use stop_conversation."
+            )
+        if remaining <= 15:
+            return (
+                f"Elapsed: {elapsed/60:.1f} min. Only {remaining:.0f}s left. "
+                "Finish your current exchange, thank the presenter, and use stop_conversation."
+            )
+        return f"Elapsed: {elapsed/60:.1f} min. Remaining: {remaining/60:.1f} min. Continue the Q&A."
 
 
 class WebSocketBidiInput(BidiInput):
@@ -483,9 +512,10 @@ async def websocket_handler(websocket, context: RequestContext):
         await log_system_prompt_to_cloudwatch(session_id, system_prompt)
 
         model = create_nova_sonic_model(voice_id)
+        session_timer = SessionTimer(SESSION_DURATION_SEC)
         agent = BidiAgent(
             model=model,
-            tools=[stop_conversation],
+            tools=[session_timer.check_session_time, stop_conversation],
             system_prompt=system_prompt,
         )
 
