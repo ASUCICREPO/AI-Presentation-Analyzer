@@ -22,6 +22,7 @@ import os
 import json
 import time
 from jinja2 import Template
+from opentelemetry import baggage, context
 
 '''
 A quick note on voice selection:
@@ -51,9 +52,9 @@ def build_qa_system_prompt(persona_name: str, persona_prompt: str, custom_instru
     
     qa_duration = session_duration // 60
     if qa_duration <= 0:
-        qa_duration = 2 # Default to 2 minutes of QA
-    if qa_duration > 5:
-        qa_duration = 5 # Cap at 5 minutes
+        qa_duration = 1 # Default to 1 minutes of QA
+    if qa_duration > 10:
+        qa_duration = 10 # Cap at 10 minutes
 
     
     with open("qa_system_prompt.jinja2", "r") as f:
@@ -477,6 +478,11 @@ async def websocket_handler(websocket, context: RequestContext):
     session_id = raw.get("sessionId", "") or (context.session_id or "")
 
     print(f"[WebSocket] Setup from user={user_id} persona={persona_id} session={session_id}", flush=True)
+
+    # Attach session ID as OTEL baggage so all downstream spans are correlated
+    # in the CloudWatch GenAI Observability dashboard.
+    ctx = baggage.set_baggage("session.id", session_id)
+    context.attach(ctx)
 
     if not persona_id or not user_id or not session_id:
         print(f"[WebSocket] Missing required params: persona={persona_id} user={user_id} session={session_id}", flush=True)
