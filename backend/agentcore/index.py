@@ -10,7 +10,7 @@ from strands.experimental.bidi.types.events import (
 )
 from strands.experimental.bidi.types.io import BidiInput, BidiOutput, BidiOutputEvent
 from strands.experimental.bidi.models import BidiNovaSonicModel
-from strands.experimental.bidi.hooks.events import BidiMessageAddedEvent
+from strands.experimental.hooks.events import BidiMessageAddedEvent
 from strands.experimental.bidi.tools import stop_conversation
 from bedrock_agentcore import BedrockAgentCoreApp, RequestContext, PingStatus
 from typing import Literal
