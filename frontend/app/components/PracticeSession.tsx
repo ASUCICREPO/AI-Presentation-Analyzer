@@ -18,6 +18,7 @@ import { toast } from 'sonner';
 import PracticeSessionHeader from './practice/PracticeSessionHeader';
 import CameraView from './practice/CameraView';
 import CalibrationPanel from './practice/CalibrationPanel';
+import MicCheckCard from './practice/MicCheckCard';
 import RealTimeFeedbackPanel from './practice/RealTimeFeedbackPanel';
 import TranscriptionPanel from './practice/TranscriptionPanel';
 
@@ -697,26 +698,40 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
           }}
         >
           {showRightPanel && (
-            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm 2xl:p-6 relative overflow-hidden animate-fade-in">
-              {isCalibrating ? (
-                <CalibrationPanel
-                  showMesh={showMesh}
-                  onToggleMesh={() => setShowMesh(!showMesh)}
-                  gazeStatus={gazeStatus}
-                  micCalibration={micCalibration}
-                  onComplete={() => setIsCalibrating(false)}
-                />
-              ) : (
-                <RealTimeFeedbackPanel
-                  isRecording={isRecording && !isPaused}
-                  soundEnabled={soundEnabled}
-                  onToggleSound={() => setSoundEnabled(!soundEnabled)}
-                  isDistracted={gazeDisplayDistracted}
-                  metrics={feedbackMetrics}
-                  vocalVariety={vocalVariety.metrics}
-                />
+            <>
+              <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm 2xl:p-6 relative overflow-hidden animate-fade-in">
+                {isCalibrating ? (
+                  <CalibrationPanel
+                    showMesh={showMesh}
+                    onToggleMesh={() => setShowMesh(!showMesh)}
+                    gazeStatus={gazeStatus}
+                  />
+                ) : (
+                  <RealTimeFeedbackPanel
+                    isRecording={isRecording && !isPaused}
+                    soundEnabled={soundEnabled}
+                    onToggleSound={() => setSoundEnabled(!soundEnabled)}
+                    isDistracted={gazeDisplayDistracted}
+                    metrics={feedbackMetrics}
+                    vocalVariety={vocalVariety.metrics}
+                  />
+                )}
+              </div>
+              {isCalibrating && (
+                <>
+                  <MicCheckCard micCalibration={micCalibration} />
+                  <button
+                    onClick={() => setIsCalibrating(false)}
+                    className="w-full rounded-lg bg-maroon px-4 py-2.5 text-sm font-bold text-white shadow-lg hover:bg-maroon-dark hover:shadow-xl transform active:scale-[0.98] transition-all flex items-center justify-center gap-2 font-sans animate-fade-in"
+                  >
+                    <span>Everything Looks Good</span>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  </button>
+                </>
               )}
-            </div>
+            </>
           )}
         </div>
       </div>
