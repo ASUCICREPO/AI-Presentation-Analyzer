@@ -163,8 +163,13 @@ export function useQASession(
     isPlayingRef.current = true;
     setAgentState('talking');
 
-    const ctx = playbackContextRef.current || new AudioContext({ sampleRate: QA_SESSION_CONFIG.AUDIO_SAMPLE_RATE });
-    playbackContextRef.current = ctx;
+    let ctx = playbackContextRef.current;
+    if (!ctx || ctx.state === 'closed') {
+      ctx = new AudioContext({ sampleRate: QA_SESSION_CONFIG.AUDIO_SAMPLE_RATE });
+      playbackContextRef.current = ctx;
+      playbackDestRef.current = null;
+      playbackGainRef.current = null;
+    }
 
     if (!playbackDestRef.current) {
       const dest = ctx.createMediaStreamDestination();
@@ -266,6 +271,13 @@ export function useQASession(
     const workletBlob = new Blob([workletCode], { type: 'application/javascript' });
     const workletUrl = URL.createObjectURL(workletBlob);
     await ctx.audioWorklet.addModule(workletUrl);
+
+    // Guard: if cleanup ran while we were awaiting addModule, the context is closed
+    if (ctx.state === 'closed') {
+      console.warn('[useQASession] AudioContext was closed during setup, aborting capture');
+      return;
+    }
+
     await ctx.resume(); // ensure context is running before constructing worklet node
 
     const processor = new AudioWorkletNode(ctx, 'pcm-processor');
@@ -306,6 +318,13 @@ export function useQASession(
 
   // Session lifecycle
   const startSession = useCallback(async () => {
+    // Clean up any leftover state from a previous attempt to prevent AudioContext leaks
+    stopAudioCapture();
+    wsClientRef.current?.disconnect();
+    wsClientRef.current = null;
+    endingRef.current = false;
+    analyticsReceivedRef.current = null;
+
     setStatus('connecting');
     setError(null);
     setTranscriptEntries([]);
@@ -316,7 +335,7 @@ export function useQASession(
       if (!getToken) {
         throw new Error('getToken function is required for authentication');
       }
-      
+
       const client = new QAWebSocketClient(
         config,
         handleEvent
@@ -328,10 +347,13 @@ export function useQASession(
       // the setup message sent in connect()'s onopen handler.
     } catch (e) {
       console.error('[useQASession] Failed to start:', e);
+      stopAudioCapture();
+      wsClientRef.current?.disconnect();
+      wsClientRef.current = null;
       setError('Failed to connect to QA session');
       setStatus('error');
     }
-  }, [config, getToken, handleEvent, startAudioCapture, startTimer]);
+  }, [config, getToken, handleEvent, startAudioCapture, stopAudioCapture, startTimer]);
 
   const endSession = useCallback((): Promise<QAAnalyticsResponse | null> => {
     setStatus('ending');
