@@ -62,6 +62,12 @@ export class AIPresentationCoachStack extends cdk.Stack {
           id: 'AbortIncompleteMultipartUploads',
           abortIncompleteMultipartUploadAfter: cdk.Duration.days(1),
         },
+        {
+          id: 'ExpireSessionFilesAfter30Days',
+          // All session objects ({user_id}/{session_id}/*) are deleted 30 days
+          // after creation; access logs live in the separate accessLogsBucket.
+          expiration: cdk.Duration.days(30),
+        },
       ],
     });
 
