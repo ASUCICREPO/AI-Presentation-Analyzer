@@ -22,7 +22,7 @@ import os
 import json
 import time
 from jinja2 import Template
-from opentelemetry import baggage, context
+from opentelemetry import baggage, context as otel_context
 
 '''
 A quick note on voice selection:
@@ -514,8 +514,8 @@ async def websocket_handler(websocket, context: RequestContext):
 
     # Attach session ID as OTEL baggage so all downstream spans are correlated
     # in the CloudWatch GenAI Observability dashboard.
-    ctx = baggage.set_baggage("session.id", session_id)
-    context.attach(ctx)
+    _otel_ctx = baggage.set_baggage("session.id", session_id)
+    _otel_token = otel_context.attach(_otel_ctx)
 
     if not persona_id or not user_id or not session_id:
         print(f"[WebSocket] Missing required params: persona={persona_id} user={user_id} session={session_id}", flush=True)
@@ -641,6 +641,8 @@ async def websocket_handler(websocket, context: RequestContext):
         import traceback
         traceback.print_exc()
     finally:
+        if _otel_token is not None:
+            otel_context.detach(_otel_token)
         if agent:
             try:
                 await agent.stop()

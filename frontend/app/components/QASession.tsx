@@ -41,6 +41,7 @@ export default function QASession({
 }: QASessionProps) {
   const { getIdToken } = useAuth();
   const autoNavigatedRef = useRef(false);
+  const wasEverActiveRef = useRef(false);
   const transcriptScrollRef = useRef<HTMLDivElement>(null);
 
   const dateStr = useMemo(() => {
@@ -77,11 +78,19 @@ export default function QASession({
   }, [endSession, onComplete]);
 
   useEffect(() => {
+    if (qa.status === 'active') wasEverActiveRef.current = true;
+  }, [qa.status]);
+
+  useEffect(() => {
     if (qa.status === 'ended' && !autoNavigatedRef.current) {
       autoNavigatedRef.current = true;
-      onComplete(Promise.resolve(qa.qaAnalytics));
+      if (wasEverActiveRef.current) {
+        onComplete(Promise.resolve(qa.qaAnalytics));
+      } else {
+        onSkip();
+      }
     }
-  }, [qa.status, qa.qaAnalytics, onComplete]);
+  }, [qa.status, qa.qaAnalytics, onComplete, onSkip]);
 
   useEffect(() => {
     if (transcriptScrollRef.current) {
