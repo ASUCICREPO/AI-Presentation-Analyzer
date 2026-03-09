@@ -53,8 +53,6 @@ def build_qa_system_prompt(persona_name: str, persona_prompt: str, custom_instru
     qa_duration = session_duration // 60
     if qa_duration <= 0:
         qa_duration = 1 # Default to 1 minutes of QA
-    if qa_duration > 10:
-        qa_duration = 10 # Cap at 10 minutes
 
     
     with open("qa_system_prompt.jinja2", "r") as f:
