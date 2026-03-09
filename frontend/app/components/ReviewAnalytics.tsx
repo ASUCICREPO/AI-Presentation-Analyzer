@@ -126,6 +126,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
   const [dismissedBanner, setDismissedBanner] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
+  const [isVideoDownloading, setIsVideoDownloading] = useState(false);
   const videoRef = useRef<CustomVideoPlayerHandle>(null);
 
   // Fetch video playback URL on mount
@@ -222,6 +223,27 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
     }
   };
 
+  const handleDownloadVideo = async () => {
+    if (isVideoDownloading || !videoUrl) return;
+    setIsVideoDownloading(true);
+    try {
+      const res = await fetch(videoUrl);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `presentation_recording_${sessionData.sessionId}.webm`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Video download failed:', err);
+    } finally {
+      setIsVideoDownloading(false);
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6">
       {/* No-AI Banner */}
@@ -265,6 +287,18 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
               : <Download className="h-4 w-4" />}
             {isPdfLoading ? 'Generating PDF...' : 'Download PDF'}
           </button>
+          {videoUrl && (
+            <button
+              onClick={handleDownloadVideo}
+              disabled={isVideoDownloading}
+              className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              {isVideoDownloading
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Download className="h-4 w-4" />}
+              {isVideoDownloading ? 'Downloading...' : 'Download Video'}
+            </button>
+          )}
           <button
             onClick={onBackToStart}
             className="flex items-center gap-2 rounded-lg bg-maroon px-4 py-2 text-white hover:bg-maroon/90 transition-colors"
@@ -548,8 +582,8 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-gray-900">Q&A Session Feedback</h2>
             <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${qaAnalytics.qaFeedback.responseQuality === 'Excellent' ? 'bg-green-100 text-green-800' :
-                qaAnalytics.qaFeedback.responseQuality === 'Good' ? 'bg-blue-100 text-blue-800' :
-                  'bg-yellow-100 text-yellow-800'
+              qaAnalytics.qaFeedback.responseQuality === 'Good' ? 'bg-blue-100 text-blue-800' :
+                'bg-yellow-100 text-yellow-800'
               }`}>
               {qaAnalytics.qaFeedback.responseQuality}
             </span>
@@ -591,7 +625,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
                 {qaAnalytics.qaFeedback.questionBreakdown.map((q, i) => (
                   <div key={i} className="flex items-start gap-3 rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
                     <span className={`mt-0.5 inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${q.rating === 'Strong' ? 'bg-green-500' :
-                        q.rating === 'Adequate' ? 'bg-blue-500' : 'bg-amber-500'
+                      q.rating === 'Adequate' ? 'bg-blue-500' : 'bg-amber-500'
                       }`}>
                       {i + 1}
                     </span>
@@ -599,7 +633,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium text-gray-900 truncate">{q.question}</span>
                         <span className={`flex-shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${q.rating === 'Strong' ? 'bg-green-100 text-green-700' :
-                            q.rating === 'Adequate' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
+                          q.rating === 'Adequate' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
                           }`}>
                           {q.rating}
                         </span>
