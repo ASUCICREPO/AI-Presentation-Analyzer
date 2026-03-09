@@ -541,17 +541,19 @@ async def websocket_handler(websocket, context: RequestContext):
             print(f"[WebSocket] No transcript for session {session_id}, using placeholder", flush=True)
             transcript_text = "No presentation transcript available."
 
+        session_duration = int(persona_data.get('timeLimitSec', 300))
+
         system_prompt = build_qa_system_prompt(
             persona_name=persona_data.get('name', 'Interviewer'),
             persona_prompt=persona_data.get('personaPrompt', ''),
             custom_instructions=persona_data.get('description', ''),
             transcript_text=transcript_text,
-            session_duration=SESSION_DURATION_SEC
+            session_duration=session_duration
         )
         await log_system_prompt_to_cloudwatch(session_id, system_prompt)
 
         model = create_nova_sonic_model(voice_id)
-        time_guard = SessionTimeGuard(SESSION_DURATION_SEC)
+        time_guard = SessionTimeGuard(session_duration)
         agent = BidiAgent(
             model=model,
             tools=[stop_conversation],

@@ -16,6 +16,7 @@ interface QASessionProps {
   sessionId: string;
   userId: string;
   voiceId?: string;
+  timeLimitSec?: number;
   onBack: () => void;
   onComplete: (qaPromise: Promise<QAAnalyticsResponse | null>) => void;
   onSkip: () => void;
@@ -33,6 +34,7 @@ export default function QASession({
   sessionId,
   userId,
   voiceId,
+  timeLimitSec,
   onBack,
   onComplete,
   onSkip,
@@ -58,19 +60,21 @@ export default function QASession({
     [personaId, sessionId, userId, dateStr, voiceId, getIdToken],
   );
 
-  const qa = useQASession(wsConfig, getIdToken);
+  const durationSec = timeLimitSec ?? 300;
+  const qa = useQASession(wsConfig, getIdToken, durationSec);
+  const { endSession } = qa;
   const displayPersonaName = qa.personaName || initialPersonaName;
 
-  const remaining = Math.max(0, QA_SESSION_CONFIG.DURATION_SEC - qa.timer);
+  const remaining = Math.max(0, durationSec - qa.timer);
   const isWarning = remaining <= QA_SESSION_CONFIG.WARNING_AT_SEC;
   const isCritical = remaining <= QA_SESSION_CONFIG.FINAL_WARNING_AT_SEC;
 
   const handleEndSession = useCallback(() => {
     if (autoNavigatedRef.current) return;
     autoNavigatedRef.current = true;
-    const promise = qa.endSession();
+    const promise = endSession();
     onComplete(promise);
-  }, [qa.endSession, onComplete]);
+  }, [endSession, onComplete]);
 
   useEffect(() => {
     if (qa.status === 'ended' && !autoNavigatedRef.current) {

@@ -30,6 +30,7 @@ export interface UseQASessionReturn extends QASessionState {
 export function useQASession(
   config: QAWebSocketConfig,
   getToken?: () => Promise<string>,
+  durationSec: number = QA_SESSION_CONFIG.DURATION_SEC,
 ): UseQASessionReturn {
   const [status, setStatus] = useState<QASessionStatus>('idle');
   const [timer, setTimer] = useState(0);
@@ -203,7 +204,7 @@ export function useQASession(
     setTimer(0);
     timerIntervalRef.current = setInterval(() => {
       setTimer(prev => {
-        if (prev >= QA_SESSION_CONFIG.DURATION_SEC) {
+        if (prev >= durationSec) {
           return prev;
         }
         return prev + 1;
