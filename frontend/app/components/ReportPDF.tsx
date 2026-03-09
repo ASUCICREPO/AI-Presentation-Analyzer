@@ -695,7 +695,7 @@ export function ReportDocument({
 
               {/* Strengths & Improvements side by side */}
               <View style={{ flexDirection: 'row', gap: 10, marginBottom: 10 }}>
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, borderWidth: 1, borderColor: '#D1FAE5', borderRadius: 6, padding: 8, backgroundColor: '#F0FDF4' }}>
                   <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#166534', marginBottom: 4 }}>Strengths</Text>
                   {qaAnalytics.qaFeedback.strengths.map((s, i) => (
                     <View key={i} style={styles.strengthRow}>
@@ -704,7 +704,7 @@ export function ReportDocument({
                     </View>
                   ))}
                 </View>
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, borderWidth: 1, borderColor: '#FDE68A', borderRadius: 6, padding: 8, backgroundColor: '#FFFBEB' }}>
                   <Text style={{ fontSize: 9, fontFamily: 'Helvetica-Bold', color: '#92400E', marginBottom: 4 }}>Areas to Improve</Text>
                   {qaAnalytics.qaFeedback.improvements.map((imp, i) => (
                     <View key={i} style={styles.strengthRow}>
