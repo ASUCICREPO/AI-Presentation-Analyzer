@@ -266,6 +266,7 @@ export function useQASession(
     const workletBlob = new Blob([workletCode], { type: 'application/javascript' });
     const workletUrl = URL.createObjectURL(workletBlob);
     await ctx.audioWorklet.addModule(workletUrl);
+    await ctx.resume(); // ensure context is running before constructing worklet node
 
     const processor = new AudioWorkletNode(ctx, 'pcm-processor');
     processorNodeRef.current = processor;
