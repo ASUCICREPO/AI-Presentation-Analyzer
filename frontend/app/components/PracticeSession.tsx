@@ -8,6 +8,7 @@ import { useSessionAnalytics, SessionAnalytics } from '../hooks/useSessionAnalyt
 import { useVideoRecording } from '../hooks/useVideoRecording';
 import { useDetailedMetrics } from '../hooks/useDetailedMetrics';
 import { useSessionManifest } from '../hooks/useSessionManifest';
+import { useMicCalibration } from '../hooks/useMicCalibration';
 import { uploadJsonToS3, pollAnalytics, AIFeedbackResponse } from '../services/api';
 import { ANALYSIS_CONFIG, PRESENTATION_LIMITS, DEFAULT_TIME_LIMIT_SEC } from '../config/config';
 
@@ -17,6 +18,7 @@ import { toast } from 'sonner';
 import PracticeSessionHeader from './practice/PracticeSessionHeader';
 import CameraView from './practice/CameraView';
 import CalibrationPanel from './practice/CalibrationPanel';
+import MicCheckCard from './practice/MicCheckCard';
 import RealTimeFeedbackPanel from './practice/RealTimeFeedbackPanel';
 import TranscriptionPanel from './practice/TranscriptionPanel';
 
@@ -114,12 +116,16 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
   // Detailed Metrics Hook (per-second snapshots)
   const detailedMetrics = useDetailedMetrics(sessionId);
 
+  // Mic Calibration Hook (lightweight volume meter for pre-session check)
+  const micCalibration = useMicCalibration();
+
   // Register exit handler so parent can cleanly stop the session on exit
   useEffect(() => {
     if (exitSessionRef) {
       exitSessionRef.current = () => {
         stopAnalysis();
         vocalVariety.stopAnalysis();
+        micCalibration.stop();
         if (!stoppingRef.current) {
           videoRecording.abort();
         }
@@ -464,6 +470,8 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
           setCameraActive(true);
           setPermissionDenied(false);
           setIsCalibrating(true);
+          // Start mic calibration as soon as camera/mic stream is ready
+          micCalibration.start(stream);
         };
       }
     } catch (err) {
@@ -489,11 +497,12 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
   }, []);
 
   // Full cleanup on unmount — stops camera, audio analysis, vocal variety,
-  // video recording, and aborts manifest so no media streams leak.
+  // video recording, mic calibration, and aborts manifest so no media streams leak.
   useEffect(() => {
     return () => {
       stopAnalysis();
       vocalVariety.stopAnalysis();
+      micCalibration.stop();
       if (!stoppingRef.current) {
         videoRecording.abort();
       }
@@ -518,6 +527,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
       const currentStream = mediaStreamRef.current;
 
       setIsCalibrating(false);
+      micCalibration.stop();
       setIsRecording(true);
       setIsPaused(false);
       isPausedRef.current = false;
@@ -688,25 +698,40 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
           }}
         >
           {showRightPanel && (
-            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm 2xl:p-6 relative overflow-hidden animate-fade-in">
-              {isCalibrating ? (
-                <CalibrationPanel
-                  showMesh={showMesh}
-                  onToggleMesh={() => setShowMesh(!showMesh)}
-                  gazeStatus={gazeStatus}
-                  onComplete={() => setIsCalibrating(false)}
-                />
-              ) : (
-                <RealTimeFeedbackPanel
-                  isRecording={isRecording && !isPaused}
-                  soundEnabled={soundEnabled}
-                  onToggleSound={() => setSoundEnabled(!soundEnabled)}
-                  isDistracted={gazeDisplayDistracted}
-                  metrics={feedbackMetrics}
-                  vocalVariety={vocalVariety.metrics}
-                />
+            <>
+              <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm 2xl:p-6 relative overflow-hidden animate-fade-in">
+                {isCalibrating ? (
+                  <CalibrationPanel
+                    showMesh={showMesh}
+                    onToggleMesh={() => setShowMesh(!showMesh)}
+                    gazeStatus={gazeStatus}
+                  />
+                ) : (
+                  <RealTimeFeedbackPanel
+                    isRecording={isRecording && !isPaused}
+                    soundEnabled={soundEnabled}
+                    onToggleSound={() => setSoundEnabled(!soundEnabled)}
+                    isDistracted={gazeDisplayDistracted}
+                    metrics={feedbackMetrics}
+                    vocalVariety={vocalVariety.metrics}
+                  />
+                )}
+              </div>
+              {isCalibrating && (
+                <>
+                  <MicCheckCard micCalibration={micCalibration} />
+                  <button
+                    onClick={() => setIsCalibrating(false)}
+                    className="w-full rounded-lg bg-maroon px-4 py-2.5 text-sm font-bold text-white shadow-lg hover:bg-maroon-dark hover:shadow-xl transform active:scale-[0.98] transition-all flex items-center justify-center gap-2 font-sans animate-fade-in"
+                  >
+                    <span>Everything Looks Good</span>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  </button>
+                </>
               )}
-            </div>
+            </>
           )}
         </div>
       </div>

@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import PersonaCard from './PersonaCard';
 import CustomizePersona from './CustomizePersona';
-import { Persona } from '../config/config';
+import { Persona, EXPERTISE_ORDER } from '../config/config';
 import { fetchPersonas, savePersonaCustomization } from '../services/api';
 
 interface PersonaSelectionProps {
@@ -18,40 +18,33 @@ interface PersonaSelectionProps {
   onContinue: () => void;
 }
 
-// ─── Skeleton loader that mirrors PersonaCard layout ─────────────────
 function PersonaCardSkeleton() {
   return (
-    <div className="w-full animate-pulse rounded-xl border-2 border-gray-200 bg-white p-5 sm:p-6 2xl:p-10">
-      {/* Header */}
-      <div className="mb-4 flex items-center gap-4 2xl:mb-8 2xl:gap-6">
-        <div className="h-10 w-10 rounded-lg bg-gray-200 2xl:h-14 2xl:w-14" />
+    <div className="w-full animate-pulse rounded-2xl border-2 border-gray-200 bg-white">
+      <div className="flex items-center gap-4 px-5 py-5 sm:px-6 2xl:gap-6 2xl:px-10 2xl:py-7">
+        <div className="h-12 w-12 shrink-0 rounded-xl bg-gray-200 2xl:h-16 2xl:w-16" />
         <div className="flex-1">
-          <div className="h-5 w-40 rounded bg-gray-200 2xl:h-7 2xl:w-56" />
-          <div className="mt-2 h-4 w-28 rounded bg-gray-100 2xl:h-5 2xl:w-36" />
-        </div>
-      </div>
-      {/* Content grid */}
-      <div className="grid grid-cols-2 gap-x-8 gap-y-4 2xl:gap-x-12 2xl:gap-y-8">
-        <div>
-          <div className="mb-2 h-4 w-24 rounded bg-gray-200 2xl:h-5" />
-          <div className="space-y-2 pl-6">
-            <div className="h-3 w-32 rounded bg-gray-100 2xl:h-4" />
-            <div className="h-3 w-28 rounded bg-gray-100 2xl:h-4" />
-            <div className="h-3 w-36 rounded bg-gray-100 2xl:h-4" />
+          <div className="flex items-center gap-2.5">
+            <div className="h-5 w-32 rounded bg-gray-200 2xl:h-7 2xl:w-44" />
+            <div className="h-5 w-20 rounded-full bg-gray-100 2xl:h-6 2xl:w-24" />
           </div>
+          <div className="mt-2 h-4 w-56 rounded bg-gray-100 2xl:h-5 2xl:w-72" />
         </div>
-        <div>
-          <div className="mb-2 h-4 w-24 rounded bg-gray-200 2xl:h-5" />
-          <div className="h-3 w-28 rounded bg-gray-100 pl-6 2xl:h-4" />
+        <div className="hidden items-center gap-3 sm:flex">
+          <div className="h-8 w-24 rounded-full bg-gray-100 2xl:h-10 2xl:w-32" />
+          <div className="h-7 w-7 rounded-full border-2 border-gray-200 2xl:h-9 2xl:w-9" />
         </div>
-      </div>
-      {/* Communication style */}
-      <div className="mt-4 2xl:mt-8">
-        <div className="mb-2 h-4 w-36 rounded bg-gray-200 2xl:h-5" />
-        <div className="h-3 w-full max-w-md rounded bg-gray-100 pl-6 2xl:h-4" />
       </div>
     </div>
   );
+}
+
+function sortByExpertise(personas: Persona[]): Persona[] {
+  return [...personas].sort((a, b) => {
+    const aOrder = EXPERTISE_ORDER[a.expertise.toLowerCase()] ?? 1;
+    const bOrder = EXPERTISE_ORDER[b.expertise.toLowerCase()] ?? 1;
+    return aOrder - bOrder;
+  });
 }
 
 export default function PersonaSelection({
@@ -73,7 +66,7 @@ export default function PersonaSelection({
 
   useEffect(() => {
     fetchPersonas()
-      .then(setPersonas)
+      .then((data) => setPersonas(sortByExpertise(data)))
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
@@ -104,21 +97,23 @@ export default function PersonaSelection({
   };
 
   return (
-    <div className="mx-auto w-full max-w-[800px] px-4 py-6 sm:px-6 sm:py-8 xl:max-w-[900px] 2xl:max-w-[1280px] 2xl:py-16">
+    <div className="mx-auto flex w-full max-w-[820px] flex-col px-4 py-6 sm:px-6 sm:py-8 xl:max-w-[920px] 2xl:max-w-[1280px] 2xl:py-16">
       {/* Page Title */}
-      <div className="mb-6 2xl:mb-10">
+      <div className="mb-8 2xl:mb-12">
         <h1 className="text-xl font-bold text-gray-900 font-serif italic sm:text-2xl 2xl:text-4xl">
           Select Your Audience Persona
         </h1>
-        <p className="mt-1.5 text-sm leading-relaxed text-gray-500 sm:mt-2 2xl:text-xl 2xl:leading-8 font-sans">
+        <p className="mt-2 text-sm leading-relaxed text-gray-500 sm:mt-2.5 2xl:text-xl 2xl:leading-8 font-sans">
           Choose the type of audience you&apos;ll be presenting to. The AI will tailor feedback based on the selected persona&apos;s characteristics and expectations.
         </p>
       </div>
 
       {/* Persona Cards */}
-      <div className="mb-6 2xl:mb-8 space-y-4">
+      <div className="mb-6 2xl:mb-8 space-y-3 2xl:space-y-4">
         {loading ? (
           <>
+            <PersonaCardSkeleton />
+            <PersonaCardSkeleton />
             <PersonaCardSkeleton />
           </>
         ) : error ? (
@@ -130,6 +125,8 @@ export default function PersonaSelection({
             <PersonaCard
               key={persona.personaID}
               name={persona.name}
+              description={persona.description}
+              icon={persona.icon}
               expertise={persona.expertise}
               keyPriorities={persona.keyPriorities}
               presentationTime={persona.presentationTime}

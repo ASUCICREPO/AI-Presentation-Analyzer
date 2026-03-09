@@ -103,10 +103,10 @@ def get_persona(identifier):
 
 # Fallback thresholds — only used when the persona has no bestPractices.
 _FALLBACK_BP = {
-    'wpm': {'min': 140, 'max': 160},
-    'eyeContact': {'min': 60},
-    'fillerWords': {'max': 3},
-    'pauses': {'min': 4},
+    'wpm': {'min': 110, 'max': 170},
+    'eyeContact': {'min': 50},
+    'fillerWords': {'max': 5},
+    'pauses': {'min': 1},
 }
 
 def _resolve_best_practices(persona):
@@ -234,36 +234,24 @@ def generate_feedback(persona, transcript, persona_customization=None,
 
     parts.extend([
         "",
-        f"Based on your role as {persona_name}, the transcript,"
-        " and the presentation materials (if PDF is provided), provide structured feedback.",
+        f"As {persona_name}, provide structured feedback on this presentation.",
         "",
-        "IMPORTANT: Keep ALL feedback concise. Brevity is mandatory.",
+        "CALIBRATION: Assess overall quality honestly first. Strong presentations"
+        " get refinements, not flaw lists. Weak ones get direct criticism."
+        " Match tone and severity to actual quality — don't manufacture problems.",
         "",
-        "CRITICAL CONSTRAINT FOR keyRecommendations: You MUST return EXACTLY 5"
-        " recommendations — not 4, not 6, exactly 5. Each recommendation MUST"
-        " have a short title (under 8 words) and a description of EXACTLY 3"
-        " sentences. No more, no less than 3 sentences per description. Keep"
-        " each description under 60 words total. Do NOT write paragraphs."
-        " Recommendations MUST focus ONLY on the presentation CONTENT — what"
-        " was said, the arguments made, the structure, clarity, depth, and"
-        " completeness of the material. Do NOT mention delivery metrics like"
-        " speaking pace, volume, eye contact, filler words, or pauses in"
-        " keyRecommendations. Delivery feedback belongs in performanceSummary only.",
+        "keyRecommendations: Return EXACTLY 5. Each needs a title (under 8 words)"
+        " and EXACTLY 3 sentences (under 60 words). Focus ONLY on content —"
+        " arguments, structure, clarity, depth. No delivery metrics here.",
+        " For strong presentations, frame as refinements, not corrections.",
         "",
-        "For performanceSummary: provide an overall assessment (2-3 sentences), list"
-        " 2-3 content strengths (each no more than 1 sentence), and give delivery"
-        " feedback on pace, volume, eye contact, filler words, and pauses.",
+        "performanceSummary: Overall assessment (2-3 sentences), 2-3 content"
+        " strengths (1 sentence each), and deliveryFeedback for speakingPace,"
+        " volume, eyeContact, fillerWords, pauses — each EXACTLY 2 sentences"
+        " (observation + one tip), under 30 words.",
         "",
-        "CRITICAL CONSTRAINT FOR deliveryFeedback: Each of the five delivery feedback"
-        " fields (speakingPace, volume, eyeContact, fillerWords, pauses) MUST be"
-        " EXACTLY 2 sentences. No more, no less. The first sentence should state"
-        " what was observed. The second sentence should give one actionable tip."
-        " Do NOT include statistics, standard deviations, window breakdowns, or"
-        " lengthy analysis. Keep each field under 30 words total.",
-        "",
-        f"Use a {communication_style} tone throughout your feedback.",
-        "Be constructive and encouraging while being honest about areas needing work.",
-        "Prioritize brevity and clarity — avoid verbose explanations.",
+        f"Tone: {communication_style}. Lead with strengths. Be honest —"
+        " praise confidently when earned, critique directly when needed. Be concise.",
     ])
 
     tool_config = {

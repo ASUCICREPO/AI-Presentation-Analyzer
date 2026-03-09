@@ -55,6 +55,13 @@ export interface Persona {
   personaID: string;
   name: string;
   description: string;
+  /**
+   * SVG icon name used in the persona card UI.
+   * Must match a key in the PERSONA_ICON_REGISTRY (see PersonaCard.tsx).
+   * Stored in the DynamoDB personas table as a string.
+   * Examples: "briefcase", "people", "school", "mic", "lightbulb"
+   */
+  icon?: string;
   personaPrompt?: string;
   expertise: string;
   keyPriorities: string[];
@@ -64,6 +71,16 @@ export interface Persona {
   bestPractices?: PersonaBestPractices;
   scoringWeights?: PersonaScoringWeights;
 }
+
+/** Sort order for expertise levels (lower = displayed first) */
+export const EXPERTISE_ORDER: Record<string, number> = {
+  beginner: 0,
+  intermediate: 1,
+  expert: 2,
+};
+
+/** Fallback icon name when a persona has no icon field set */
+export const DEFAULT_PERSONA_ICON = 'people';
 
 /** Fallback when a persona has no timeLimitSec set */
 export const DEFAULT_TIME_LIMIT_SEC = 15 * 60; // 15 minutes
