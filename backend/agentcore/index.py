@@ -10,9 +10,9 @@ from strands.experimental.bidi.types.events import (
 )
 from strands.experimental.bidi.types.io import BidiInput, BidiOutput, BidiOutputEvent
 from strands.experimental.bidi.models import BidiNovaSonicModel
+from strands.experimental.bidi.hooks.events import BidiMessageAddedEvent
 from strands.experimental.bidi.tools import stop_conversation
 from bedrock_agentcore import BedrockAgentCoreApp, RequestContext, PingStatus
-from strands import tool
 from typing import Literal
 from datetime import datetime, timezone
 import asyncio
@@ -91,31 +91,42 @@ def create_nova_sonic_model(voice_id: str = None) -> BidiNovaSonicModel:
     )
 
 
-class SessionTimer:
+class SessionTimeGuard:
+    """Bidi hook that monitors elapsed time after each user message.
+
+    Sets a flag that the I/O input channel reads before yielding the next
+    audio frame.  This keeps send() calls out of hook callbacks (which the
+    Strands docs treat as observers, not actors).
+    """
+
     def __init__(self, duration_sec: int):
         self._start = time.monotonic()
         self._duration = duration_sec
+        # Read by WebSocketBidiInput between audio frames
+        self.time_nudge: str | None = None
+        self.force_stop = False
 
-    @tool
-    def check_session_time(self) -> str:
-        """Check how much time has elapsed and how much remains in the Q&A session.
+    async def on_message_added(self, event: BidiMessageAddedEvent):
+        """Fires every time a message is added to conversation history."""
+        # Only check after the presenter (user) finishes an answer
+        if event.message['role'] != 'user':
+            return
 
-        Call this after every 2-3 questions to monitor the session clock.
-        """
         elapsed = time.monotonic() - self._start
         remaining = max(0, self._duration - elapsed)
 
         if remaining <= 0:
-            return (
-                f"TIME EXPIRED. Elapsed: {elapsed/60:.1f} min. "
-                "You MUST wrap up NOW — thank the presenter and use stop_conversation."
+            self.time_nudge = (
+                "TIME EXPIRED. Thank the presenter briefly and use "
+                "stop_conversation immediately."
             )
-        if remaining <= 15:
-            return (
-                f"Elapsed: {elapsed/60:.1f} min. Only {remaining:.0f}s left. "
-                "Finish your current exchange, thank the presenter, and use stop_conversation."
+            self.force_stop = True
+        elif remaining <= 30:
+            self.time_nudge = (
+                f"TIME CHECK: Only {remaining:.0f}s remaining. "
+                "This should be your last question. Wrap up and use "
+                "stop_conversation soon."
             )
-        return f"Elapsed: {elapsed/60:.1f} min. Remaining: {remaining/60:.1f} min. Continue the Q&A."
 
 
 class WebSocketBidiInput(BidiInput):
@@ -129,10 +140,11 @@ class WebSocketBidiInput(BidiInput):
     agent is still running (keeping the WS alive), then the client sends "end".
     """
 
-    def __init__(self, websocket: WebSocket):
+    def __init__(self, websocket: WebSocket, time_guard: SessionTimeGuard | None = None):
         self._ws = websocket
         self._stopped = False
         self._analytics_requested = asyncio.Event()
+        self._time_guard = time_guard
 
     async def start(self, agent: BidiAgent) -> None:
         self._stopped = False
@@ -142,8 +154,31 @@ class WebSocketBidiInput(BidiInput):
             role="user"
         ))
 
+    async def _drain_time_nudge(self) -> None:
+        """If the time guard flagged a nudge, inject it as a text event
+        and optionally force-stop after a grace period."""
+        if not self._time_guard or not self._time_guard.time_nudge:
+            return
+
+        nudge = self._time_guard.time_nudge
+        self._time_guard.time_nudge = None  # consume
+        print(f"[SessionTimeGuard] Injecting nudge: {nudge}", flush=True)
+
+        await self._agent.send(BidiTextInputEvent(text=nudge, role="user"))
+
+        if self._time_guard.force_stop:
+            # Give the model a short grace period to say goodbye,
+            # then hard-terminate the input channel.
+            await asyncio.sleep(15)
+            print("[SessionTimeGuard] Grace period elapsed, forcing stop", flush=True)
+            self._stopped = True
+            raise asyncio.CancelledError("session time expired")
+
     async def __call__(self) -> BidiAudioInputEvent:
         while not self._stopped:
+            # Inject any pending time nudge before processing the next frame
+            await self._drain_time_nudge()
+
             try:
                 msg = await self._ws.receive_json()
             except WebSocketDisconnect:
@@ -518,11 +553,12 @@ async def websocket_handler(websocket, context: RequestContext):
         await log_system_prompt_to_cloudwatch(session_id, system_prompt)
 
         model = create_nova_sonic_model(voice_id)
-        session_timer = SessionTimer(SESSION_DURATION_SEC)
+        time_guard = SessionTimeGuard(SESSION_DURATION_SEC)
         agent = BidiAgent(
             model=model,
-            tools=[session_timer.check_session_time, stop_conversation],
+            tools=[stop_conversation],
             system_prompt=system_prompt,
+            hooks=[time_guard],
         )
 
         await websocket.send_json({
@@ -531,7 +567,7 @@ async def websocket_handler(websocket, context: RequestContext):
             "session_id": session_id
         })
 
-        ws_input = WebSocketBidiInput(websocket)
+        ws_input = WebSocketBidiInput(websocket, time_guard=time_guard)
         ws_output = WebSocketBidiOutput(websocket)
 
         async def analytics_watcher():
