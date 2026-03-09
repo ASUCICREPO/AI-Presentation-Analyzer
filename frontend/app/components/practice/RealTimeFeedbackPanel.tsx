@@ -18,19 +18,7 @@ interface RealTimeFeedbackPanelProps {
   vocalVariety: VocalVarietyMetrics;
 }
 
-// Color helpers for vocal variety scores
-function varietyBarColor(score: number): string {
-  if (score >= 70) return 'bg-green-500';
-  if (score >= 40) return 'bg-yellow-500';
-  return 'bg-red-500';
-}
-
-function varietyTextColor(score: number): string {
-  if (score >= 70) return 'text-green-600';
-  if (score >= 40) return 'text-yellow-600';
-  return 'text-red-600';
-}
-
+// Color helper for monotone score (inverted — high = bad)
 function monotoneTextColor(score: number): string {
   if (score >= 70) return 'text-red-600';
   if (score >= 40) return 'text-yellow-600';
@@ -90,23 +78,22 @@ export default function RealTimeFeedbackPanel({
             <div className="flex items-center gap-2 text-gray-600">
               <Eye className="w-4 h-4" />
               <span>Eye Contact</span>
-              
+
               {/* Audio Toggle & Tooltip */}
               <div className="group relative flex items-center">
-                <button 
+                <button
                   onClick={(e) => {
                     e.stopPropagation();
                     onToggleSound();
                   }}
-                  className={`ml-1 p-1.5 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 ${
-                    soundEnabled 
-                      ? 'bg-blue-100 text-blue-600 hover:bg-blue-200' 
-                      : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-                  }`}
+                  className={`ml-1 p-1.5 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500 ${soundEnabled
+                    ? 'bg-blue-100 text-blue-600 hover:bg-blue-200'
+                    : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                    }`}
                 >
                   {soundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
                 </button>
-                
+
                 {/* Tooltip */}
                 <div className="absolute bottom-full left-1/2 mb-2 w-56 -translate-x-1/2 translate-y-2 opacity-0 invisible transform rounded-lg bg-gray-900 px-3 py-2 text-center text-xs text-white shadow-xl transition-all duration-200 group-hover:visible group-hover:translate-y-0 group-hover:opacity-100 z-50">
                   <p className="font-semibold mb-1">{soundEnabled ? "Audio Cues On" : "Audio Cues Off"}</p>
@@ -122,7 +109,7 @@ export default function RealTimeFeedbackPanel({
               {isRecording ? (!isDistracted ? 'Focused' : 'Distracted') : '--'}
             </span>
           </div>
-          
+
           {/* Visual Status Indicator */}
           <div className="mt-2 flex items-center gap-2">
             <div className={`h-3 w-3 rounded-full transition-colors duration-300 ${isRecording ? (!isDistracted ? 'bg-green-500' : 'bg-red-500 animate-pulse') : 'bg-gray-300'}`} />
@@ -146,38 +133,6 @@ export default function RealTimeFeedbackPanel({
           </div>
         </div>
 
-        {/* Pitch Variation */}
-        <div className={!isRecording ? 'opacity-50' : ''}>
-          <div className="flex justify-between text-sm 2xl:text-base">
-            <span className="text-gray-600">Pitch Variation</span>
-            <span className={`font-semibold ${isRecording && vocalVariety.pitchVariation > 0 ? varietyTextColor(vocalVariety.pitchVariation) : 'text-gray-900'}`}>
-              {isRecording && vocalVariety.pitchVariation > 0 ? `${vocalVariety.pitchVariation}%` : '--'}
-            </span>
-          </div>
-          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${isRecording && vocalVariety.pitchVariation > 0 ? varietyBarColor(vocalVariety.pitchVariation) : 'bg-gray-200'}`}
-              style={{ width: isRecording && vocalVariety.pitchVariation > 0 ? `${vocalVariety.pitchVariation}%` : '0%' }}
-            />
-          </div>
-        </div>
-
-        {/* Tone Variation */}
-        <div className={!isRecording ? 'opacity-50' : ''}>
-          <div className="flex justify-between text-sm 2xl:text-base">
-            <span className="text-gray-600">Tone Variation</span>
-            <span className={`font-semibold ${isRecording && vocalVariety.spectralVariation > 0 ? varietyTextColor(vocalVariety.spectralVariation) : 'text-gray-900'}`}>
-              {isRecording && vocalVariety.spectralVariation > 0 ? `${vocalVariety.spectralVariation}%` : '--'}
-            </span>
-          </div>
-          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
-            <div
-              className={`h-full rounded-full transition-all duration-500 ${isRecording && vocalVariety.spectralVariation > 0 ? varietyBarColor(vocalVariety.spectralVariation) : 'bg-gray-200'}`}
-              style={{ width: isRecording && vocalVariety.spectralVariation > 0 ? `${vocalVariety.spectralVariation}%` : '0%' }}
-            />
-          </div>
-        </div>
-
         {/* Monotone Level */}
         <div className={`rounded-lg border border-gray-100 p-2.5 ${!isRecording ? 'opacity-50' : ''}`}>
           <div className="flex justify-between items-center">
@@ -192,8 +147,8 @@ export default function RealTimeFeedbackPanel({
               : vocalVariety.monotoneScore >= 70
                 ? 'Try varying your pitch and volume more'
                 : vocalVariety.monotoneScore >= 40
-                  ? 'Good variety, keep it up!'
-                  : 'Excellent vocal variety!'}
+                  ? 'Better, but vary more'
+                  : 'Good vocal variety'}
           </p>
         </div>
       </div>

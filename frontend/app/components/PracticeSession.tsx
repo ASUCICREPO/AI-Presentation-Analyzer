@@ -8,6 +8,7 @@ import { useSessionAnalytics, SessionAnalytics } from '../hooks/useSessionAnalyt
 import { useVideoRecording } from '../hooks/useVideoRecording';
 import { useDetailedMetrics } from '../hooks/useDetailedMetrics';
 import { useSessionManifest } from '../hooks/useSessionManifest';
+import { useMicCalibration } from '../hooks/useMicCalibration';
 import { uploadJsonToS3, pollAnalytics, AIFeedbackResponse } from '../services/api';
 import { ANALYSIS_CONFIG, PRESENTATION_LIMITS, DEFAULT_TIME_LIMIT_SEC } from '../config/config';
 
@@ -114,12 +115,16 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
   // Detailed Metrics Hook (per-second snapshots)
   const detailedMetrics = useDetailedMetrics(sessionId);
 
+  // Mic Calibration Hook (lightweight volume meter for pre-session check)
+  const micCalibration = useMicCalibration();
+
   // Register exit handler so parent can cleanly stop the session on exit
   useEffect(() => {
     if (exitSessionRef) {
       exitSessionRef.current = () => {
         stopAnalysis();
         vocalVariety.stopAnalysis();
+        micCalibration.stop();
         if (!stoppingRef.current) {
           videoRecording.abort();
         }
@@ -464,6 +469,8 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
           setCameraActive(true);
           setPermissionDenied(false);
           setIsCalibrating(true);
+          // Start mic calibration as soon as camera/mic stream is ready
+          micCalibration.start(stream);
         };
       }
     } catch (err) {
@@ -489,11 +496,12 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
   }, []);
 
   // Full cleanup on unmount — stops camera, audio analysis, vocal variety,
-  // video recording, and aborts manifest so no media streams leak.
+  // video recording, mic calibration, and aborts manifest so no media streams leak.
   useEffect(() => {
     return () => {
       stopAnalysis();
       vocalVariety.stopAnalysis();
+      micCalibration.stop();
       if (!stoppingRef.current) {
         videoRecording.abort();
       }
@@ -518,6 +526,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
       const currentStream = mediaStreamRef.current;
 
       setIsCalibrating(false);
+      micCalibration.stop();
       setIsRecording(true);
       setIsPaused(false);
       isPausedRef.current = false;
@@ -694,6 +703,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
                   showMesh={showMesh}
                   onToggleMesh={() => setShowMesh(!showMesh)}
                   gazeStatus={gazeStatus}
+                  micCalibration={micCalibration}
                   onComplete={() => setIsCalibrating(false)}
                 />
               ) : (

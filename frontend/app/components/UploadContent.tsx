@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { getPresignedUrl, uploadFileWithPresignedUrl } from '../services/api';
 
 interface UploadContentProps {
@@ -21,6 +21,20 @@ export default function UploadContent({ personaName, sessionId, initialFileName,
   const [progress, setProgress] = useState(initialUploaded ? 100 : 0);
   const [error, setError] = useState<string | null>(null);
   const [displayFileName, setDisplayFileName] = useState<string | null>(initialFileName ?? null);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(true);
+  const [modalVisible, setModalVisible] = useState(false);
+
+  // Trigger enter animation after mount
+  useEffect(() => {
+    if (showPrivacyModal) {
+      requestAnimationFrame(() => setModalVisible(true));
+    }
+  }, [showPrivacyModal]);
+
+  const handleDismissPrivacy = () => {
+    setModalVisible(false);
+    setTimeout(() => setShowPrivacyModal(false), 300);
+  };
 
   const handleBrowseClick = () => {
     fileInputRef.current?.click();
@@ -96,29 +110,29 @@ export default function UploadContent({ personaName, sessionId, initialFileName,
                 <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z" fill="currentColor" />
               </svg>
             </div>
-            
+
             <h3 className="mb-2 text-base font-medium text-gray-900 font-sans 2xl:text-xl">
               Drop your presentation file here
             </h3>
             <p className="mb-6 text-sm text-gray-500 font-sans 2xl:text-lg 2xl:mb-8">
               or click to browse
             </p>
-            
-            <input 
-              type="file" 
+
+            <input
+              type="file"
               ref={fileInputRef}
-              className="hidden" 
+              className="hidden"
               accept=".pdf"
               onChange={handleFileChange}
             />
-            
-            <button 
+
+            <button
               onClick={handleBrowseClick}
               className="rounded-lg bg-maroon-600 px-6 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-maroon-700 hover:shadow-md active:scale-[0.98] font-sans 2xl:px-8 2xl:py-3.5 2xl:text-lg"
             >
               Select File
             </button>
-            
+
             <p className="mt-4 text-xs text-gray-400 font-sans 2xl:text-base 2xl:mt-6">
               Supported format: PDF
             </p>
@@ -173,9 +187,8 @@ export default function UploadContent({ personaName, sessionId, initialFileName,
             <div className="mt-4">
               <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100 2xl:h-3">
                 <div
-                  className={`h-full rounded-full transition-all duration-300 ease-out ${
-                    uploaded ? 'bg-green-500' : 'bg-maroon-600'
-                  }`}
+                  className={`h-full rounded-full transition-all duration-300 ease-out ${uploaded ? 'bg-green-500' : 'bg-maroon-600'
+                    }`}
                   style={{ width: `${progress}%` }}
                 />
               </div>
@@ -222,10 +235,69 @@ export default function UploadContent({ personaName, sessionId, initialFileName,
           </button>
         </div>
       </div>
-      
+
       <p className="mt-4 text-center text-xs text-gray-400 font-sans 2xl:text-sm 2xl:mt-6">
         Content upload is optional. You can skip this step and proceed directly to practice mode.
       </p>
+
+      {/* Privacy Notice Modal */}
+      {showPrivacyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className={`absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ${modalVisible ? 'opacity-100' : 'opacity-0'
+              }`}
+          />
+          <div
+            className={`relative w-full max-w-lg transform overflow-hidden rounded-2xl bg-white p-6 shadow-xl transition-all duration-300 ${modalVisible ? 'translate-y-0 opacity-100 scale-100' : 'translate-y-4 opacity-0 scale-95'
+              }`}
+          >
+            <div className="flex items-start gap-3 mb-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-50 shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" className="text-blue-500">
+                  <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z" fill="currentColor" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 font-serif">Data Usage &amp; Privacy Notice</h3>
+                <p className="text-xs text-gray-500 font-sans">Important information about your presentation data</p>
+              </div>
+            </div>
+
+            <p className="text-sm text-gray-700 mb-4 font-sans leading-relaxed">
+              Your uploaded presentation content and recorded videos are processed to provide real-time feedback and analysis.
+            </p>
+
+            <p className="text-sm font-semibold text-gray-900 mb-2 font-sans">Here&apos;s what you should know:</p>
+            <ul className="space-y-2 mb-4">
+              <li className="flex items-start gap-2 text-sm text-gray-700 font-sans">
+                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-gray-400 shrink-0" />
+                Your data is stored in the backend to enable presentation analysis and feedback
+              </li>
+              <li className="flex items-start gap-2 text-sm text-gray-700 font-sans">
+                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-gray-400 shrink-0" />
+                Your data will not be shared beyond the services required for this application
+              </li>
+              <li className="flex items-start gap-2 text-sm text-gray-700 font-sans">
+                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-gray-400 shrink-0" />
+                Your data will not be used for model training or shared with external parties
+              </li>
+            </ul>
+
+            <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 mb-6">
+              <p className="text-xs text-gray-700 font-sans leading-relaxed">
+                <span className="font-semibold">⚠️ Note:</span> While we prioritize your privacy, please avoid uploading sensitive, confidential, or personally identifiable information (PII) as this is a practice tool utilizing cloud-based AI services.
+              </p>
+            </div>
+
+            <button
+              onClick={handleDismissPrivacy}
+              className="w-full rounded-lg bg-maroon-600 px-4 py-3 text-sm font-bold text-white shadow-sm transition-all hover:bg-maroon-700 hover:shadow-md active:scale-[0.98] font-sans"
+            >
+              I Understand &amp; Agree
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
