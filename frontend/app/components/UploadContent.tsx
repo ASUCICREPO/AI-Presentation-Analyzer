@@ -21,8 +21,10 @@ export default function UploadContent({ personaName, sessionId, initialFileName,
   const [progress, setProgress] = useState(initialUploaded ? 100 : 0);
   const [error, setError] = useState<string | null>(null);
   const [displayFileName, setDisplayFileName] = useState<string | null>(initialFileName ?? null);
-  const [showPrivacyModal, setShowPrivacyModal] = useState(true);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const pendingFileRef = useRef<File | null>(null);
 
   // Trigger enter animation after mount
   useEffect(() => {
@@ -33,7 +35,26 @@ export default function UploadContent({ personaName, sessionId, initialFileName,
 
   const handleDismissPrivacy = () => {
     setModalVisible(false);
-    setTimeout(() => setShowPrivacyModal(false), 300);
+    setTimeout(() => {
+      setShowPrivacyModal(false);
+      setPrivacyAccepted(true);
+      // Proceed with the pending upload
+      if (pendingFileRef.current) {
+        const file = pendingFileRef.current;
+        pendingFileRef.current = null;
+        setSelectedFile(file);
+        startUpload(file);
+      }
+    }, 300);
+  };
+
+  const handleCancelPrivacy = () => {
+    setModalVisible(false);
+    setTimeout(() => {
+      setShowPrivacyModal(false);
+      pendingFileRef.current = null;
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }, 300);
   };
 
   const handleBrowseClick = () => {
@@ -60,11 +81,17 @@ export default function UploadContent({ personaName, sessionId, initialFileName,
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
+    if (!file) return;
+
+    setUploaded(false);
+    setError(null);
+
+    if (privacyAccepted) {
       setSelectedFile(file);
-      setUploaded(false);
-      setError(null);
       startUpload(file);
+    } else {
+      pendingFileRef.current = file;
+      setShowPrivacyModal(true);
     }
   };
 
@@ -246,6 +273,7 @@ export default function UploadContent({ personaName, sessionId, initialFileName,
           <div
             className={`absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ${modalVisible ? 'opacity-100' : 'opacity-0'
               }`}
+            onClick={handleCancelPrivacy}
           />
           <div
             className={`relative w-full max-w-lg transform overflow-hidden rounded-2xl bg-white p-6 shadow-xl transition-all duration-300 ${modalVisible ? 'translate-y-0 opacity-100 scale-100' : 'translate-y-4 opacity-0 scale-95'
@@ -289,12 +317,20 @@ export default function UploadContent({ personaName, sessionId, initialFileName,
               </p>
             </div>
 
-            <button
-              onClick={handleDismissPrivacy}
-              className="w-full rounded-lg bg-maroon-600 px-4 py-3 text-sm font-bold text-white shadow-sm transition-all hover:bg-maroon-700 hover:shadow-md active:scale-[0.98] font-sans"
-            >
-              I Understand &amp; Agree
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={handleCancelPrivacy}
+                className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-700 shadow-sm transition-all hover:bg-gray-50 font-sans"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDismissPrivacy}
+                className="flex-1 rounded-lg bg-maroon-600 px-4 py-3 text-sm font-bold text-white shadow-sm transition-all hover:bg-maroon-700 hover:shadow-md active:scale-[0.98] font-sans"
+              >
+                I Understand &amp; Agree
+              </button>
+            </div>
           </div>
         </div>
       )}
