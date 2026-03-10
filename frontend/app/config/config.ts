@@ -68,6 +68,7 @@ export interface Persona {
   presentationTime: string;
   communicationStyle: string;
   timeLimitSec?: number;
+  qaTimeLimitSec?: number;
   bestPractices?: PersonaBestPractices;
   scoringWeights?: PersonaScoringWeights;
 }
@@ -84,6 +85,9 @@ export const DEFAULT_PERSONA_ICON = 'people';
 
 /** Fallback when a persona has no timeLimitSec set */
 export const DEFAULT_TIME_LIMIT_SEC = 15 * 60; // 15 minutes
+
+/** Fallback when a persona has no qaTimeLimitSec set */
+export const DEFAULT_QA_TIME_LIMIT_SEC = 5 * 60; // 5 minutes
 
 /** Generic defaults used when a persona has no bestPractices set.
  *

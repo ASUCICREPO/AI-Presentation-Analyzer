@@ -39,6 +39,7 @@ export default function Home() {
   const [selectedPersona, setSelectedPersona] = useState<string | null>(null);
   const [selectedPersonaName, setSelectedPersonaName] = useState<string>('');
   const [selectedPersonaTimeLimit, setSelectedPersonaTimeLimit] = useState<number | undefined>(undefined);
+  const [selectedPersonaQATimeLimit, setSelectedPersonaQATimeLimit] = useState<number | undefined>(undefined);
   const [selectedPersonaData, setSelectedPersonaData] = useState<Persona | null>(null);
   const [customNotes, setCustomNotes] = useState('');
   const [pdfUploaded, setPdfUploaded] = useState(false);
@@ -273,6 +274,7 @@ export default function Home() {
             onSelectPersona={handlePersonaSelect}
             onPersonaNameChange={setSelectedPersonaName}
             onTimeLimitChange={setSelectedPersonaTimeLimit}
+            onQATimeLimitChange={setSelectedPersonaQATimeLimit}
             onPersonaDataChange={setSelectedPersonaData}
             customNotes={customNotes}
             onCustomNotesChange={setCustomNotes}
@@ -316,7 +318,7 @@ export default function Home() {
             personaName={selectedPersonaName}
             sessionId={sessionId}
             userId={userId || ''}
-            timeLimitSec={selectedPersonaTimeLimit}
+            qaTimeLimitSec={selectedPersonaQATimeLimit}
             onBack={handleBackToPractice}
             onComplete={handleQAComplete}
             onSkip={handleQASkip}

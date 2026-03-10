@@ -545,7 +545,7 @@ async def websocket_handler(websocket, context: RequestContext):
             print(f"[WebSocket] No transcript for session {session_id}, using placeholder", flush=True)
             transcript_text = "No presentation transcript available."
 
-        session_duration = int(persona_data.get('timeLimitSec', 300))
+        session_duration = int(persona_data.get('qaTimeLimitSec', 300))
 
         system_prompt = build_qa_system_prompt(
             persona_name=persona_data.get('name', 'Interviewer'),

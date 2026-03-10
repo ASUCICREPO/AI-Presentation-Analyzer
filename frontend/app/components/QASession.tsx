@@ -6,7 +6,7 @@ import { useQASession } from '../hooks/useQASession';
 import { QAWebSocketConfig } from '../services/websocket';
 import { QAAnalyticsResponse } from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import { QA_SESSION_CONFIG } from '../config/config';
+import { QA_SESSION_CONFIG, DEFAULT_QA_TIME_LIMIT_SEC } from '../config/config';
 import QACameraView from './qa/QACameraView';
 import QAOrbPanel from './qa/QAOrbPanel';
 
@@ -16,7 +16,7 @@ interface QASessionProps {
   sessionId: string;
   userId: string;
   voiceId?: string;
-  timeLimitSec?: number;
+  qaTimeLimitSec?: number;
   onBack: () => void;
   onComplete: (qaPromise: Promise<QAAnalyticsResponse | null>) => void;
   onSkip: () => void;
@@ -34,7 +34,7 @@ export default function QASession({
   sessionId,
   userId,
   voiceId,
-  timeLimitSec,
+  qaTimeLimitSec,
   onBack,
   onComplete,
   onSkip,
@@ -61,7 +61,7 @@ export default function QASession({
     [personaId, sessionId, userId, dateStr, voiceId, getIdToken],
   );
 
-  const durationSec = timeLimitSec ?? 300;
+  const durationSec = qaTimeLimitSec ?? DEFAULT_QA_TIME_LIMIT_SEC;
   const qa = useQASession(wsConfig, getIdToken, durationSec);
   const { endSession } = qa;
   const displayPersonaName = qa.personaName || initialPersonaName;
