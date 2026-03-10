@@ -65,6 +65,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
 
   // New Calibration Mode State
   const [isCalibrating, setIsCalibrating] = useState(false);
+  const [calibrationStep, setCalibrationStep] = useState<1 | 2>(1);
   const [showMesh, setShowMesh] = useState(false);
 
   // Runtime toggle for real-time feedback panel (config provides default)
@@ -684,7 +685,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
             onPauseRecording={handlePauseRecording}
             onResumeRecording={handleResumeRecording}
             onStopRecording={handleStopRecording}
-            onReEnterCalibration={() => setIsCalibrating(true)}
+            onReEnterCalibration={() => { setCalibrationStep(1); setIsCalibrating(true); }}
           />
         </div>
 
@@ -701,11 +702,15 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
             <>
               <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm 2xl:p-6 relative overflow-hidden animate-fade-in">
                 {isCalibrating ? (
-                  <CalibrationPanel
-                    showMesh={showMesh}
-                    onToggleMesh={() => setShowMesh(!showMesh)}
-                    gazeStatus={gazeStatus}
-                  />
+                  calibrationStep === 1 ? (
+                    <CalibrationPanel
+                      showMesh={showMesh}
+                      onToggleMesh={() => setShowMesh(!showMesh)}
+                      gazeStatus={gazeStatus}
+                    />
+                  ) : (
+                    <MicCheckCard micCalibration={micCalibration} onBack={() => setCalibrationStep(1)} />
+                  )
                 ) : (
                   <RealTimeFeedbackPanel
                     isRecording={isRecording && !isPaused}
@@ -717,19 +722,28 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
                   />
                 )}
               </div>
-              {isCalibrating && (
-                <>
-                  <MicCheckCard micCalibration={micCalibration} />
-                  <button
-                    onClick={() => setIsCalibrating(false)}
-                    className="w-full rounded-lg bg-maroon px-4 py-2.5 text-sm font-bold text-white shadow-lg hover:bg-maroon-dark hover:shadow-xl transform active:scale-[0.98] transition-all flex items-center justify-center gap-2 font-sans animate-fade-in"
-                  >
-                    <span>Everything Looks Good</span>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  </button>
-                </>
+              {isCalibrating && calibrationStep === 1 && (
+                <button
+                  onClick={() => setCalibrationStep(2)}
+                  className="w-full rounded-lg bg-maroon px-4 py-2.5 text-sm font-bold text-white shadow-lg hover:bg-maroon-dark hover:shadow-xl transform active:scale-[0.98] transition-all flex items-center justify-center gap-2 font-sans animate-fade-in"
+                >
+                  <span>Continue to Mic Calibration</span>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+                    <path d="M5 12h14" />
+                    <path d="m12 5 7 7-7 7" />
+                  </svg>
+                </button>
+              )}
+              {isCalibrating && calibrationStep === 2 && (
+                <button
+                  onClick={() => setIsCalibrating(false)}
+                  className="w-full rounded-lg bg-maroon px-4 py-2.5 text-sm font-bold text-white shadow-lg hover:bg-maroon-dark hover:shadow-xl transform active:scale-[0.98] transition-all flex items-center justify-center gap-2 font-sans animate-fade-in"
+                >
+                  <span>Everything Looks Good</span>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                </button>
               )}
             </>
           )}
