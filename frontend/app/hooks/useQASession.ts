@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { QAWebSocketClient, QAWebSocketConfig, QAWebSocketEvent, QATranscriptEntry } from '../services/websocket';
 import { QA_SESSION_CONFIG } from '../config/config';
-import { QAAnalyticsResponse } from '../services/api';
+import { QAAnalyticsResponse, normalizeQAFeedback } from '../services/api';
 
 export type AgentState = null | 'thinking' | 'listening' | 'talking';
 
@@ -122,7 +122,7 @@ export function useQASession(
 
       case 'qa_analytics':
         console.log('[useQASession] Received qa_analytics from server');
-        analyticsReceivedRef.current = event as unknown as QAAnalyticsResponse;
+        analyticsReceivedRef.current = normalizeQAFeedback(event as unknown as QAAnalyticsResponse);
         setQaAnalytics(analyticsReceivedRef.current);
         if (analyticsResolveRef.current) {
           analyticsResolveRef.current(analyticsReceivedRef.current);

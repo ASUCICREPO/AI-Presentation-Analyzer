@@ -51,6 +51,23 @@ export interface QAAnalyticsResponse {
   model: string;
 }
 
+/** Normalize QAFeedback fields that the LLM may return as strings instead of arrays. */
+export function normalizeQAFeedback(res: QAAnalyticsResponse): QAAnalyticsResponse {
+  const fb = res.qaFeedback;
+  if (!fb) return res;
+  const toArray = (v: unknown): string[] =>
+    Array.isArray(v) ? v : typeof v === 'string' ? [v] : [];
+  return {
+    ...res,
+    qaFeedback: {
+      ...fb,
+      strengths: toArray(fb.strengths),
+      improvements: toArray(fb.improvements),
+      questionBreakdown: Array.isArray(fb.questionBreakdown) ? fb.questionBreakdown : [],
+    },
+  };
+}
+
 export class AnalyticsProcessingError extends Error {
   constructor() {
     super('Analytics still processing');
@@ -378,7 +395,8 @@ export async function fetchQAAnalytics(sessionId: string): Promise<QAAnalyticsRe
       { headers },
     );
     if (!res.ok) return null;
-    return res.json();
+    const data: QAAnalyticsResponse = await res.json();
+    return normalizeQAFeedback(data);
   } catch {
     return null;
   }
