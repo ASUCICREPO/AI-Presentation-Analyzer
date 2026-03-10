@@ -60,6 +60,7 @@ export function useQASession(
   const analyticsResolveRef = useRef<((v: QAAnalyticsResponse | null) => void) | null>(null);
   const analyticsReceivedRef = useRef<QAAnalyticsResponse | null>(null);
   const endingRef = useRef(false);
+  const wasActiveRef = useRef(false);
 
   // Audio playback queue
   const playbackContextRef = useRef<AudioContext | null>(null);
@@ -72,6 +73,7 @@ export function useQASession(
   const handleEvent = useCallback((event: QAWebSocketEvent) => {
     switch (event.type) {
       case 'session_started':
+        wasActiveRef.current = true;
         setStatus('active');
         setPersonaName((event.persona_name as string) || '');
         setAgentState('listening');
@@ -142,8 +144,13 @@ export function useQASession(
         }
         wsClientRef.current?.disconnect();
         wsClientRef.current = null;
+        if (wasActiveRef.current || endingRef.current) {
+          setStatus('ended');
+        } else {
+          setError(prev => prev || 'QA session failed to start. Please try again.');
+          setStatus('error');
+        }
         endingRef.current = false;
-        setStatus('ended');
         setAgentState(null);
         stopAudioCapture();
         stopTimer();
@@ -271,14 +278,14 @@ export function useQASession(
     const workletBlob = new Blob([workletCode], { type: 'application/javascript' });
     const workletUrl = URL.createObjectURL(workletBlob);
     await ctx.audioWorklet.addModule(workletUrl);
+    URL.revokeObjectURL(workletUrl); // free blob URL after addModule completes
 
-    // Guard: if cleanup ran while we were awaiting addModule, the context is closed
-    if (ctx.state === 'closed') {
+    if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
+      await ctx.resume();
+    } else if (ctx.state === 'closed') {
       console.warn('[useQASession] AudioContext was closed during setup, aborting capture');
       return;
     }
-
-    await ctx.resume(); // ensure context is running before constructing worklet node
 
     const processor = new AudioWorkletNode(ctx, 'pcm-processor');
     processorNodeRef.current = processor;
@@ -302,7 +309,9 @@ export function useQASession(
   const stopAudioCapture = useCallback(() => {
     processorNodeRef.current?.disconnect();
     processorNodeRef.current = null;
-    audioContextRef.current?.close();
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close();
+    }
     audioContextRef.current = null;
     mediaStreamRef.current?.getTracks().forEach(t => t.stop());
     mediaStreamRef.current = null;
@@ -310,7 +319,9 @@ export function useQASession(
     playbackGainRef.current = null;
     playbackDestRef.current = null;
     setBotAudioTrack(null);
-    playbackContextRef.current?.close();
+    if (playbackContextRef.current && playbackContextRef.current.state !== 'closed') {
+      playbackContextRef.current.close();
+    }
     playbackContextRef.current = null;
     playbackQueueRef.current = [];
     isPlayingRef.current = false;
@@ -323,6 +334,7 @@ export function useQASession(
     wsClientRef.current?.disconnect();
     wsClientRef.current = null;
     endingRef.current = false;
+    wasActiveRef.current = false;
     analyticsReceivedRef.current = null;
 
     setStatus('connecting');

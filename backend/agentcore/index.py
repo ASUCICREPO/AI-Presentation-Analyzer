@@ -11,6 +11,7 @@ from strands.experimental.bidi.types.events import (
 from strands.experimental.bidi.types.io import BidiInput, BidiOutput, BidiOutputEvent
 from strands.experimental.bidi.models import BidiNovaSonicModel
 from strands.experimental.hooks.events import BidiMessageAddedEvent
+from strands.hooks.registry import HookRegistry
 from strands.experimental.bidi.tools import stop_conversation
 from bedrock_agentcore import BedrockAgentCoreApp, RequestContext, PingStatus
 from typing import Literal
@@ -103,6 +104,9 @@ class SessionTimeGuard:
         # Read by WebSocketBidiInput between audio frames
         self.time_nudge: str | None = None
         self.force_stop = False
+
+    def register_hooks(self, registry: HookRegistry) -> None:
+        registry.add_callback(BidiMessageAddedEvent, self.on_message_added)
 
     async def on_message_added(self, event: BidiMessageAddedEvent):
         """Fires every time a message is added to conversation history."""
