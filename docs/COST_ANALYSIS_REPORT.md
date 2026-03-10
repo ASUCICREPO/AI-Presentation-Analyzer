@@ -25,6 +25,7 @@ The AI Presentation Coach is a fully serverless application built on AWS. This r
 | AgentCore CPU utilisation | ~30% active (I/O wait is not billed) |
 | AgentCore peak memory | 512 MB |
 | S3 storage per session | ~50 MB (video ~45 MB + PDF ~3 MB + JSON ~2 MB) |
+| Estimated sessions per month | ~100 (S3 storage caps at ~5 GB due to 30-day lifecycle policy) |
 | DynamoDB reads per session | ~5 RRUs (persona lookups) |
 | API Gateway calls per session | ~10 REST calls |
 | Lambda invocations per session | 3 (presigned URL ~2 s, analytics ~15 s, persona CRUD ~1 s) |
@@ -103,36 +104,77 @@ These are the costs that accrue even when nobody is using the app — persistent
 | Service | What Costs at Idle | Daily Cost | Monthly Cost |
 |---|---|---|---|
 | AWS Amplify Hosting | 0.1 GB storage + ~1 GB/month transfer | ~$0.0050 | $0.152 |
+| Amazon S3 | ~5 GB max (100 sessions × 50 MB, 30-day lifecycle) | ~$0.0038 | $0.115 |
 | Amazon CloudWatch Logs | ~0.1 GB/month ingestion + 0.5 GB retained | ~$0.0022 | $0.065 |
 | Amazon ECR | AgentCore Docker image ~0.5 GB | ~$0.0017 | $0.050 |
 | Amazon DynamoDB | <1 MB persona table storage | ~$0.0000 | $0.0003 |
-| Amazon S3 | Grows with stored sessions (~50 MB each) | varies | $0.023/GB |
 | Lambda, API Gateway, Transcribe, Bedrock | Not invoked = not billed | $0.00 | $0.00 |
-| **Total idle cost** | | **~$0.009/day** | **~$0.27/month** |
+| **Total idle cost** | | **~$0.013/day** | **~$0.38/month** |
 
-> **Key insight:** All compute (Lambda, Transcribe, Bedrock, AgentCore) is pure pay-per-use. When no sessions are running, those costs are exactly $0. The only persistent costs are storage (Amplify, ECR, CloudWatch, S3) totalling ~$0.27/month.
+> **Key insight:** All compute (Lambda, Transcribe, Bedrock, AgentCore) is pure pay-per-use. When no sessions are running, those costs are exactly $0. The only persistent costs are storage (Amplify, S3, ECR, CloudWatch) totalling ~$0.38/month at 100 sessions. A 30-day S3 lifecycle policy automatically deletes session data after one month, so storage never grows beyond ~5 GB regardless of how long the app runs.
 
 ---
 
 ## Cost Scaling by Number of Sessions per Month
 
-| Sessions/month | Transcribe | Bedrock (all) | AgentCore | S3 Storage | Cognito (MAUs) | **Total/month** | **Per session** |
+Totals include the $0.27/month steady-state cost (Amplify + ECR + CloudWatch). Cognito assumes 1 unique user per session. All rows use standard Transcribe rate — volume discounts only apply above **16,667 sessions/month** (250,000 minutes).
+
+| Sessions/month | Transcribe | Bedrock (all) | AgentCore | S3 | Cognito | **Total/month** | **Per session** |
 |---|---|---|---|---|---|---|---|
 | 10 | $3.60 | $1.03 | $0.03 | $0.01 | $0.15 | **~$5.09** | $0.509 |
-| 50 | $18.00 | $5.13 | $0.13 | $0.06 | $0.75 | **~$24.35** | $0.487 |
-| 100 | $36.00 | $10.26 | $0.26 | $0.12 | $1.50 | **~$48.42** | $0.484 |
-| 500 | $180.00 | $51.30 | $1.32 | $0.58 | $7.50 | **~$241.50** | $0.483 |
-| 1,000 | $360.00 | $102.60 | $2.63 | $1.15 | $15.00 | **~$482.65** | $0.483 |
-| 5,000 | $1,440.00* | $513.00 | $13.16 | $5.75 | $75.00 | **~$2,090** | $0.418 |
+| 50 | $18.00 | $5.14 | $0.13 | $0.06 | $0.75 | **~$24.35** | $0.487 |
+| 100 | $36.00 | $10.28 | $0.26 | $0.12 | $1.50 | **~$48.44** | $0.484 |
+| 500 | $180.00 | $51.38 | $1.32 | $0.60 | $7.50 | **~$241.10** | $0.482 |
+| 1,000 | $360.00 | $102.75 | $2.63 | $1.20 | $15.00 | **~$481.93** | $0.482 |
+| 5,000 | $1,800.00 | $513.75 | $13.16 | $6.02 | $75.00 | **~$2,408.56** | $0.482 |
 
-*\*At 5,000 sessions/month (83,333 Transcribe minutes/month), volume discounts begin to apply, reducing Transcribe rate from $0.0004/sec to $0.00025/sec beyond 250K minutes.*
+---
+
+## Detailed Example: 100 Sessions in a Month
+
+| Service | Calculation | Cost |
+|---|---|---|
+| Amazon Transcribe | 100 × 900 sec × $0.0004/sec | $36.00 |
+| Bedrock — Nova 2 Sonic | 100 × 5 min × $0.017/min | $8.50 |
+| Bedrock — Claude Haiku 4.5 | 100 × (7K×$1/1M + 2K×$5/1M) | $1.70 |
+| Bedrock — Nova 2 Lite | 100 × (4K×$0.06/1M + 1.5K×$0.24/1M) | $0.06 |
+| Bedrock Guardrails | 100 × $0.15/1,000 text units | $0.02 |
+| Bedrock AgentCore Runtime | 100 × (90s CPU + 300s×0.5GB memory) | $0.26 |
+| Amazon S3 | 100 × 50 MB storage + requests | $0.12 |
+| Amazon Cognito | 100 MAUs × $0.015 | $1.50 |
+| AWS Lambda | 100 × 3 invocations, 2.25 GB-sec | $0.00 |
+| Amazon API Gateway | 100 × 10 REST calls | $0.00 |
+| Amazon DynamoDB | 100 × 5 RRUs | $0.00 |
+| Steady-state (Amplify + ECR + CloudWatch) | Fixed monthly | $0.27 |
+| **Total** | | **$48.44** |
+| **Per session** | | **$0.484** |
+
+---
+
+## Detailed Example: 1,000 Sessions in a Month
+
+| Service | Calculation | Cost |
+|---|---|---|
+| Amazon Transcribe | 1,000 × 900 sec × $0.0004/sec | $360.00 |
+| Bedrock — Nova 2 Sonic | 1,000 × 5 min × $0.017/min | $85.00 |
+| Bedrock — Claude Haiku 4.5 | 1,000 × (7K×$1/1M + 2K×$5/1M) | $17.00 |
+| Bedrock — Nova 2 Lite | 1,000 × (4K×$0.06/1M + 1.5K×$0.24/1M) | $0.60 |
+| Bedrock Guardrails | 1,000 × $0.15/1,000 text units | $0.15 |
+| Bedrock AgentCore Runtime | 1,000 × (90s CPU + 300s×0.5GB memory) | $2.63 |
+| Amazon S3 | 1,000 × 50 MB storage + requests | $1.20 |
+| Amazon Cognito | 1,000 MAUs × $0.015 | $15.00 |
+| AWS Lambda | 1,000 × 3 invocations, 2.25 GB-sec | $0.04 |
+| Amazon API Gateway | 1,000 × 10 REST calls | $0.04 |
+| Amazon DynamoDB | 1,000 × 5 RRUs | $0.00 |
+| Steady-state (Amplify + ECR + CloudWatch) | Fixed monthly | $0.27 |
+| **Total** | | **$481.93** |
+| **Per session** | | **$0.482** |
 
 ---
 
 ## Limitations and Exclusions
 
 - Data transfer costs between AWS services within the same region (intra-region transfer is free)
-- WAFv2 web ACL (not deployed in this stack)
 - Secrets Manager (only used in optional GitHub CI/CD mode)
 - S3 storage accumulation over time is shown as a per-session addition only — long-term storage growth depends on retention policies
 - Cross-region Bedrock inference routing overhead (cross-region inference profiles are used but pricing is same as regional)
@@ -144,11 +186,10 @@ These are the costs that accrue even when nobody is using the app — persistent
 
 ### Immediate Actions (Highest Impact)
 
-1. **Transcribe is 77% of cost ($0.36/session)** — Transcribe volume discounts kick in at 250K minutes/month, dropping from $0.0004/sec to $0.00025/sec (saving 37.5%). At 277+ sessions/month you hit this tier.
-2. **Nova Sonic is 18% of cost ($0.085/session)** — The `SESSION_DURATION_SEC: 300` cap is already enforced in the AgentCore stack. Ensure the frontend enforces a hard UI cutoff to prevent overruns.
+1. **Transcribe is 77% of cost ($0.36/session)** — Transcribe volume discounts kick in at 250,000 minutes/month, dropping from $0.0004/sec to $0.00025/sec (saving 37.5%). At **16,667+ sessions/month** (250,000 minutes ÷ 15 min/session) you hit this tier — significantly reducing per-session cost at scale.
+2. **Nova Sonic is 18% of cost ($0.085/session)** — The `SESSION_DURATION_SEC: 300` cap is already enforced in the AgentCore stack.
 3. **API Gateway REST → HTTP API** — Switching from REST API ($3.50/M calls) to HTTP API ($1.00/M calls) saves 71% on API Gateway with no functional impact for this use case.
 4. **Cognito Lite tier** — If passwordless auth and custom access tokens aren't required, Lite tier costs $0.005/MAU vs $0.015/MAU on Essentials — a 67% reduction (saves $100/month at 10,000 MAUs).
-5. **S3 lifecycle policies** — Session videos (~45 MB each) are the largest storage driver. Add a 30-day auto-delete lifecycle rule to cap storage costs.
 
 ### Best Practices
 
@@ -161,6 +202,6 @@ These are the costs that accrue even when nobody is using the app — persistent
 
 ## Conclusion
 
-The AI Presentation Coach has a **marginal cost of ~$0.47 per 15-minute session**, dominated by Amazon Transcribe ($0.36) and Nova 2 Sonic ($0.085). The architecture is genuinely serverless — **idle cost is ~$0.009/day (~$0.27/month)** with zero compute charges when no users are active.
+The AI Presentation Coach has a **marginal cost of ~$0.47 per 15-minute session**, dominated by Amazon Transcribe ($0.36) and Nova 2 Sonic ($0.085). The architecture is genuinely serverless — **idle cost is ~$0.013/day (~$0.38/month)** with zero compute charges when no users are active. A 30-day S3 lifecycle policy caps storage at ~5 GB (at 100 sessions/month), keeping S3 costs flat at ~$0.12/month with no long-term accumulation.
 
 At 100 sessions/month the total bill is approximately **$48/month**. At 1,000 sessions/month it scales linearly to approximately **$483/month**, with Transcribe volume discounts beginning to reduce per-session cost above ~280 sessions/month.
