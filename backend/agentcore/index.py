@@ -3,14 +3,17 @@ from strands.experimental.bidi import BidiAgent
 from strands.experimental.bidi.types.events import (
     BidiAudioInputEvent,
     BidiAudioStreamEvent,
+    BidiTextInputEvent,
     BidiTranscriptStreamEvent,
     BidiInterruptionEvent,
     BidiResponseCompleteEvent,
 )
 from strands.experimental.bidi.types.io import BidiInput, BidiOutput, BidiOutputEvent
 from strands.experimental.bidi.models import BidiNovaSonicModel
+from strands.experimental.hooks.events import BidiMessageAddedEvent
+from strands.hooks.registry import HookRegistry
 from strands.experimental.bidi.tools import stop_conversation
-from bedrock_agentcore import BedrockAgentCoreApp, RequestContext
+from bedrock_agentcore import BedrockAgentCoreApp, RequestContext, PingStatus
 from typing import Literal
 from datetime import datetime, timezone
 import asyncio
@@ -18,6 +21,9 @@ import boto3
 import aioboto3
 import os
 import json
+import time
+from jinja2 import Template
+from opentelemetry import baggage, context as otel_context
 
 '''
 A quick note on voice selection:
@@ -37,40 +43,31 @@ if DEFAULT_VOICE_ID not in VALID_VOICES:
     raise ValueError(f"Invalid VOICE_ID '{DEFAULT_VOICE_ID}'. Must be one of: {VALID_VOICES}.")
 MODEL_ID=os.getenv("MODEL_ID", "amazon.nova-2-sonic-v1:0") #Nova 2 Sonic default for best performance.
 SESSION_DURATION_SEC = int(os.getenv("SESSION_DURATION_SEC", "300"))  # 5 minutes default
-QA_ANALYTICS_MODEL_ID = os.getenv("QA_ANALYTICS_MODEL_ID", "global.amazon.nova-2-lite-v1:0")
+QA_ANALYTICS_MODEL_ID = os.getenv("QA_ANALYTICS_MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+_runtime_name = os.getenv("AGENT_RUNTIME_NAME", "")
+CLOUDWATCH_LOG_GROUP = f"/aws/bedrock-agentcore/runtimes/{_runtime_name}-DEFAULT" if _runtime_name else ""
 
 
-def build_qa_system_prompt(persona_name: str, persona_prompt: str, custom_instructions: str, transcript_text: str) -> str:
+def build_qa_system_prompt(persona_name: str, persona_prompt: str, custom_instructions: str, transcript_text: str, session_duration: float) -> str:
     """Build a QA-focused system prompt from persona and presentation context."""
-    return f"""You are {persona_name}, an engaged audience member at a presentation Q&A session.
+    
+    qa_duration = session_duration // 60
+    if qa_duration <= 0:
+        qa_duration = 1 # Default to 1 minutes of QA
 
-PERSONA CHARACTERISTICS:
-{persona_prompt}
-
-CUSTOM INSTRUCTIONS:
-{custom_instructions or "Focus on understanding and challenging the presented ideas."}
-
-YOUR GOALS:
-1. Ask clarifying questions about unclear or complex points
-2. Challenge assumptions and conclusions with critical thinking
-3. Explore practical applications of presented concepts
-4. Help the presenter think deeper about their topic
-5. Maintain the conversation for approximately {SESSION_DURATION_SEC // 60} minutes
-
-BEHAVIOR GUIDELINES:
-- Start by briefly acknowledging the presentation, then ask your first question
-- Ask one focused question at a time
-- Listen actively to responses before asking follow-ups
-- Reference specific parts of the presentation when possible
-- Maintain your persona's communication style
-- Be respectful but intellectually rigorous
-- Vary question types between clarification, critical analysis, and practical application
-- If the presenter gives a short or unclear response, ask a follow-up to dig deeper
-- As time progresses, move toward more challenging or synthesizing questions
-
-PRESENTATION TRANSCRIPT:
-{transcript_text}
-"""
+    
+    with open("qa_system_prompt.jinja2", "r") as f:
+        template_file = f.read()
+    template = Template(template_file)
+    prompt = template.render(
+        persona_name=persona_name,
+        persona_prompt=persona_prompt,
+        custom_instructions=custom_instructions if custom_instructions else None,
+        transcript_text=transcript_text,
+        qa_limit=qa_duration
+    )
+    print(f"Rendered QA system prompt:\n{prompt}")
+    return prompt
 
 
 def create_nova_sonic_model(voice_id: str = None) -> BidiNovaSonicModel:
@@ -93,6 +90,47 @@ def create_nova_sonic_model(voice_id: str = None) -> BidiNovaSonicModel:
     )
 
 
+class SessionTimeGuard:
+    """Bidi hook that monitors elapsed time after each user message.
+
+    Sets a flag that the I/O input channel reads before yielding the next
+    audio frame.  This keeps send() calls out of hook callbacks (which the
+    Strands docs treat as observers, not actors).
+    """
+
+    def __init__(self, duration_sec: int):
+        self._start = time.monotonic()
+        self._duration = duration_sec
+        # Read by WebSocketBidiInput between audio frames
+        self.time_nudge: str | None = None
+        self.force_stop = False
+
+    def register_hooks(self, registry: HookRegistry) -> None:
+        registry.add_callback(BidiMessageAddedEvent, self.on_message_added)
+
+    async def on_message_added(self, event: BidiMessageAddedEvent):
+        """Fires every time a message is added to conversation history."""
+        # Only check after the presenter (user) finishes an answer
+        if event.message['role'] != 'user':
+            return
+
+        elapsed = time.monotonic() - self._start
+        remaining = max(0, self._duration - elapsed)
+
+        if remaining <= 0:
+            self.time_nudge = (
+                "TIME EXPIRED. Thank the presenter briefly and use "
+                "stop_conversation immediately."
+            )
+            self.force_stop = True
+        elif remaining <= 30:
+            self.time_nudge = (
+                f"TIME CHECK: Only {remaining:.0f}s remaining. "
+                "This should be your last question. Wrap up and use "
+                "stop_conversation soon."
+            )
+
+
 class WebSocketBidiInput(BidiInput):
     """Bridge browser WebSocket audio into BidiAgent input events.
 
@@ -104,16 +142,45 @@ class WebSocketBidiInput(BidiInput):
     agent is still running (keeping the WS alive), then the client sends "end".
     """
 
-    def __init__(self, websocket: WebSocket):
+    def __init__(self, websocket: WebSocket, time_guard: SessionTimeGuard | None = None):
         self._ws = websocket
         self._stopped = False
         self._analytics_requested = asyncio.Event()
+        self._time_guard = time_guard
 
     async def start(self, agent: BidiAgent) -> None:
         self._stopped = False
+        self._agent = agent
+        await agent.send(BidiTextInputEvent(
+            text="Please introduce yourself and begin the Q&A session.",
+            role="user"
+        ))
+
+    async def _drain_time_nudge(self) -> None:
+        """If the time guard flagged a nudge, inject it as a text event
+        and optionally force-stop after a grace period."""
+        if not self._time_guard or not self._time_guard.time_nudge:
+            return
+
+        nudge = self._time_guard.time_nudge
+        self._time_guard.time_nudge = None  # consume
+        print(f"[SessionTimeGuard] Injecting nudge: {nudge}", flush=True)
+
+        await self._agent.send(BidiTextInputEvent(text=nudge, role="user"))
+
+        if self._time_guard.force_stop:
+            # Give the model a short grace period to say goodbye,
+            # then hard-terminate the input channel.
+            await asyncio.sleep(15)
+            print("[SessionTimeGuard] Grace period elapsed, forcing stop", flush=True)
+            self._stopped = True
+            raise asyncio.CancelledError("session time expired")
 
     async def __call__(self) -> BidiAudioInputEvent:
         while not self._stopped:
+            # Inject any pending time nudge before processing the next frame
+            await self._drain_time_nudge()
+
             try:
                 msg = await self._ws.receive_json()
             except WebSocketDisconnect:
@@ -195,24 +262,22 @@ async def load_persona(persona_id: str) -> dict:
     """Load persona configuration from DynamoDB."""
     table_name = os.getenv('PERSONA_TABLE_NAME')
     if not table_name:
-        print("[Error] PERSONA_TABLE_NAME environment variable not set")
+        print("PERSONA_TABLE_NAME environment variable not set")
         return {}
-    
+
     try:
         session = aioboto3.Session()
         async with session.resource('dynamodb', region_name=REGION) as dynamodb:
             table = await dynamodb.Table(table_name)
             response = await table.get_item(Key={'personaID': persona_id})
-            
+
             if 'Item' not in response:
-                print(f"[Error] Persona {persona_id} not found in DynamoDB")
+                print(f"Persona {persona_id} not found in DynamoDB")
                 return {}
-            
+
             return response['Item']
     except Exception as e:
-        print(f"[Error] Failed to load persona {persona_id}: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"Failed to load persona {persona_id}: {e}")
         return {}
 
 
@@ -220,7 +285,7 @@ async def load_transcript(user_id: str, session_id: str) -> str:
     """Load presentation transcript from S3."""
     bucket_name = os.getenv('UPLOADS_BUCKET')
     if not bucket_name:
-        print("[Error] UPLOADS_BUCKET environment variable not set")
+        print("UPLOADS_BUCKET environment variable not set")
         return ""
     
     s3_key = f"{user_id}/{session_id}/transcript.json"
@@ -230,10 +295,10 @@ async def load_transcript(user_id: str, session_id: str) -> str:
         async with session.client('s3', region_name=REGION) as s3:
             response = await s3.get_object(Bucket=bucket_name, Key=s3_key)
             content = await response['Body'].read()
-            
+
             # Parse transcript JSON
             transcript_data = json.loads(content)
-            
+
             # Extract text from transcript entries
             if isinstance(transcript_data, list):
                 # Format: [{"text": "...", "timestamp": ...}, ...]
@@ -243,15 +308,48 @@ async def load_transcript(user_id: str, session_id: str) -> str:
                 transcript_text = " ".join([entry.get('text', '') for entry in transcript_data['entries']])
             else:
                 transcript_text = str(transcript_data)
-            
-            return transcript_text.strip()
-            
+
+            transcript_text = transcript_text.strip()
+            print(f"Loaded transcript ({len(transcript_text)} chars) from s3://{bucket_name}/{s3_key}")
+            return transcript_text
+
     except Exception as e:
-        print(f"[Warning] Failed to load transcript from s3://{bucket_name}/{s3_key}: {e}")
+        print(f"Failed to load transcript from s3://{bucket_name}/{s3_key}: {e}")
         return ""
 
 
 app = BedrockAgentCoreApp()
+
+
+@app.ping
+def health_check():
+    return PingStatus.HEALTHY
+
+
+async def log_system_prompt_to_cloudwatch(session_id: str, system_prompt: str) -> None:
+    """Write the rendered system prompt to a dedicated CloudWatch log stream."""
+    if not CLOUDWATCH_LOG_GROUP:
+        print("[SystemPromptLog] CLOUDWATCH_LOG_GROUP not set; skipping dedicated log stream")
+        return
+    stream_name = f"system-prompts/{session_id}"
+    try:
+        session = aioboto3.Session()
+        async with session.client('logs', region_name=REGION) as logs:
+            try:
+                await logs.create_log_stream(logGroupName=CLOUDWATCH_LOG_GROUP, logStreamName=stream_name)
+            except logs.exceptions.ResourceAlreadyExistsException:
+                pass
+            await logs.put_log_events(
+                logGroupName=CLOUDWATCH_LOG_GROUP,
+                logStreamName=stream_name,
+                logEvents=[{
+                    'timestamp': int(datetime.now(timezone.utc).timestamp() * 1000),
+                    'message': system_prompt,
+                }]
+            )
+        print(f"[SystemPromptLog] Prompt logged to stream: {CLOUDWATCH_LOG_GROUP}/{stream_name}")
+    except Exception as e:
+        print(f"[SystemPromptLog] Failed to write to CloudWatch: {e}")
 
 
 async def generate_qa_analytics(transcript_entries: list[dict], persona_data: dict) -> dict:
@@ -418,6 +516,11 @@ async def websocket_handler(websocket, context: RequestContext):
 
     print(f"[WebSocket] Setup from user={user_id} persona={persona_id} session={session_id}", flush=True)
 
+    # Attach session ID as OTEL baggage so all downstream spans are correlated
+    # in the CloudWatch GenAI Observability dashboard.
+    _otel_ctx = baggage.set_baggage("session.id", session_id)
+    _otel_token = otel_context.attach(_otel_ctx)
+
     if not persona_id or not user_id or not session_id:
         print(f"[WebSocket] Missing required params: persona={persona_id} user={user_id} session={session_id}", flush=True)
         await websocket.send_json({"type": "error", "message": "Setup missing personaId, userId, or sessionId"})
@@ -442,18 +545,24 @@ async def websocket_handler(websocket, context: RequestContext):
             print(f"[WebSocket] No transcript for session {session_id}, using placeholder", flush=True)
             transcript_text = "No presentation transcript available."
 
+        session_duration = int(persona_data.get('timeLimitSec', 300))
+
         system_prompt = build_qa_system_prompt(
             persona_name=persona_data.get('name', 'Interviewer'),
             persona_prompt=persona_data.get('personaPrompt', ''),
             custom_instructions=persona_data.get('description', ''),
-            transcript_text=transcript_text
+            transcript_text=transcript_text,
+            session_duration=session_duration
         )
+        await log_system_prompt_to_cloudwatch(session_id, system_prompt)
 
         model = create_nova_sonic_model(voice_id)
+        time_guard = SessionTimeGuard(session_duration)
         agent = BidiAgent(
             model=model,
             tools=[stop_conversation],
             system_prompt=system_prompt,
+            hooks=[time_guard],
         )
 
         await websocket.send_json({
@@ -462,7 +571,7 @@ async def websocket_handler(websocket, context: RequestContext):
             "session_id": session_id
         })
 
-        ws_input = WebSocketBidiInput(websocket)
+        ws_input = WebSocketBidiInput(websocket, time_guard=time_guard)
         ws_output = WebSocketBidiOutput(websocket)
 
         async def analytics_watcher():
@@ -536,6 +645,8 @@ async def websocket_handler(websocket, context: RequestContext):
         import traceback
         traceback.print_exc()
     finally:
+        if _otel_token is not None:
+            otel_context.detach(_otel_token)
         if agent:
             try:
                 await agent.stop()

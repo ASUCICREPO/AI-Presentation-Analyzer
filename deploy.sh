@@ -223,9 +223,11 @@ echo ""
 # Prepare environment variables for the build
 ENV_VARS="[{\"name\":\"BRANCH_NAME\",\"value\":\"$BRANCH_NAME\",\"type\":\"PLAINTEXT\"},{\"name\":\"STACK_NAME\",\"value\":\"$STACK_NAME\",\"type\":\"PLAINTEXT\"}"
 
-# Add GitHub token if provided
+# Add GitHub details if provided
 if [ -n "$GITHUB_TOKEN" ]; then
     ENV_VARS="${ENV_VARS},{\"name\":\"GITHUB_TOKEN\",\"value\":\"$GITHUB_TOKEN\",\"type\":\"PLAINTEXT\"}"
+    ENV_VARS="${ENV_VARS},{\"name\":\"GITHUB_OWNER\",\"value\":\"$GITHUB_OWNER\",\"type\":\"PLAINTEXT\"}"
+    ENV_VARS="${ENV_VARS},{\"name\":\"GITHUB_REPO\",\"value\":\"$GITHUB_REPO_NAME\",\"type\":\"PLAINTEXT\"}"
 fi
 
 ENV_VARS="${ENV_VARS}]"

@@ -28,7 +28,7 @@ export class AgentCoreStack extends cdk.Stack {
       platform: ecrAssets.Platform.LINUX_ARM64,
     });
 
-    const agentCoreRuntime = new agentcore.Runtime(this, 'LiveQAAgentRuntime', {
+    const agentCoreRuntime: agentcore.Runtime = new agentcore.Runtime(this, 'LiveQAAgentRuntime', {
       description: 'Bidirectional voice agent for live Q&A sessions with WebSocket support',
       agentRuntimeArtifact: agentcore.AgentRuntimeArtifact.fromEcrRepository(
         agentCoreImage.repository,
@@ -41,6 +41,12 @@ export class AgentCoreStack extends cdk.Stack {
         'SESSION_DURATION_SEC': '300',
         'PERSONA_TABLE_NAME': props.personasTable.tableName,
         'UPLOADS_BUCKET': props.uploadsBucket.bucketName,
+        // The container constructs the log-group path at runtime from the name.
+        // We cannot use agentRuntimeArn here — it would create a Fn::GetAtt
+        // self-reference that CloudFormation rejects as a circular dependency.
+        'AGENT_RUNTIME_NAME': cdk.Lazy.string({
+          produce: () => agentCoreRuntime.agentRuntimeName,
+        }),
       },
       lifecycleConfiguration: {
         idleRuntimeSessionTimeout: cdk.Duration.minutes(10),
@@ -66,18 +72,23 @@ export class AgentCoreStack extends cdk.Stack {
     // attachToRole() creates AWS::IAM::Policy here, referencing the role by name
     // (a cross-stack import from AIPresentationCoachStack, same direction as all
     // other props). AIPresentationCoachStack has zero references to this stack.
-    const authRolePolicy = new iam.Policy(this, 'AuthRoleAgentCorePolicy', {
-      statements: [
-        new iam.PolicyStatement({
-          effect: iam.Effect.ALLOW,
-          actions: ['bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream'],
-          resources: [
+    // ManagedPolicy instead of Policy to avoid implicit CloudFormation dependency:
+    // AWS::BedrockAgentCore::Runtime implicitly depends on all AWS::IAM::Policy
+    // resources in the stack. Using AWS::IAM::ManagedPolicy breaks that cycle.
+    const authRolePolicy = new iam.CfnManagedPolicy(this, 'AuthRoleAgentCorePolicy', {
+      managedPolicyName: `AgentCoreInvokeWebSocket-${this.stackName}`,
+      policyDocument: {
+        Version: '2012-10-17',
+        Statement: [{
+          Effect: 'Allow',
+          Action: ['bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream'],
+          Resource: [
             agentCoreRuntime.agentRuntimeArn,
-            `${agentCoreRuntime.agentRuntimeArn}/*`,
+            cdk.Fn.join('', [agentCoreRuntime.agentRuntimeArn, '/*']),
           ],
-        }),
-      ],
-      roles: [props.authenticatedRole],
+        }],
+      },
+      roles: [props.authenticatedRole.roleName],
     });
 
     this.webSocketUrl = `wss://bedrock-agentcore.${this.region}.amazonaws.com/runtimes/${agentCoreRuntime.agentRuntimeArn}/ws`;
@@ -111,8 +122,8 @@ export class AgentCoreStack extends cdk.Stack {
       { id: 'AwsSolutions-IAM5', reason: 'Bedrock inference profiles route to multiple regions for availability. Wildcard required for cross-region inference routing.', appliesTo: ['Resource::arn:aws:bedrock:*:<AWS::AccountId>:inference-profile/*'] },
     ], true);
 
-    NagSuppressions.addResourceSuppressions(authRolePolicy, [
-      { id: 'AwsSolutions-IAM5', reason: 'AgentCore WebSocket invocation checks IAM against runtime-endpoint sub-resources (e.g. runtime/<id>/runtime-endpoint/DEFAULT). Wildcard required to cover all endpoint sub-resources.', appliesTo: ['Resource::<LiveQAAgentRuntime36D5E8ED.AgentRuntimeArn>/*'] },
-    ], true);
+    NagSuppressions.addResourceSuppressionsByPath(this, `${this.stackName}/AuthRoleAgentCorePolicy`, [
+      { id: 'AwsSolutions-IAM5', reason: 'AgentCore WebSocket invocation checks IAM against runtime-endpoint sub-resources (e.g. runtime/<id>/runtime-endpoint/DEFAULT). Wildcard required to cover all endpoint sub-resources.' },
+    ]);
   }
 }

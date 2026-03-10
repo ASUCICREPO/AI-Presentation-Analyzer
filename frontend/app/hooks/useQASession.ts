@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { QAWebSocketClient, QAWebSocketConfig, QAWebSocketEvent, QATranscriptEntry } from '../services/websocket';
 import { QA_SESSION_CONFIG } from '../config/config';
-import { QAAnalyticsResponse } from '../services/api';
+import { QAAnalyticsResponse, normalizeQAFeedback } from '../services/api';
 
 export type AgentState = null | 'thinking' | 'listening' | 'talking';
 
@@ -30,6 +30,7 @@ export interface UseQASessionReturn extends QASessionState {
 export function useQASession(
   config: QAWebSocketConfig,
   getToken?: () => Promise<string>,
+  durationSec: number = QA_SESSION_CONFIG.DURATION_SEC,
 ): UseQASessionReturn {
   const [status, setStatus] = useState<QASessionStatus>('idle');
   const [timer, setTimer] = useState(0);
@@ -59,6 +60,7 @@ export function useQASession(
   const analyticsResolveRef = useRef<((v: QAAnalyticsResponse | null) => void) | null>(null);
   const analyticsReceivedRef = useRef<QAAnalyticsResponse | null>(null);
   const endingRef = useRef(false);
+  const wasActiveRef = useRef(false);
 
   // Audio playback queue
   const playbackContextRef = useRef<AudioContext | null>(null);
@@ -71,6 +73,7 @@ export function useQASession(
   const handleEvent = useCallback((event: QAWebSocketEvent) => {
     switch (event.type) {
       case 'session_started':
+        wasActiveRef.current = true;
         setStatus('active');
         setPersonaName((event.persona_name as string) || '');
         setAgentState('listening');
@@ -119,7 +122,7 @@ export function useQASession(
 
       case 'qa_analytics':
         console.log('[useQASession] Received qa_analytics from server');
-        analyticsReceivedRef.current = event as unknown as QAAnalyticsResponse;
+        analyticsReceivedRef.current = normalizeQAFeedback(event as unknown as QAAnalyticsResponse);
         setQaAnalytics(analyticsReceivedRef.current);
         if (analyticsResolveRef.current) {
           analyticsResolveRef.current(analyticsReceivedRef.current);
@@ -141,8 +144,13 @@ export function useQASession(
         }
         wsClientRef.current?.disconnect();
         wsClientRef.current = null;
+        if (wasActiveRef.current || endingRef.current) {
+          setStatus('ended');
+        } else {
+          setError(prev => prev || 'QA session failed to start. Please try again.');
+          setStatus('error');
+        }
         endingRef.current = false;
-        setStatus('ended');
         setAgentState(null);
         stopAudioCapture();
         stopTimer();
@@ -162,8 +170,13 @@ export function useQASession(
     isPlayingRef.current = true;
     setAgentState('talking');
 
-    const ctx = playbackContextRef.current || new AudioContext({ sampleRate: QA_SESSION_CONFIG.AUDIO_SAMPLE_RATE });
-    playbackContextRef.current = ctx;
+    let ctx = playbackContextRef.current;
+    if (!ctx || ctx.state === 'closed') {
+      ctx = new AudioContext({ sampleRate: QA_SESSION_CONFIG.AUDIO_SAMPLE_RATE });
+      playbackContextRef.current = ctx;
+      playbackDestRef.current = null;
+      playbackGainRef.current = null;
+    }
 
     if (!playbackDestRef.current) {
       const dest = ctx.createMediaStreamDestination();
@@ -203,7 +216,7 @@ export function useQASession(
     setTimer(0);
     timerIntervalRef.current = setInterval(() => {
       setTimer(prev => {
-        if (prev >= QA_SESSION_CONFIG.DURATION_SEC) {
+        if (prev >= durationSec) {
           return prev;
         }
         return prev + 1;
@@ -265,6 +278,14 @@ export function useQASession(
     const workletBlob = new Blob([workletCode], { type: 'application/javascript' });
     const workletUrl = URL.createObjectURL(workletBlob);
     await ctx.audioWorklet.addModule(workletUrl);
+    URL.revokeObjectURL(workletUrl); // free blob URL after addModule completes
+
+    if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
+      await ctx.resume();
+    } else if (ctx.state === 'closed') {
+      console.warn('[useQASession] AudioContext was closed during setup, aborting capture');
+      return;
+    }
 
     const processor = new AudioWorkletNode(ctx, 'pcm-processor');
     processorNodeRef.current = processor;
@@ -288,7 +309,9 @@ export function useQASession(
   const stopAudioCapture = useCallback(() => {
     processorNodeRef.current?.disconnect();
     processorNodeRef.current = null;
-    audioContextRef.current?.close();
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close();
+    }
     audioContextRef.current = null;
     mediaStreamRef.current?.getTracks().forEach(t => t.stop());
     mediaStreamRef.current = null;
@@ -296,7 +319,9 @@ export function useQASession(
     playbackGainRef.current = null;
     playbackDestRef.current = null;
     setBotAudioTrack(null);
-    playbackContextRef.current?.close();
+    if (playbackContextRef.current && playbackContextRef.current.state !== 'closed') {
+      playbackContextRef.current.close();
+    }
     playbackContextRef.current = null;
     playbackQueueRef.current = [];
     isPlayingRef.current = false;
@@ -304,6 +329,14 @@ export function useQASession(
 
   // Session lifecycle
   const startSession = useCallback(async () => {
+    // Clean up any leftover state from a previous attempt to prevent AudioContext leaks
+    stopAudioCapture();
+    wsClientRef.current?.disconnect();
+    wsClientRef.current = null;
+    endingRef.current = false;
+    wasActiveRef.current = false;
+    analyticsReceivedRef.current = null;
+
     setStatus('connecting');
     setError(null);
     setTranscriptEntries([]);
@@ -314,7 +347,7 @@ export function useQASession(
       if (!getToken) {
         throw new Error('getToken function is required for authentication');
       }
-      
+
       const client = new QAWebSocketClient(
         config,
         handleEvent
@@ -326,10 +359,13 @@ export function useQASession(
       // the setup message sent in connect()'s onopen handler.
     } catch (e) {
       console.error('[useQASession] Failed to start:', e);
+      stopAudioCapture();
+      wsClientRef.current?.disconnect();
+      wsClientRef.current = null;
       setError('Failed to connect to QA session');
       setStatus('error');
     }
-  }, [config, getToken, handleEvent, startAudioCapture, startTimer]);
+  }, [config, getToken, handleEvent, startAudioCapture, stopAudioCapture, startTimer]);
 
   const endSession = useCallback((): Promise<QAAnalyticsResponse | null> => {
     setStatus('ending');

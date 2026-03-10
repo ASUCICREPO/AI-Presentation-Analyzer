@@ -21,12 +21,21 @@ phases:
           echo "Error - Required environment variables not set"
           exit 1
         fi
+      - |
+        CDK_CONTEXT="-c branchName=$BRANCH_NAME"
+        if [ -n "$GITHUB_TOKEN" ] && [ -n "$GITHUB_OWNER" ] && [ -n "$GITHUB_REPO" ]; then
+          CDK_CONTEXT="$CDK_CONTEXT -c githubOwner=$GITHUB_OWNER -c githubRepo=$GITHUB_REPO -c githubToken=$GITHUB_TOKEN"
+          echo "GitHub mode enabled for $GITHUB_OWNER/$GITHUB_REPO"
+        else
+          echo "Bare mode (no GitHub CI/CD)"
+        fi
+        export CDK_CONTEXT
       - echo "Changing to backend directory..."
       - cd backend
       - echo "Installing npm dependencies..."
       - npm install
       - echo "Checking if CDK bootstrap is needed..."
-      - npx cdk bootstrap --require-approval never
+      - npx cdk bootstrap $CDK_CONTEXT --require-approval never
     finally:
       - echo "Pre-build phase completed"
 
@@ -35,9 +44,9 @@ phases:
     commands:
       - echo "Deploying CDK stack..."
       - echo "Listing available stacks..."
-      - npx cdk list
-      - echo "Deploying stack - $STACK_NAME"
-      - npx cdk deploy $STACK_NAME --require-approval never --verbose
+      - npx cdk list $CDK_CONTEXT
+      - echo "Deploying all stacks..."
+      - npx cdk deploy --all $CDK_CONTEXT --require-approval never --verbose
     finally:
       - echo "Build phase completed"
 

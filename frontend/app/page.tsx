@@ -316,6 +316,7 @@ export default function Home() {
             personaName={selectedPersonaName}
             sessionId={sessionId}
             userId={userId || ''}
+            timeLimitSec={selectedPersonaTimeLimit}
             onBack={handleBackToPractice}
             onComplete={handleQAComplete}
             onSkip={handleQASkip}
