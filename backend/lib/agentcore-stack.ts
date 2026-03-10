@@ -38,7 +38,7 @@ export class AgentCoreStack extends cdk.Stack {
       environmentVariables: {
         'VOICE_ID': 'matthew',
         'MODEL_ID': 'amazon.nova-2-sonic-v1:0',
-        'SESSION_DURATION_SEC': '300',
+        'QA_ANALYTICS_MODEL_ID': 'global.amazon.nova-2-lite-v1:0',
         'PERSONA_TABLE_NAME': props.personasTable.tableName,
         'UPLOADS_BUCKET': props.uploadsBucket.bucketName,
         // The container constructs the log-group path at runtime from the name.
