@@ -595,9 +595,9 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
           </p>
 
           <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div>
-              <h3 className="mb-2 text-sm font-medium text-green-700">Strengths</h3>
-              <ul className="space-y-1.5">
+            <div className="rounded-lg border border-green-200 bg-green-50 p-4">
+              <h3 className="mb-3 text-sm font-semibold text-green-800">Strengths</h3>
+              <ul className="space-y-2">
                 {qaAnalytics.qaFeedback.strengths.map((s, i) => (
                   <li key={i} className="flex gap-2 text-sm text-gray-700">
                     <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0 text-green-500" />
@@ -606,9 +606,9 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
                 ))}
               </ul>
             </div>
-            <div>
-              <h3 className="mb-2 text-sm font-medium text-amber-700">Areas to Improve</h3>
-              <ul className="space-y-1.5">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <h3 className="mb-3 text-sm font-semibold text-amber-800">Areas to Improve</h3>
+              <ul className="space-y-2">
                 {qaAnalytics.qaFeedback.improvements.map((imp, i) => (
                   <li key={i} className="flex gap-2 text-sm text-gray-700">
                     <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" />
@@ -733,14 +733,12 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
                             <span className={getScoreColor(w.speakingPace.average, 'wpm')}>{w.speakingPace.average} WPM</span>
                             {prev && getTrendIcon(w.speakingPace.average, prev.speakingPace.average)}
                           </div>
-                          <span className="text-xs text-gray-500">&sigma;: {w.speakingPace.standardDeviation}</span>
                         </td>
                         <td className="px-6 py-4 text-sm">
                           <div className="flex items-center gap-2">
                             <span className={getScoreColor(w.volumeLevel.average, 'volume')}>{w.volumeLevel.average}%</span>
                             {prev && getTrendIcon(w.volumeLevel.average, prev.volumeLevel.average)}
                           </div>
-                          <span className="text-xs text-gray-500">&sigma;: {w.volumeLevel.standardDeviation}</span>
                         </td>
                         <td className="px-6 py-4 text-sm">
                           <div className="flex items-center gap-2">
