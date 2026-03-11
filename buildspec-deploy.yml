@@ -120,14 +120,12 @@ phases:
           # Write .env.local for the Next.js build
           cd $CODEBUILD_SRC_DIR/frontend
 
-          cat > .env.local <<ENVEOF
-NEXT_PUBLIC_COGNITO_REGION=$REGION
-NEXT_PUBLIC_COGNITO_USER_POOL_ID=$USER_POOL_ID
-NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID=$USER_POOL_CLIENT_ID
-NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID=$IDENTITY_POOL_ID
-NEXT_PUBLIC_API_BASE_URL=$API_URL
-NEXT_PUBLIC_WEBSOCKET_API_URL=$WEBSOCKET_URL
-ENVEOF
+          echo "NEXT_PUBLIC_COGNITO_REGION=$REGION" > .env.local
+          echo "NEXT_PUBLIC_COGNITO_USER_POOL_ID=$USER_POOL_ID" >> .env.local
+          echo "NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID=$USER_POOL_CLIENT_ID" >> .env.local
+          echo "NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID=$IDENTITY_POOL_ID" >> .env.local
+          echo "NEXT_PUBLIC_API_BASE_URL=$API_URL" >> .env.local
+          echo "NEXT_PUBLIC_WEBSOCKET_API_URL=$WEBSOCKET_URL" >> .env.local
 
           echo ""
           echo "Generated .env.local:"
