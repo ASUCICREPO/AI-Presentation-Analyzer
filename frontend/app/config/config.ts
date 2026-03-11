@@ -177,6 +177,8 @@ export const VIDEO_RECORDING_CONFIG = {
   MIME_TYPE: 'video/webm;codecs=vp8,opus',
   /** Fallback MIME if preferred isn't supported */
   FALLBACK_MIME_TYPE: 'video/webm',
+  /** Safari only supports MP4 via MediaRecorder */
+  SAFARI_MIME_TYPE: 'video/mp4',
   /** MediaRecorder timeslice (ms) — push data every 1s into buffer */
   TIMESLICE_MS: 1_000,
   /** S3 multipart minimum part size (5 MB). Parts below this can't be uploaded

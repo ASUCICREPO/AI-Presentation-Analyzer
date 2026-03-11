@@ -150,7 +150,7 @@ export default function PersonaSelection({
       {/* Customize Persona - Only visible when persona is selected */}
       <div
         className={`
-          transition-all duration-400 ease-out overflow-hidden
+          transition-all duration-[400ms] ease-out overflow-hidden
           ${isPersonaSelected 
             ? 'opacity-100 max-h-[500px] mb-6 2xl:mb-8' 
             : 'opacity-0 max-h-0 mb-0'
@@ -167,7 +167,7 @@ export default function PersonaSelection({
       {/* Continue Button - Only visible when persona is selected */}
       <div
         className={`
-          flex flex-col items-end gap-2 transition-all duration-400 ease-out
+          flex flex-col items-end gap-2 transition-all duration-[400ms] ease-out
           ${isPersonaSelected 
             ? 'opacity-100 translate-y-0' 
             : 'opacity-0 translate-y-2 pointer-events-none'

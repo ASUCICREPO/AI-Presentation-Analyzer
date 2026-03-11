@@ -52,6 +52,7 @@ export function useVideoRecording(sessionId: string, options?: VideoRecordingOpt
   const flushIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeRef = useRef(false);
   const startTimeRef = useRef<number>(0);
+  const mimeTypeRef = useRef<string>('video/webm');
   const onPartUploadedRef = useRef(options?.onPartUploaded);
   onPartUploadedRef.current = options?.onPartUploaded;
 
@@ -59,7 +60,7 @@ export function useVideoRecording(sessionId: string, options?: VideoRecordingOpt
   const flushBuffer = useCallback(async () => {
     if (!uploadIdRef.current || bufferRef.current.length === 0) return;
 
-    const blob = new Blob(bufferRef.current, { type: 'video/webm' });
+    const blob = new Blob(bufferRef.current, { type: mimeTypeRef.current });
     bufferRef.current = [];
 
     const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
@@ -105,9 +106,17 @@ export function useVideoRecording(sessionId: string, options?: VideoRecordingOpt
         startTimeRef.current = Date.now();
 
         // 2. Choose a supported MIME type
-        const mimeType = MediaRecorder.isTypeSupported(VIDEO_RECORDING_CONFIG.MIME_TYPE)
-          ? VIDEO_RECORDING_CONFIG.MIME_TYPE
-          : VIDEO_RECORDING_CONFIG.FALLBACK_MIME_TYPE;
+        let mimeType: string;
+        if (MediaRecorder.isTypeSupported(VIDEO_RECORDING_CONFIG.MIME_TYPE)) {
+          mimeType = VIDEO_RECORDING_CONFIG.MIME_TYPE;
+        } else if (MediaRecorder.isTypeSupported(VIDEO_RECORDING_CONFIG.FALLBACK_MIME_TYPE)) {
+          mimeType = VIDEO_RECORDING_CONFIG.FALLBACK_MIME_TYPE;
+        } else if (MediaRecorder.isTypeSupported(VIDEO_RECORDING_CONFIG.SAFARI_MIME_TYPE)) {
+          mimeType = VIDEO_RECORDING_CONFIG.SAFARI_MIME_TYPE;
+        } else {
+          mimeType = '';
+        }
+        mimeTypeRef.current = mimeType || 'video/webm';
 
         // 3. Create MediaRecorder
         const recorder = new MediaRecorder(stream, { mimeType });
@@ -178,13 +187,14 @@ export function useVideoRecording(sessionId: string, options?: VideoRecordingOpt
 
     // Final flush (upload whatever is left in the buffer, even < 5 MB)
     if (uploadIdRef.current && bufferRef.current.length > 0) {
-      let blob = new Blob(bufferRef.current, { type: 'video/webm' });
+      let blob = new Blob(bufferRef.current, { type: mimeTypeRef.current });
       bufferRef.current = [];
 
       if (blob.size > 0) {
         // If no parts have been uploaded yet, the entire recording is in
         // this blob.  Patch the WebM EBML header with the real duration so
         // browsers can seek and display the video without artifacts.
+        const isWebm = mimeTypeRef.current.includes('webm');
         if (partsRef.current.length === 0) {
           const durationMs = Date.now() - startTimeRef.current;
 
@@ -201,8 +211,10 @@ export function useVideoRecording(sessionId: string, options?: VideoRecordingOpt
           }
 
           try {
-            console.log(`[useVideoRecording] Fixing WebM duration (${(durationMs / 1000).toFixed(1)}s) on final blob`);
-            blob = await fixWebmDuration(blob, durationMs, { logger: false });
+            if (isWebm) {
+              console.log(`[useVideoRecording] Fixing WebM duration (${(durationMs / 1000).toFixed(1)}s) on final blob`);
+              blob = await fixWebmDuration(blob, durationMs, { logger: false });
+            }
           } catch (err) {
             // Non-fatal — upload the blob without the fix
             console.warn('[useVideoRecording] fixWebmDuration failed, uploading as-is:', err);

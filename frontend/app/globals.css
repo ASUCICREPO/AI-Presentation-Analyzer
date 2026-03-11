@@ -70,6 +70,10 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* Custom scrollbar */
+.backdrop-blur-sm {
+  -webkit-backdrop-filter: blur(4px);
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;

@@ -155,16 +155,21 @@ export default function PersonaCard({
   const IconComponent = getIconComponent(icon);
 
   useEffect(() => {
-    if (detailsRef.current) {
-      setDetailsHeight(detailsRef.current.scrollHeight);
-    }
+    const el = detailsRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      setDetailsHeight(el.scrollHeight);
+    });
   }, [isSelected, keyPriorities, communicationStyle]);
 
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(); } }}
       className={`
-        group relative w-full rounded-2xl border-2 text-left
+        group relative w-full cursor-pointer rounded-2xl border-2 text-left
         transition-all duration-300 ease-out
         ${isSelected
           ? `${accent.bgSelected} ${accent.border} shadow-md ring-1 ring-black/[0.03]`
@@ -318,6 +323,6 @@ export default function PersonaCard({
           </div>
         </div>
       </div>
-    </button>
+    </div>
   );
 }
