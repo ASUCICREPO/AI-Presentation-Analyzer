@@ -229,12 +229,12 @@ The script outputs direct links to the CodeBuild console and CloudWatch Logs. Yo
 
 ### What the Build Does (buildspec-deploy.yml)
 
-| Phase          | Actions                                                                                                                                             |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **install**    | Installs Node.js 18 and zip utility                                                                                                                 |
-| **pre_build**  | Validates env vars, `cd backend && npm install`, runs `cdk bootstrap`                                                                               |
-| **build**      | Runs `cdk deploy --all --require-approval never`                                                                                                    |
-| **post_build** | Prints stack outputs. In bare mode (no token): builds the frontend, zips the static export, and deploys it to Amplify via the create-deployment API |
+| Phase          | Actions                                                                                                                              |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **install**    | Installs Node.js 18 and zip utility                                                                                                  |
+| **pre_build**  | Validates env vars, `cd backend && npm install`, runs `cdk bootstrap`                                                                |
+| **build**      | Runs `cdk deploy --all --require-approval never`                                                                                     |
+| **post_build** | Prints stack outputs. In bare mode (no token): builds the frontend, uploads `build.zip` to S3, and prints manual deploy instructions |
 
 ### CodeBuild Configuration
 
@@ -346,9 +346,43 @@ No manual frontend configuration needed. The `FrontendConfigStack` automatically
 
 ### Bare Mode
 
-> **Note**: If you deployed using `deploy.sh` without a GitHub token, the frontend was already built and deployed automatically by CodeBuild. The steps below are only needed if you deployed manually using `cdk deploy` (Option B).
+> **Note**: If you deployed using `deploy.sh` without a GitHub token, CodeBuild builds the frontend and uploads `build.zip` to S3. You then deploy it to Amplify yourself using the instructions printed in the CodeBuild logs.
 
-In bare mode with manual CDK deployment, Amplify doesn't build from source. You need to:
+In bare mode, CodeBuild:
+1. Deploys all four backend stacks via CDK
+2. Extracts backend stack outputs (Cognito, API Gateway, WebSocket URLs)
+3. Builds the Next.js frontend with those values baked in
+4. Uploads `build.zip` to S3 at `s3://ai-coach-deploy-artifacts-<ACCOUNT_ID>/bare-mode-builds/<BRANCH>/build.zip`
+
+After the build completes, deploy the frontend to Amplify:
+
+**Option 1: Deploy via CLI** (run in CloudShell or any terminal with AWS CLI):
+
+```bash
+# Download the build artifact from S3
+aws s3 cp s3://ai-coach-deploy-artifacts-<ACCOUNT_ID>/bare-mode-builds/<BRANCH>/build.zip ./build.zip
+
+# Create an Amplify deployment
+DEPLOY=$(aws amplify create-deployment --app-id <AMPLIFY_APP_ID> --branch-name <BRANCH> --output json)
+URL=$(echo $DEPLOY | python3 -c "import sys,json; print(json.load(sys.stdin)['zipUploadUrl'])")
+JOB=$(echo $DEPLOY | python3 -c "import sys,json; print(json.load(sys.stdin)['jobId'])")
+
+# Upload and start
+curl -X PUT -T build.zip "$URL"
+aws amplify start-deployment --app-id <AMPLIFY_APP_ID> --branch-name <BRANCH> --job-id $JOB
+```
+
+Replace `<ACCOUNT_ID>`, `<AMPLIFY_APP_ID>`, and `<BRANCH>` with your actual values (printed in the CodeBuild logs).
+
+**Option 2: Deploy via Amplify Console**:
+
+1. Download `build.zip` from S3 (see command above) or find it in the S3 console under the `ai-coach-deploy-artifacts-<ACCOUNT_ID>` bucket
+2. Go to the [Amplify Console](https://console.aws.amazon.com/amplify/)
+3. Select your app → click the branch → use "Deploy without Git provider" to upload `build.zip`
+
+#### Manual CDK Deployment (Option B)
+
+If you deployed manually using `cdk deploy` (Option B) instead of `deploy.sh`, Amplify doesn't build from source. You need to:
 
 1. **Create `frontend/.env.local`** with the stack outputs:
 

@@ -64,121 +64,131 @@ phases:
       # When no GitHub token was provided, Amplify has no source
       # provider — we build the Next.js frontend here and push the
       # static export to Amplify via the create-deployment API.
-      # In GitHub mode this block is skipped entirely.
+      # In GitHub mode this entire section is skipped.
       # ──────────────────────────────────────────────────────────────
+
+      # Step 1: Extract stack outputs and build the frontend (bare mode only)
       - |
         if [ -z "$GITHUB_TOKEN" ]; then
-          # Guard: skip frontend deploy if CDK deployment failed
           if [ "$CODEBUILD_BUILD_SUCCEEDING" = "0" ]; then
             echo "CDK deployment failed — skipping frontend build & deploy."
             exit 1
           fi
-
           echo ""
           echo "=== BARE-MODE FRONTEND BUILD & DEPLOY ==="
           echo ""
-
-          # Derive stack names from the sanitized branch (matches deploy.sh logic)
           SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | sed 's/\//-/g' | sed 's/[^a-zA-Z0-9-]/-/g' | tr '[:upper:]' '[:lower:]')
           BACKEND_STACK="AIPresentationCoachStack-${SANITIZED_BRANCH}"
           AGENTCORE_STACK="AgentCoreStack-${SANITIZED_BRANCH}"
           AMPLIFY_STACK="AmplifyHostingStack-${SANITIZED_BRANCH}"
-
           echo "Extracting stack outputs..."
-
-          # Helper: extract a single CfnOutput value by OutputKey from a given stack
           get_output() {
             aws cloudformation describe-stacks \
               --stack-name "$1" \
               --query "Stacks[0].Outputs[?OutputKey==\`$2\`].OutputValue" \
               --output text
           }
-
-          REGION=$(get_output "$BACKEND_STACK" "Region")
-          USER_POOL_ID=$(get_output "$BACKEND_STACK" "UserPoolId")
-          USER_POOL_CLIENT_ID=$(get_output "$BACKEND_STACK" "UserPoolClientId")
-          IDENTITY_POOL_ID=$(get_output "$BACKEND_STACK" "IdentityPoolId")
-          API_URL=$(get_output "$BACKEND_STACK" "ApiUrl")
-          WEBSOCKET_URL=$(get_output "$AGENTCORE_STACK" "AgentCoreWebSocketUrl")
-          AMPLIFY_APP_ID=$(get_output "$AMPLIFY_STACK" "AmplifyAppId")
-
-          echo "  Region            = $REGION"
-          echo "  UserPoolId        = $USER_POOL_ID"
-          echo "  UserPoolClientId  = $USER_POOL_CLIENT_ID"
-          echo "  IdentityPoolId    = $IDENTITY_POOL_ID"
-          echo "  ApiUrl            = $API_URL"
-          echo "  WebSocketUrl      = $WEBSOCKET_URL"
-          echo "  AmplifyAppId      = $AMPLIFY_APP_ID"
-
-          # Validate that all required outputs were retrieved
-          if [ -z "$AMPLIFY_APP_ID" ] || [ -z "$API_URL" ] || [ -z "$USER_POOL_ID" ]; then
-            echo "Error: Failed to retrieve required stack outputs. Skipping frontend deploy."
+          export BARE_REGION=$(get_output "$BACKEND_STACK" "Region")
+          export BARE_USER_POOL_ID=$(get_output "$BACKEND_STACK" "UserPoolId")
+          export BARE_USER_POOL_CLIENT_ID=$(get_output "$BACKEND_STACK" "UserPoolClientId")
+          export BARE_IDENTITY_POOL_ID=$(get_output "$BACKEND_STACK" "IdentityPoolId")
+          export BARE_API_URL=$(get_output "$BACKEND_STACK" "ApiUrl")
+          export BARE_WEBSOCKET_URL=$(get_output "$AGENTCORE_STACK" "AgentCoreWebSocketUrl")
+          export BARE_AMPLIFY_APP_ID=$(get_output "$AMPLIFY_STACK" "AmplifyAppId")
+          echo "  Region            = $BARE_REGION"
+          echo "  UserPoolId        = $BARE_USER_POOL_ID"
+          echo "  UserPoolClientId  = $BARE_USER_POOL_CLIENT_ID"
+          echo "  IdentityPoolId    = $BARE_IDENTITY_POOL_ID"
+          echo "  ApiUrl            = $BARE_API_URL"
+          echo "  WebSocketUrl      = $BARE_WEBSOCKET_URL"
+          echo "  AmplifyAppId      = $BARE_AMPLIFY_APP_ID"
+          if [ -z "$BARE_AMPLIFY_APP_ID" ] || [ -z "$BARE_API_URL" ] || [ -z "$BARE_USER_POOL_ID" ]; then
+            echo "Error: Failed to retrieve required stack outputs."
             echo "The backend is deployed — you can build and deploy the frontend manually."
             exit 0
           fi
-
-          # Write .env.local for the Next.js build
           cd $CODEBUILD_SRC_DIR/frontend
-
-          echo "NEXT_PUBLIC_COGNITO_REGION=$REGION" > .env.local
-          echo "NEXT_PUBLIC_COGNITO_USER_POOL_ID=$USER_POOL_ID" >> .env.local
-          echo "NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID=$USER_POOL_CLIENT_ID" >> .env.local
-          echo "NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID=$IDENTITY_POOL_ID" >> .env.local
-          echo "NEXT_PUBLIC_API_BASE_URL=$API_URL" >> .env.local
-          echo "NEXT_PUBLIC_WEBSOCKET_API_URL=$WEBSOCKET_URL" >> .env.local
-
+          echo "NEXT_PUBLIC_COGNITO_REGION=$BARE_REGION" > .env.local
+          echo "NEXT_PUBLIC_COGNITO_USER_POOL_ID=$BARE_USER_POOL_ID" >> .env.local
+          echo "NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID=$BARE_USER_POOL_CLIENT_ID" >> .env.local
+          echo "NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID=$BARE_IDENTITY_POOL_ID" >> .env.local
+          echo "NEXT_PUBLIC_API_BASE_URL=$BARE_API_URL" >> .env.local
+          echo "NEXT_PUBLIC_WEBSOCKET_API_URL=$BARE_WEBSOCKET_URL" >> .env.local
           echo ""
           echo "Generated .env.local:"
           cat .env.local
           echo ""
-
           echo "Installing frontend dependencies..."
           npm ci
-
           echo "Building Next.js static export..."
           npm run build
-
           echo "Creating deployment package..."
           cd out
           zip -r ../build.zip .
           cd ..
-
-          echo "Creating Amplify deployment..."
-          aws amplify create-deployment \
-            --app-id "$AMPLIFY_APP_ID" \
-            --branch-name "$BRANCH_NAME" \
-            --output json > deployment_response.json
-
-          if [ $? -ne 0 ]; then
-            echo "Error: Failed to create Amplify deployment."
-            cat deployment_response.json
-            echo "The backend is deployed — you can deploy the frontend manually."
-            exit 0
-          fi
-
-          UPLOAD_URL=$(node -e "const d=require('./deployment_response.json'); console.log(d.zipUploadUrl)")
-          JOB_ID=$(node -e "const d=require('./deployment_response.json'); console.log(d.jobId)")
-
-          echo "Uploading build artifact to Amplify (Job ID: $JOB_ID)..."
-          curl -s -X PUT -T build.zip "$UPLOAD_URL"
-
-          if [ $? -ne 0 ]; then
-            echo "Error: Failed to upload build.zip to Amplify."
-            echo "The backend is deployed — you can deploy the frontend manually."
-            exit 0
-          fi
-
-          echo "Starting Amplify deployment..."
-          aws amplify start-deployment \
-            --app-id "$AMPLIFY_APP_ID" \
-            --branch-name "$BRANCH_NAME" \
-            --job-id "$JOB_ID"
-
-          echo ""
-          echo "=== Frontend deployed to Amplify successfully! ==="
-          echo ""
+          echo "build.zip created at: $(pwd)/build.zip ($(du -h build.zip | cut -f1))"
+          export BARE_MODE=true
         else
           echo "GitHub mode — Amplify builds the frontend from source automatically."
+        fi
+
+      # Step 2: Upload build.zip to S3 as a fallback artifact (bare mode only)
+      - |
+        if [ "$BARE_MODE" = "true" ]; then
+          echo ""
+          echo "--- Uploading build.zip to S3 as fallback artifact ---"
+          ARTIFACT_BUCKET="ai-coach-deploy-artifacts-$(aws sts get-caller-identity --query Account --output text)"
+          export ARTIFACT_BUCKET
+
+          # Create bucket if it doesn't exist (ignore error if it already exists)
+          aws s3 mb "s3://$ARTIFACT_BUCKET" --region "$AWS_DEFAULT_REGION" 2>/dev/null || true
+
+          ARTIFACT_KEY="bare-mode-builds/${BRANCH_NAME}/build.zip"
+          aws s3 cp "$CODEBUILD_SRC_DIR/frontend/build.zip" "s3://${ARTIFACT_BUCKET}/${ARTIFACT_KEY}" --region "$AWS_DEFAULT_REGION"
+
+          if [ $? -eq 0 ]; then
+            export ARTIFACT_S3_URI="s3://${ARTIFACT_BUCKET}/${ARTIFACT_KEY}"
+            echo "Build artifact uploaded to: $ARTIFACT_S3_URI"
+          else
+            echo "Warning: Failed to upload build.zip to S3. Continuing with Amplify deploy attempt."
+            export ARTIFACT_S3_URI=""
+          fi
+        fi
+
+      # Step 3: Print instructions for manual Amplify deploy (bare mode only)
+      - |
+        if [ "$BARE_MODE" = "true" ]; then
+          echo ""
+          echo "╔══════════════════════════════════════════════════════════════╗"
+          echo "║              BARE-MODE DEPLOYMENT COMPLETE                  ║"
+          echo "╚══════════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "  ✅ Backend stacks deployed successfully."
+          echo "  ✅ Frontend build.zip created and uploaded to S3."
+          echo ""
+          echo "  To finish, deploy the frontend to Amplify:"
+          echo ""
+          echo "  ── Download build.zip ──────────────────────────────────────"
+          echo "  aws s3 cp $ARTIFACT_S3_URI ./build.zip"
+          echo ""
+          echo "  ── Deploy to Amplify via CLI ───────────────────────────────"
+          echo "  DEPLOY=\$(aws amplify create-deployment --app-id $BARE_AMPLIFY_APP_ID --branch-name $BRANCH_NAME --region $AWS_DEFAULT_REGION --output json)"
+          echo "  URL=\$(echo \$DEPLOY | python3 -c \"import sys,json; print(json.load(sys.stdin)['zipUploadUrl'])\")"
+          echo "  JOB=\$(echo \$DEPLOY | python3 -c \"import sys,json; print(json.load(sys.stdin)['jobId'])\")"
+          echo "  curl -X PUT -T build.zip \"\$URL\""
+          echo "  aws amplify start-deployment --app-id $BARE_AMPLIFY_APP_ID --branch-name $BRANCH_NAME --job-id \$JOB --region $AWS_DEFAULT_REGION"
+          echo ""
+          echo "  ── Or deploy via Amplify Console ───────────────────────────"
+          echo "  1. Go to: https://console.aws.amazon.com/amplify/apps/$BARE_AMPLIFY_APP_ID/overview"
+          echo "  2. Click the branch '$BRANCH_NAME'"
+          echo "  3. Use 'Deploy without Git provider' and upload build.zip"
+          echo ""
+          echo "  S3 artifact:      $ARTIFACT_S3_URI"
+          echo "  Amplify App ID:   $BARE_AMPLIFY_APP_ID"
+          echo "  Branch:           $BRANCH_NAME"
+          echo "  Region:           $AWS_DEFAULT_REGION"
+          echo ""
+          echo "══════════════════════════════════════════════════════════════"
         fi
     finally:
       - echo "Post-build phase completed"
