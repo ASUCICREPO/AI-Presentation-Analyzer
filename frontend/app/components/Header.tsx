@@ -61,10 +61,10 @@ export default function Header({ currentStep, onStepClick, sessionId }: HeaderPr
         </div>
 
         {/* Spacer pushes stepper + avatar to the right */}
-        <div className="min-w-[24px] flex-1 sm:min-w-[40px] lg:min-w-[60px]" />
+        <div className="min-w-[12px] flex-1 sm:min-w-[40px] lg:min-w-[60px]" />
 
-        {/* Stepper */}
-        <nav className="flex items-center">
+        {/* Stepper — scrollable on mobile */}
+        <nav className="flex items-center overflow-x-auto scrollbar-hide max-w-[55vw] sm:max-w-none sm:overflow-visible">
           {steps.map((step, index) => {
             const isActive = step.number === currentStep;
             const isCompleted = step.number < currentStep;

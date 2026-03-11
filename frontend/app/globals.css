@@ -8,19 +8,20 @@
   --maroon-300: #f7a3a3;
   --maroon-400: #f27272;
   --maroon-500: #e84545;
-  --maroon-600: #800001; /* Primary Brand Color */
+  --maroon-600: #800001;
+  /* Primary Brand Color */
   --maroon-700: #6b0001;
   --maroon-800: #590001;
   --maroon-900: #4a0001;
-  
+
   /* Accent Colors */
   --accent-gray: #404040;
-  
+
   /* UI Semantic Mapping */
   --color-brand-primary: var(--maroon-600);
   --color-brand-primary-dark: var(--maroon-700);
   --color-brand-primary-light: var(--maroon-500);
-  
+
   --color-background: #f9fafb;
   --color-surface: #ffffff;
   --color-foreground: #171717;
@@ -38,10 +39,10 @@
   --color-maroon-700: var(--maroon-700);
   --color-maroon-800: var(--maroon-800);
   --color-maroon-900: var(--maroon-900);
-  
+
   /* Accent */
   --color-accent: var(--accent-gray);
-  
+
   /* Semantic Aliases used in components */
   --color-maroon: var(--maroon-600);
   --color-maroon-dark: var(--maroon-700);
@@ -50,7 +51,7 @@
   /* Fonts */
   --font-heading: var(--font-heading), 'EB Garamond', serif;
   --font-body: var(--font-body), 'Montserrat', sans-serif;
-  
+
   /* Font aliases for Tailwind utility classes */
   --font-serif: var(--font-heading), 'EB Garamond', serif;
   --font-sans: var(--font-body), 'Montserrat', sans-serif;
@@ -64,7 +65,12 @@ body {
   color: var(--color-foreground);
 }
 
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   font-family: var(--font-heading), 'EB Garamond', serif;
   font-weight: 500;
 }
@@ -95,30 +101,86 @@ h1, h2, h3, h4, h5, h6 {
 
 /* Animations */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes checkmark {
-  0% { transform: scale(0); opacity: 0; }
-  50% { transform: scale(1.2); }
-  100% { transform: scale(1); opacity: 1; }
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+
+  50% {
+    transform: scale(1.2);
+  }
+
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 @keyframes stepEnter {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 /* Utility classes for animations */
-.animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
-.animate-slide-up { animation: slideUp 0.5s ease-out forwards; }
-.animate-checkmark { animation: checkmark 0.3s ease-out forwards; }
-.animate-step-enter { animation: stepEnter 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-.stagger-1 { animation-delay: 100ms; }
-.stagger-2 { animation-delay: 200ms; }
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.5s ease-out forwards;
+}
+
+.animate-checkmark {
+  animation: checkmark 0.3s ease-out forwards;
+}
+
+.animate-step-enter {
+  animation: stepEnter 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.stagger-1 {
+  animation-delay: 100ms;
+}
+
+.stagger-2 {
+  animation-delay: 200ms;
+}
+
+/* Hide scrollbar but keep scroll functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
