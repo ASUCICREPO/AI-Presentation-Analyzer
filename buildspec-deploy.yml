@@ -8,6 +8,8 @@ phases:
       - echo "Installing dependencies..."
       - node --version
       - npm --version
+      # zip is needed for bare-mode frontend deployment to Amplify
+      - yum install -y zip
     finally:
       - echo "Install phase completed"
 
@@ -27,7 +29,7 @@ phases:
           CDK_CONTEXT="$CDK_CONTEXT -c githubOwner=$GITHUB_OWNER -c githubRepo=$GITHUB_REPO -c githubToken=$GITHUB_TOKEN"
           echo "GitHub mode enabled for $GITHUB_OWNER/$GITHUB_REPO"
         else
-          echo "Bare mode (no GitHub CI/CD)"
+          echo "Bare mode (no GitHub CI/CD) — frontend will be built and deployed by this build"
         fi
         export CDK_CONTEXT
       - echo "Changing to backend directory..."
@@ -56,5 +58,129 @@ phases:
       - echo "Stack Name - $STACK_NAME"
       - echo "Retrieving stack outputs..."
       - aws cloudformation describe-stacks --stack-name $STACK_NAME --query 'Stacks[0].Outputs' --output table || echo "Could not retrieve outputs"
+
+      # ──────────────────────────────────────────────────────────────
+      # Bare-mode frontend build & deploy
+      # When no GitHub token was provided, Amplify has no source
+      # provider — we build the Next.js frontend here and push the
+      # static export to Amplify via the create-deployment API.
+      # In GitHub mode this block is skipped entirely.
+      # ──────────────────────────────────────────────────────────────
+      - |
+        if [ -z "$GITHUB_TOKEN" ]; then
+          # Guard: skip frontend deploy if CDK deployment failed
+          if [ "$CODEBUILD_BUILD_SUCCEEDING" = "0" ]; then
+            echo "CDK deployment failed — skipping frontend build & deploy."
+            exit 1
+          fi
+
+          echo ""
+          echo "=== BARE-MODE FRONTEND BUILD & DEPLOY ==="
+          echo ""
+
+          # Derive stack names from the sanitized branch (matches deploy.sh logic)
+          SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | sed 's/\//-/g' | sed 's/[^a-zA-Z0-9-]/-/g' | tr '[:upper:]' '[:lower:]')
+          BACKEND_STACK="AIPresentationCoachStack-${SANITIZED_BRANCH}"
+          AGENTCORE_STACK="AgentCoreStack-${SANITIZED_BRANCH}"
+          AMPLIFY_STACK="AmplifyHostingStack-${SANITIZED_BRANCH}"
+
+          echo "Extracting stack outputs..."
+
+          # Helper: extract a single CfnOutput value by OutputKey from a given stack
+          get_output() {
+            aws cloudformation describe-stacks \
+              --stack-name "$1" \
+              --query "Stacks[0].Outputs[?OutputKey==\`$2\`].OutputValue" \
+              --output text
+          }
+
+          REGION=$(get_output "$BACKEND_STACK" "Region")
+          USER_POOL_ID=$(get_output "$BACKEND_STACK" "UserPoolId")
+          USER_POOL_CLIENT_ID=$(get_output "$BACKEND_STACK" "UserPoolClientId")
+          IDENTITY_POOL_ID=$(get_output "$BACKEND_STACK" "IdentityPoolId")
+          API_URL=$(get_output "$BACKEND_STACK" "ApiUrl")
+          WEBSOCKET_URL=$(get_output "$AGENTCORE_STACK" "AgentCoreWebSocketUrl")
+          AMPLIFY_APP_ID=$(get_output "$AMPLIFY_STACK" "AmplifyAppId")
+
+          echo "  Region            = $REGION"
+          echo "  UserPoolId        = $USER_POOL_ID"
+          echo "  UserPoolClientId  = $USER_POOL_CLIENT_ID"
+          echo "  IdentityPoolId    = $IDENTITY_POOL_ID"
+          echo "  ApiUrl            = $API_URL"
+          echo "  WebSocketUrl      = $WEBSOCKET_URL"
+          echo "  AmplifyAppId      = $AMPLIFY_APP_ID"
+
+          # Validate that all required outputs were retrieved
+          if [ -z "$AMPLIFY_APP_ID" ] || [ -z "$API_URL" ] || [ -z "$USER_POOL_ID" ]; then
+            echo "Error: Failed to retrieve required stack outputs. Skipping frontend deploy."
+            echo "The backend is deployed — you can build and deploy the frontend manually."
+            exit 0
+          fi
+
+          # Write .env.local for the Next.js build
+          cd $CODEBUILD_SRC_DIR/frontend
+
+          cat > .env.local <<ENVEOF
+NEXT_PUBLIC_COGNITO_REGION=$REGION
+NEXT_PUBLIC_COGNITO_USER_POOL_ID=$USER_POOL_ID
+NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID=$USER_POOL_CLIENT_ID
+NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID=$IDENTITY_POOL_ID
+NEXT_PUBLIC_API_BASE_URL=$API_URL
+NEXT_PUBLIC_WEBSOCKET_API_URL=$WEBSOCKET_URL
+ENVEOF
+
+          echo ""
+          echo "Generated .env.local:"
+          cat .env.local
+          echo ""
+
+          echo "Installing frontend dependencies..."
+          npm ci
+
+          echo "Building Next.js static export..."
+          npm run build
+
+          echo "Creating deployment package..."
+          cd out
+          zip -r ../build.zip .
+          cd ..
+
+          echo "Creating Amplify deployment..."
+          aws amplify create-deployment \
+            --app-id "$AMPLIFY_APP_ID" \
+            --branch-name "$BRANCH_NAME" \
+            --output json > deployment_response.json
+
+          if [ $? -ne 0 ]; then
+            echo "Error: Failed to create Amplify deployment."
+            cat deployment_response.json
+            echo "The backend is deployed — you can deploy the frontend manually."
+            exit 0
+          fi
+
+          UPLOAD_URL=$(node -e "const d=require('./deployment_response.json'); console.log(d.zipUploadUrl)")
+          JOB_ID=$(node -e "const d=require('./deployment_response.json'); console.log(d.jobId)")
+
+          echo "Uploading build artifact to Amplify (Job ID: $JOB_ID)..."
+          curl -s -X PUT -T build.zip "$UPLOAD_URL"
+
+          if [ $? -ne 0 ]; then
+            echo "Error: Failed to upload build.zip to Amplify."
+            echo "The backend is deployed — you can deploy the frontend manually."
+            exit 0
+          fi
+
+          echo "Starting Amplify deployment..."
+          aws amplify start-deployment \
+            --app-id "$AMPLIFY_APP_ID" \
+            --branch-name "$BRANCH_NAME" \
+            --job-id "$JOB_ID"
+
+          echo ""
+          echo "=== Frontend deployed to Amplify successfully! ==="
+          echo ""
+        else
+          echo "GitHub mode — Amplify builds the frontend from source automatically."
+        fi
     finally:
       - echo "Post-build phase completed"

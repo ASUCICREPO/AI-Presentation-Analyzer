@@ -1,283 +1,623 @@
-# Deployment Guide
+# AI Presentation Coach — Deployment Guide
 
-This guide provides step-by-step instructions for deploying [INSERT_PROJECT_NAME].
+This guide covers two deployment methods:
+
+1. **Automated deployment** using the `deploy.sh` script and AWS CodeBuild (recommended)
+2. **Manual deployment** using AWS CDK directly from your local machine
+
+Both methods deploy four CloudFormation stacks:
+
+| Stack                               | Purpose                                                                |
+| ----------------------------------- | ---------------------------------------------------------------------- |
+| `AmplifyHostingStack-{branch}`      | Creates the Amplify App (with optional GitHub CI/CD)                   |
+| `AIPresentationCoachStack-{branch}` | Backend: Cognito, API Gateway, Lambda, DynamoDB, S3, Bedrock Guardrail |
+| `AgentCoreStack-{branch}`           | Live Q&A bidirectional voice agent (Bedrock AgentCore)                 |
+| `FrontendConfigStack-{branch}`      | Wires backend outputs to the Amplify branch as environment variables   |
 
 ---
 
 ## Table of Contents
 
-- [Deployment Guide](#deployment-guide)
-  - [Requirements](#requirements)
-  - [Pre-Deployment](#pre-deployment)
-    - [AWS Account Setup](#aws-account-setup)
-    - [CLI Tools Installation](#cli-tools-installation)
-    - [Environment Configuration](#environment-configuration)
-  - [Deployment](#deployment)
-    - [Backend Deployment](#backend-deployment)
-    - [Frontend Deployment](#frontend-deployment)
-  - [Post-Deployment Verification](#post-deployment-verification)
-  - [Troubleshooting](#troubleshooting)
+- [Prerequisites](#prerequisites)
+- [Creating a GitHub Personal Access Token](#creating-a-github-personal-access-token)
+- [Deployment Modes](#deployment-modes)
+- [Option A: Automated Deployment (deploy.sh + CodeBuild)](#option-a-automated-deployment-deploysh--codebuild)
+- [Option B: Manual Deployment (CDK CLI)](#option-b-manual-deployment-cdk-cli)
+- [Post-Deployment: Frontend Configuration](#post-deployment-frontend-configuration)
+- [Verifying the Deployment](#verifying-the-deployment)
+- [Environment Variables Reference](#environment-variables-reference)
+- [Cleanup](#cleanup)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
-## Requirements
-
-Before you deploy, you must have the following:
+## Prerequisites
 
 ### Accounts
-- [ ] **AWS Account** - [Create an AWS Account](https://aws.amazon.com/)
-- [ ] [INSERT_ADDITIONAL_ACCOUNT_REQUIREMENTS]
 
-### CLI Tools
-- [ ] **AWS CLI** (v2.x) - [Install AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
-- [ ] **Node.js** (v18.x or later) - [Install Node.js](https://nodejs.org/)
-- [ ] **npm** (v9.x or later) - Included with Node.js
-- [ ] **AWS CDK** (v2.x) - Install via `npm install -g aws-cdk`
-- [ ] [INSERT_ADDITIONAL_CLI_TOOLS]
+- **AWS Account** — [Create one here](https://aws.amazon.com/)
+- **GitHub Account** — required for the automated deployment; also needed if you want Amplify to auto-build on every push (GitHub mode)
 
-### Access Permissions
-- [ ] AWS IAM user/role with permissions for:
-  - CloudFormation
-  - Lambda
-  - API Gateway
-  - S3
-  - [INSERT_ADDITIONAL_AWS_SERVICES]
-- [ ] [INSERT_ADDITIONAL_PERMISSIONS]
+### For Automated Deployment (deploy.sh)
 
-### Software Dependencies
-- [ ] Git - [Install Git](https://git-scm.com/downloads)
-- [ ] [INSERT_ADDITIONAL_DEPENDENCIES]
+The script is designed to run in **AWS CloudShell** or any bash environment with the AWS CLI configured. You need:
 
----
+| Requirement                  | Details                                                                                                                                                    |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AWS CLI v2.x                 | Pre-installed in CloudShell. [Install guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) for local use.                 |
+| Bash shell                   | Pre-installed in CloudShell, macOS, and Linux. On Windows, use Git Bash, WSL, or CloudShell.                                                               |
+| AWS credentials configured   | Run `aws configure` or use CloudShell (auto-configured). Needs permissions for IAM, CodeBuild, and STS.                                                    |
+| GitHub repository URL        | Your fork of this repo in `owner/repo` format (e.g., `your-username/AI-Presentation-Coach`).                                                               |
+| GitHub Personal Access Token | Required for **private repositories**. Optional for public repos. See [Creating a GitHub Personal Access Token](#creating-a-github-personal-access-token). |
 
-## Pre-Deployment
+### For Manual Deployment (CDK CLI)
 
-### AWS Account Setup
+| Tool              | Version | Install                                                                                                 |
+| ----------------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| AWS CLI           | v2.x    | [Install guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)          |
+| Node.js           | v18.x+  | [nodejs.org](https://nodejs.org/)                                                                       |
+| npm               | v9.x+   | Included with Node.js                                                                                   |
+| AWS CDK           | v2.x    | `npm install -g aws-cdk`                                                                                |
+| Git               | Latest  | [git-scm.com](https://git-scm.com/downloads)                                                            |
+| Docker            | Latest  | [docker.com](https://www.docker.com/get-started/) — required for building the AgentCore container image |
+| Python 3.13 + pip | 3.13.x  | [python.org](https://www.python.org/) — required for bundling the boto3 Lambda layer                    |
 
-1. **Configure AWS CLI**
-   ```bash
-   aws configure
-   ```
-   Enter your:
-   - AWS Access Key ID
-   - AWS Secret Access Key
-   - Default region: `us-east-1` (or [INSERT_PREFERRED_REGION])
-   - Default output format: `json`
+### AWS Permissions
 
-2. **Bootstrap CDK** (first-time CDK users only)
-   ```bash
-   cdk bootstrap aws://[ACCOUNT_ID]/[REGION]
-   ```
-   > **[PLACEHOLDER]** Replace `[ACCOUNT_ID]` with your AWS account ID and `[REGION]` with your deployment region
+The deploying IAM user/role needs permissions for:
 
-### CLI Tools Installation
+- CloudFormation (full stack management)
+- IAM (roles, policies)
+- Cognito (User Pool, Identity Pool)
+- Lambda (functions, layers)
+- API Gateway (REST API)
+- DynamoDB (tables)
+- S3 (buckets)
+- Amplify (app hosting)
+- Bedrock (guardrails, model access)
+- Bedrock AgentCore (runtime)
+- ECR (container image push)
+- CloudWatch Logs
+- Secrets Manager (GitHub token storage in GitHub mode)
+- CodeBuild (automated deployment only)
+- STS (caller identity — used by `deploy.sh`)
 
-1. **Install Node.js dependencies for backend**
-   ```bash
-   cd backend
-   npm install
-   ```
+> **Tip**: For initial deployment, `AdministratorAccess` simplifies setup. Scope down permissions for production.
 
-2. **Install Node.js dependencies for frontend**
-   ```bash
-   cd frontend
-   npm install
-   ```
+### Bedrock Model Access
 
-3. **Install AWS CDK globally** (if not already installed)
-   ```bash
-   npm install -g aws-cdk
-   ```
+Before deploying, enable the following models in the [Amazon Bedrock console](https://console.aws.amazon.com/bedrock/home#/modelaccess):
 
-### Environment Configuration
-
-1. **Create environment configuration file**
-   
-   [INSERT_ENV_CONFIGURATION_INSTRUCTIONS]
-   
-   ```bash
-   # Example: Create .env file
-   cp .env.example .env
-   ```
-
-2. **Configure required environment variables**
-   
-   [INSERT_ENV_VARIABLES_TABLE]
-   
-   | Variable | Description | Example |
-   |----------|-------------|---------|
-   | `[INSERT_VAR_1]` | [INSERT_DESCRIPTION] | [INSERT_EXAMPLE] |
-   | `[INSERT_VAR_2]` | [INSERT_DESCRIPTION] | [INSERT_EXAMPLE] |
-   | `[INSERT_VAR_3]` | [INSERT_DESCRIPTION] | [INSERT_EXAMPLE] |
-
-3. **[INSERT_ADDITIONAL_CONFIGURATION_STEPS]**
-   
-   > **Important**: [INSERT_IMPORTANT_NOTES]
+- **Amazon Nova Sonic** (`amazon.nova-2-sonic-v1:0`) — used by the live Q&A voice agent
+- **Amazon Nova Lite** (`global.amazon.nova-2-lite-v1:0`) — used for Q&A session analytics
+- A foundation model for post-meeting analytics (the Lambda uses `bedrock:InvokeModel` with Converse API)
 
 ---
 
-## Deployment
+## Creating a GitHub Personal Access Token
 
-### Backend Deployment
+A GitHub Personal Access Token (PAT) is needed when:
 
-1. **Navigate to the backend directory**
-   ```bash
-   cd backend
+- Your repository is **private** (required for both deployment methods)
+- You want **GitHub mode** where Amplify auto-builds on every push
+
+### Steps to Create a Token
+
+1. Go to [github.com/settings/tokens](https://github.com/settings/tokens)
+2. Click **"Generate new token"** → **"Generate new token (classic)"**
+3. Give it a descriptive name (e.g., `AI-Presentation-Coach-Deploy`)
+4. Set an expiration (e.g., 90 days)
+5. Select the following scopes:
+   - `repo` (Full control of private repositories) — required for private repos
+   - `admin:repo_hook` (Full control of repository hooks) — required for Amplify auto-build webhooks in GitHub mode
+6. Click **"Generate token"**
+7. **Copy the token immediately** — you won't be able to see it again
+
+> **Important**: Store your token securely. Do not commit it to your repository. The `deploy.sh` script uses `read -s` to accept the token without echoing it to the terminal.
+
+### Using a Fine-Grained Token (Alternative)
+
+If you prefer fine-grained tokens:
+
+1. Go to [github.com/settings/tokens?type=beta](https://github.com/settings/tokens?type=beta)
+2. Click **"Generate new token"**
+3. Set the resource owner and select your repository
+4. Under **Repository permissions**, grant:
+   - **Contents**: Read-only
+   - **Webhooks**: Read and write (for Amplify auto-build)
+5. Click **"Generate token"** and copy it
+
+---
+
+## Deployment Modes
+
+The CDK app supports two modes controlled by context parameters:
+
+### GitHub Mode (CI/CD)
+
+Amplify connects to your GitHub repository and auto-builds the frontend on every push. Requires a GitHub PAT.
+
+```bash
+cdk deploy --all \
+  -c branchName=main \
+  -c githubOwner=your-org \
+  -c githubRepo=your-repo \
+  -c githubToken=ghp_xxxxxxxxxxxx
+```
+
+### Bare Mode (Manual Deploy)
+
+Amplify creates the app shell without a source provider. When using `deploy.sh`, CodeBuild automatically builds the frontend and pushes the static export to Amplify. When using manual CDK deployment, you build and upload the frontend yourself. No GitHub PAT needed.
+
+```bash
+cdk deploy --all -c branchName=main
+```
+
+---
+
+## Option A: Automated Deployment (deploy.sh + CodeBuild)
+
+This is the **recommended deployment method**. The `deploy.sh` script automates the entire process by creating an AWS CodeBuild project that clones your GitHub repo and runs `cdk deploy --all`.
+
+### What the Script Does
+
+1. Detects your AWS region and account ID from CLI config (or EC2 metadata in CloudShell)
+2. Prompts for GitHub repository (`owner/repo`), branch name, and optional GitHub PAT
+3. Creates an IAM service role for CodeBuild with `AdministratorAccess` (if it doesn't exist)
+4. Imports GitHub credentials into CodeBuild (for private repos)
+5. Creates a CodeBuild project named `ai-presentation-coach-deployer` (if it doesn't exist)
+6. Starts a build that runs the `buildspec-deploy.yml` pipeline
+
+### Step-by-Step
+
+#### 1. Open AWS CloudShell (Recommended)
+
+1. Log in to the [AWS Console](https://console.aws.amazon.com/)
+2. Click the **CloudShell icon** (terminal icon) in the top navigation bar
+3. Wait for the environment to initialize
+
+> Alternatively, use any terminal with bash and the AWS CLI configured.
+
+#### 2. Clone Your Repository
+
+```bash
+git clone https://github.com/YOUR-USERNAME/AI-Presentation-Coach
+cd AI-Presentation-Coach/
+```
+
+> Replace `YOUR-USERNAME` with your actual GitHub username.
+
+#### 3. Run the Deployment Script
+
+```bash
+chmod +x deploy.sh
+./deploy.sh
+```
+
+#### 4. Follow the Prompts
+
+The script will ask for three inputs:
+
+| Prompt            | Description                                            | Example                               |
+| ----------------- | ------------------------------------------------------ | ------------------------------------- |
+| GitHub repository | Your repo in `owner/repo` format                       | `your-username/AI-Presentation-Coach` |
+| Branch name       | The branch to deploy                                   | `main`                                |
+| GitHub token      | PAT for private repos (press Enter to skip for public) | `ghp_xxxxxxxxxxxx`                    |
+
+```text
+Enter GitHub repository (format: owner/repo):
+> your-username/AI-Presentation-Coach
+
+Enter branch name (e.g., main, develop, feature/new-ui):
+> main
+
+Enter GitHub Personal Access Token (optional, press Enter to skip):
+>
+```
+
+- If you provide a GitHub token, the deployment runs in **GitHub mode** (Amplify auto-builds from source on every push)
+- If you skip the token, the deployment runs in **bare mode** (CodeBuild builds the frontend and deploys it to Amplify automatically — no manual steps needed)
+
+#### 5. Monitor the Build
+
+The script outputs direct links to the CodeBuild console and CloudWatch Logs. You can also monitor manually:
+
+1. Go to **AWS Console > CodeBuild > Build projects**
+2. Click on `ai-presentation-coach-deployer`
+3. Click on the running build to view logs
+4. Wait for the build to complete (typically 15–25 minutes)
+
+### What the Build Does (buildspec-deploy.yml)
+
+| Phase          | Actions                                                                                                                                             |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **install**    | Installs Node.js 18 and zip utility                                                                                                                 |
+| **pre_build**  | Validates env vars, `cd backend && npm install`, runs `cdk bootstrap`                                                                               |
+| **build**      | Runs `cdk deploy --all --require-approval never`                                                                                                    |
+| **post_build** | Prints stack outputs. In bare mode (no token): builds the frontend, zips the static export, and deploys it to Amplify via the create-deployment API |
+
+### CodeBuild Configuration
+
+| Setting         | Value                                                   |
+| --------------- | ------------------------------------------------------- |
+| Project name    | `ai-presentation-coach-deployer`                        |
+| Compute type    | `BUILD_GENERAL1_SMALL`                                  |
+| Image           | `aws/codebuild/amazonlinux2-aarch64-standard:3.0` (ARM) |
+| Privileged mode | Enabled (required for Docker builds)                    |
+| Timeout         | 60 minutes                                              |
+
+### Stack Naming Convention
+
+The branch name is sanitized and used in the stack name:
+
+- Branch `main` → Stack `AIPresentationCoachStack-main`
+- Branch `feature/new-ui` → Stack `AIPresentationCoachStack-feature-new-ui`
+
+This allows multiple branches to be deployed side-by-side in the same account.
+
+---
+
+## Option B: Manual Deployment (CDK CLI)
+
+Use this method if you prefer to deploy from your local machine.
+
+### Step 1: Clone the Repository
+
+```bash
+git clone https://github.com/YOUR-USERNAME/AI-Presentation-Coach
+cd AI-Presentation-Coach/
+```
+
+### Step 2: Configure AWS Credentials
+
+```bash
+aws configure
+```
+
+Enter your AWS Access Key ID, Secret Access Key, default region (e.g., `us-east-1`), and output format (`json`).
+
+### Step 3: Install Backend Dependencies
+
+```bash
+cd backend
+npm install
+```
+
+### Step 4: Bootstrap CDK (First Time Only)
+
+```bash
+npx cdk bootstrap
+```
+
+This creates the CDKToolkit stack with an S3 bucket and ECR repository that CDK uses for asset staging.
+
+### Step 5: Synthesize (Optional — Review Before Deploy)
+
+```bash
+npx cdk synth -c branchName=main
+```
+
+This generates CloudFormation templates in `cdk.out/` without deploying. Review them to verify the resources.
+
+### Step 6: Deploy All Stacks
+
+**Bare mode** (no GitHub CI/CD — you'll deploy the frontend manually):
+
+```bash
+npx cdk deploy --all -c branchName=main
+```
+
+**GitHub mode** (Amplify auto-builds from your repo):
+
+```bash
+npx cdk deploy --all \
+  -c branchName=main \
+  -c githubOwner=your-org \
+  -c githubRepo=your-repo \
+  -c githubToken=ghp_xxxxxxxxxxxx
+```
+
+When prompted, review the IAM changes and type `y` to confirm.
+
+### Step 7: Note the Stack Outputs
+
+After deployment, CDK prints outputs like:
+
+```text
+AIPresentationCoachStack-main.UserPoolId = us-east-1_xxxxxxxx
+AIPresentationCoachStack-main.UserPoolClientId = xxxxxxxxxxxxxxxxxxxxxxxxxx
+AIPresentationCoachStack-main.IdentityPoolId = us-east-1:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+AIPresentationCoachStack-main.Region = us-east-1
+AIPresentationCoachStack-main.ApiUrl = https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com/prod/
+AgentCoreStack-main.AgentCoreWebSocketUrl = wss://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/arn:aws:bedrock-agentcore:...
+AmplifyHostingStack-main.AmplifyAppId = xxxxxxxxxx
+FrontendConfigStack-main.AmplifyAppUrl = https://main.xxxxxxxxxx.amplifyapp.com
+```
+
+Save these — you'll need them for frontend configuration (bare mode) or local development.
+
+---
+
+## Post-Deployment: Frontend Configuration
+
+### GitHub Mode
+
+No manual frontend configuration needed. The `FrontendConfigStack` automatically sets all `NEXT_PUBLIC_*` environment variables on the Amplify branch, and Amplify builds the frontend from source.
+
+### Bare Mode
+
+> **Note**: If you deployed using `deploy.sh` without a GitHub token, the frontend was already built and deployed automatically by CodeBuild. The steps below are only needed if you deployed manually using `cdk deploy` (Option B).
+
+In bare mode with manual CDK deployment, Amplify doesn't build from source. You need to:
+
+1. **Create `frontend/.env.local`** with the stack outputs:
+
+   ```env
+   NEXT_PUBLIC_COGNITO_REGION=us-east-1
+   NEXT_PUBLIC_COGNITO_USER_POOL_ID=us-east-1_xxxxxxxx
+   NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxx
+   NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID=us-east-1:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+   NEXT_PUBLIC_API_BASE_URL=https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com/prod
+   NEXT_PUBLIC_WEBSOCKET_API_URL=wss://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/arn:aws:bedrock-agentcore:...
    ```
 
-2. **Synthesize the CloudFormation template** (optional, for review)
-   ```bash
-   cdk synth
-   ```
+2. **Build the frontend**:
 
-3. **Deploy the backend stack**
-   ```bash
-   cdk deploy
-   ```
-   
-   When prompted:
-   - Review the IAM changes
-   - Type `y` to confirm deployment
-
-4. **Note the outputs**
-   
-   After deployment, note down the following outputs:
-   - **API Endpoint**: `[INSERT_OUTPUT_NAME]`
-   - **[INSERT_ADDITIONAL_OUTPUT]**: [INSERT_DESCRIPTION]
-   
-   > **Important**: Save these values as they will be needed for frontend configuration
-
-### Frontend Deployment
-
-1. **Navigate to the frontend directory**
    ```bash
    cd frontend
-   ```
-
-2. **Configure the frontend environment**
-   
-   [INSERT_FRONTEND_CONFIG_INSTRUCTIONS]
-   
-   ```bash
-   # Example: Update API endpoint
-   echo "NEXT_PUBLIC_API_URL=[YOUR_API_ENDPOINT]" >> .env.local
-   ```
-
-3. **Build the frontend**
-   ```bash
+   npm install
    npm run build
    ```
 
-4. **Deploy the frontend**
-   
-   [INSERT_FRONTEND_DEPLOYMENT_METHOD]
-   
-   **Option A: Deploy to Vercel**
+   This produces a static export in `frontend/out/`.
+
+3. **Deploy to Amplify** using the Amplify console or CLI:
+
    ```bash
-   npx vercel --prod
+   # Using AWS CLI to create a deployment
+   aws amplify create-deployment --app-id <AmplifyAppId> --branch-name main
+   # Follow the returned instructions to upload the zip of frontend/out/
    ```
-   
-   **Option B: Deploy to AWS Amplify**
-   ```bash
-   [INSERT_AMPLIFY_COMMANDS]
-   ```
-   
-   **Option C: [INSERT_ALTERNATIVE_DEPLOYMENT]**
-   ```bash
-   [INSERT_COMMANDS]
-   ```
+
+   Alternatively, upload the `frontend/out/` directory through the Amplify console under "Deploy without Git provider".
+
+### Local Development
+
+For local development, create `frontend/.env.local` with the same values as above, then:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The app runs at `http://localhost:3000`. CORS is pre-configured to allow `http://localhost:3000`.
 
 ---
 
-## Post-Deployment Verification
+## Verifying the Deployment
 
-### Verify Backend Deployment
+### 1. Check Stack Status
 
-1. **Check CloudFormation stack status**
-   ```bash
-   aws cloudformation describe-stacks --stack-name [INSERT_STACK_NAME]
-   ```
-   
-   Expected status: `CREATE_COMPLETE` or `UPDATE_COMPLETE`
+```bash
+aws cloudformation describe-stacks \
+  --stack-name AIPresentationCoachStack-main \
+  --query 'Stacks[0].StackStatus' \
+  --output text
+```
 
-2. **Test API endpoint**
-   ```bash
-   curl -X GET [INSERT_API_ENDPOINT]/[INSERT_TEST_PATH]
-   ```
-   
-   Expected response: [INSERT_EXPECTED_RESPONSE]
+Expected: `CREATE_COMPLETE` or `UPDATE_COMPLETE`
 
-3. **Check Lambda functions**
-   ```bash
-   aws lambda list-functions --query "Functions[?contains(FunctionName, '[INSERT_FUNCTION_PREFIX]')]"
-   ```
+### 2. Test the API
 
-### Verify Frontend Deployment
+```bash
+# This should return a 401 (Cognito auth required) — confirms the API is live
+curl -s -o /dev/null -w "%{http_code}" \
+  https://xxxxxxxxxx.execute-api.us-east-1.amazonaws.com/prod/personas
+```
 
-1. **Access the application**
-   
-   Navigate to: `[INSERT_FRONTEND_URL]`
+Expected: `401`
 
-2. **Test basic functionality**
-   - [ ] [INSERT_TEST_CASE_1]
-   - [ ] [INSERT_TEST_CASE_2]
-   - [ ] [INSERT_TEST_CASE_3]
+### 3. Verify Cognito User Pool
+
+```bash
+aws cognito-idp describe-user-pool \
+  --user-pool-id us-east-1_xxxxxxxx \
+  --query 'UserPool.Status' \
+  --output text
+```
+
+### 4. Check AgentCore Runtime
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name AgentCoreStack-main \
+  --query 'Stacks[0].Outputs' \
+  --output table
+```
+
+### 5. Access the Frontend
+
+Navigate to the Amplify URL from the stack outputs:
+
+```text
+https://main.xxxxxxxxxx.amplifyapp.com
+```
 
 ---
 
-## Troubleshooting
+## Environment Variables Reference
 
-### Common Issues
+### Frontend Environment Variables (NEXT_PUBLIC_*)
 
-#### Issue: [INSERT_COMMON_ISSUE_1]
-**Symptoms**: [INSERT_SYMPTOMS]
+| Variable                                  | Description              | Source                                |
+| ----------------------------------------- | ------------------------ | ------------------------------------- |
+| `NEXT_PUBLIC_COGNITO_REGION`              | AWS region for Cognito   | Stack output: `Region`                |
+| `NEXT_PUBLIC_COGNITO_USER_POOL_ID`        | Cognito User Pool ID     | Stack output: `UserPoolId`            |
+| `NEXT_PUBLIC_COGNITO_USER_POOL_CLIENT_ID` | Cognito App Client ID    | Stack output: `UserPoolClientId`      |
+| `NEXT_PUBLIC_COGNITO_IDENTITY_POOL_ID`    | Cognito Identity Pool ID | Stack output: `IdentityPoolId`        |
+| `NEXT_PUBLIC_API_BASE_URL`                | API Gateway base URL     | Stack output: `ApiUrl`                |
+| `NEXT_PUBLIC_WEBSOCKET_API_URL`           | AgentCore WebSocket URL  | Stack output: `AgentCoreWebSocketUrl` |
 
-**Solution**:
-```bash
-[INSERT_SOLUTION_COMMANDS]
-```
+### CDK Context Parameters
 
-#### Issue: [INSERT_COMMON_ISSUE_2]
-**Symptoms**: [INSERT_SYMPTOMS]
+| Parameter     | Required | Description                                              |
+| ------------- | -------- | -------------------------------------------------------- |
+| `branchName`  | Yes      | Git branch name (used in stack names and Amplify branch) |
+| `githubOwner` | No       | GitHub org/user (enables GitHub mode)                    |
+| `githubRepo`  | No       | GitHub repository name                                   |
+| `githubToken` | No       | GitHub PAT with `repo` scope                             |
 
-**Solution**:
-[INSERT_SOLUTION_STEPS]
+### AgentCore Runtime Environment Variables
 
-#### Issue: CDK Bootstrap Error
-**Symptoms**: Error message about CDK not being bootstrapped
-
-**Solution**:
-```bash
-cdk bootstrap aws://[ACCOUNT_ID]/[REGION]
-```
-
-#### Issue: Permission Denied
-**Symptoms**: Access denied errors during deployment
-
-**Solution**:
-- Verify your AWS credentials are configured correctly
-- Ensure your IAM user/role has the required permissions
-- Check if you're deploying to the correct region
+| Variable                | Value                            | Description                          |
+| ----------------------- | -------------------------------- | ------------------------------------ |
+| `VOICE_ID`              | `matthew`                        | Amazon Polly voice for Q&A responses |
+| `MODEL_ID`              | `amazon.nova-2-sonic-v1:0`       | Bedrock model for voice agent        |
+| `QA_ANALYTICS_MODEL_ID` | `global.amazon.nova-2-lite-v1:0` | Bedrock model for Q&A analytics      |
+| `PERSONA_TABLE_NAME`    | (auto)                           | DynamoDB personas table              |
+| `UPLOADS_BUCKET`        | (auto)                           | S3 uploads bucket                    |
 
 ---
 
 ## Cleanup
 
-To remove all deployed resources:
+### Using deploy.sh (Automated)
+
+The `deploy.sh` script only deploys — to destroy, use CDK directly:
 
 ```bash
 cd backend
-cdk destroy
+npx cdk destroy --all -c branchName=main
 ```
 
-> **Warning**: This will delete all resources created by this stack. Make sure to backup any important data before proceeding.
+Then clean up the CodeBuild resources:
+
+```bash
+# Delete the CodeBuild project
+aws codebuild delete-project --name ai-presentation-coach-deployer
+
+# Delete the IAM role
+aws iam detach-role-policy \
+  --role-name ai-presentation-coach-deployer-role \
+  --policy-arn arn:aws:iam::aws:policy/AdministratorAccess
+aws iam delete-role --role-name ai-presentation-coach-deployer-role
+
+# Remove GitHub source credentials (optional)
+CRED_ARN=$(aws codebuild list-source-credentials \
+  --query 'sourceCredentialsInfos[?serverType==`GITHUB`].arn' \
+  --output text)
+aws codebuild delete-source-credentials --arn "$CRED_ARN"
+```
+
+### Using CDK Directly
+
+```bash
+cd backend
+
+# Destroy in reverse dependency order
+npx cdk destroy FrontendConfigStack-main -c branchName=main
+npx cdk destroy AgentCoreStack-main -c branchName=main
+npx cdk destroy AIPresentationCoachStack-main -c branchName=main
+npx cdk destroy AmplifyHostingStack-main -c branchName=main
+
+# Or destroy all at once
+npx cdk destroy --all -c branchName=main
+```
+
+### Remove CDK Bootstrap Stack (optional)
+
+```bash
+aws cloudformation delete-stack --stack-name CDKToolkit
+```
+
+> **Warning**: Only do this if no other CDK apps use this account/region.
 
 ---
 
-## Next Steps
+## Troubleshooting
 
-After successful deployment:
-1. Review the [User Guide](./userGuide.md) to learn how to use the application
-2. Check the [API Documentation](./APIDoc.md) for integration details
-3. See the [Modification Guide](./modificationGuide.md) for customization options
+### CDK Bootstrap Error
 
+**Symptom**: `This stack uses assets, so the toolkit stack must be deployed`
+
+**Fix**:
+
+```bash
+cd backend
+npx cdk bootstrap
+```
+
+### Docker Not Running
+
+**Symptom**: `Cannot connect to the Docker daemon` during `cdk deploy`
+
+**Fix**: Start Docker Desktop. The AgentCore stack builds a container image that requires Docker. This is handled automatically in CodeBuild (privileged mode is enabled).
+
+### Bedrock Model Access Denied
+
+**Symptom**: `AccessDeniedException` when invoking Bedrock models
+
+**Fix**: Go to the [Bedrock Model Access page](https://console.aws.amazon.com/bedrock/home#/modelaccess) and enable the required models (Nova Sonic, Nova Lite).
+
+### IAM Role Propagation Delay
+
+**Symptom**: CodeBuild fails immediately after `deploy.sh` creates the IAM role
+
+**Fix**: The script waits 10 seconds for propagation. If it still fails, re-run `./deploy.sh` — the role already exists and will be reused.
+
+### GitHub Token Errors
+
+**Symptom**: CodeBuild cannot clone the repository
+
+**Fix**:
+
+- Verify your token hasn't expired at [github.com/settings/tokens](https://github.com/settings/tokens)
+- Ensure the token has `repo` scope
+- For fine-grained tokens, ensure **Contents: Read-only** is granted for the correct repository
+- Re-run `./deploy.sh` and provide the token again — it will re-import credentials
+
+### Amplify Build Fails in GitHub Mode
+
+**Symptom**: Amplify build fails with `npm ci` errors
+
+**Fix**:
+
+- Ensure `frontend/package-lock.json` is committed to the repo
+- Check that the GitHub PAT has `repo` scope
+- Verify the branch name matches an actual branch in the repository
+
+### Stack Stuck in ROLLBACK_COMPLETE
+
+**Symptom**: `cdk deploy` fails because a previous deployment left the stack in `ROLLBACK_COMPLETE`
+
+**Fix**:
+
+```bash
+aws cloudformation delete-stack --stack-name AIPresentationCoachStack-main
+# Wait for deletion, then redeploy
+npx cdk deploy --all -c branchName=main
+```
+
+### CORS Errors in Browser
+
+**Symptom**: `Access-Control-Allow-Origin` errors in the browser console
+
+**Fix**: The backend allows `http://localhost:3000` and the Amplify URL. If using a different origin, update the `allowedOrigins` in `backend-stack.ts` or pass them via CDK context.
+
+### Python/pip Not Found (Lambda Layer Build)
+
+**Symptom**: `pip3: command not found` during CDK synth/deploy
+
+**Fix**: Install Python 3.13 and pip. The boto3 Lambda layer uses local bundling with pip. If local bundling fails, CDK falls back to Docker bundling automatically. This is not an issue when deploying via CodeBuild.
+
+---
+
+## Architecture Reference
+
+For a deeper dive into the system architecture, see:
+
+- [Architecture Deep Dive](./architectureDeepDive.md)
+- [API Documentation](./APIDoc.md)
+- [User Guide](./userGuide.md)
+- [Modification Guide](./modificationGuide.md)

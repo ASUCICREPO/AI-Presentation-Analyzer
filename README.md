@@ -40,26 +40,23 @@ For a detailed explanation of the architecture, see the [Architecture Deep Dive]
 
 ## Deployment Guide
 
-### Automated Deployment from GitHub
+There are two ways to deploy this application:
 
-The easiest way to deploy is using the automated deployment script:
+| Method                      | Best For                       | Requirements                          |
+| :-------------------------- | :----------------------------- | :------------------------------------ |
+| **Automated** (`deploy.sh`) | Quick setup via AWS CloudShell | Bash, AWS CLI                         |
+| **Manual** (CDK CLI)        | Full local control             | Node.js 18+, CDK, Docker, Python 3.13 |
+
+Quick start with the automated method:
 
 ```bash
-# Make the script executable
 chmod +x deploy.sh
-
-# Run the deployment
 ./deploy.sh
 ```
 
-The script will prompt you for:
-- GitHub repository (format: `owner/repo`)
-- Branch name (e.g., `main`, `develop`)
-- GitHub token (optional, only for private repos)
+The script runs in AWS CloudShell (or any bash terminal with AWS CLI configured), creates a CodeBuild project, and deploys all four stacks in about 15–25 minutes.
 
-The deployment runs on AWS CodeBuild with ARM64 compute and takes 10-15 minutes.
-
-For detailed instructions, see the [Deployment Guide](./docs/deploymentGuide.md).
+For detailed deployment instructions, including prerequisites, GitHub token setup, manual CDK deployment, post-deployment frontend configuration, and cleanup, see the [Deployment Guide](./docs/deploymentGuide.md).
 
 ---
 
