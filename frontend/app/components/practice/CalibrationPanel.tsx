@@ -1,5 +1,6 @@
 import React from 'react';
 import { Sun, Ruler, ScanFace, CheckCircle2, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, AlertCircle } from 'lucide-react';
+import InfoTooltip from '../InfoTooltip';
 
 interface CalibrationPanelProps {
   showMesh: boolean;
@@ -33,7 +34,7 @@ export default function CalibrationPanel({
     <div className="animate-fade-in flex flex-col">
       <div className="flex items-center gap-2 mb-3 border-b pb-3">
         <div className="h-7 w-7 rounded-full bg-maroon-100 text-maroon flex items-center justify-center font-bold shrink-0 font-sans text-sm">1</div>
-        <h3 className="font-serif text-base font-bold text-gray-900 2xl:text-xl">Camera Check</h3>
+        <h3 className="font-serif text-base font-bold text-gray-900 2xl:text-xl">Camera Check <InfoTooltip text="Verify your camera setup — face detection, gaze tracking, and lighting conditions before you start recording." /></h3>
       </div>
 
       <div className="space-y-4">

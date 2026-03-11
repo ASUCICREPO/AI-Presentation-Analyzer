@@ -2,6 +2,7 @@ import React from 'react';
 import { Volume2, VolumeX, Eye, Mic } from 'lucide-react';
 import { VocalVarietyMetrics } from '@/app/hooks/useVocalVariety';
 import { ANALYSIS_CONFIG } from '@/app/config/config';
+import InfoTooltip from '../InfoTooltip';
 
 interface RealTimeFeedbackPanelProps {
   isRecording: boolean;
@@ -39,7 +40,7 @@ export default function RealTimeFeedbackPanel({
         <h3 className="font-serif text-base font-bold text-gray-900 2xl:text-xl">Real-time Feedback</h3>
       </div>
 
-      <div className="space-y-4 2xl:space-y-5">
+      <div className="space-y-5 2xl:space-y-7">
         {/* ─── Delivery Metrics ─────────────────────────────────── */}
 
         {/* Metric: Speaking Pace */}
@@ -47,7 +48,7 @@ export default function RealTimeFeedbackPanel({
           <div className="flex justify-between text-sm 2xl:text-base">
             <span className="flex items-center gap-2 text-gray-600">
               <Volume2 className="w-4 h-4" />
-              Speaking Pace
+              Speaking Pace <InfoTooltip text="Speaking pace calculated in Words per minute (WPM). Useful for clear, engaging delivery." size={13} />
             </span>
             <span className="font-semibold text-gray-900">{isRecording ? metrics.speakingPace : '--'} wpm</span>
           </div>
@@ -62,7 +63,7 @@ export default function RealTimeFeedbackPanel({
           <div className="flex justify-between text-sm 2xl:text-base">
             <span className="flex items-center gap-2 text-gray-600">
               <Mic className="w-4 h-4" />
-              Volume Level
+              Volume Level <InfoTooltip text="Your microphone input level. Keep it steady and avoid sudden drops or spikes." size={13} />
             </span>
             <span className="font-semibold text-gray-900">{isRecording ? `${metrics.volumeLevel}%` : '--%'}</span>
           </div>
@@ -77,7 +78,7 @@ export default function RealTimeFeedbackPanel({
           <div className="flex justify-between text-sm 2xl:text-base">
             <div className="flex items-center gap-2 text-gray-600">
               <Eye className="w-4 h-4" />
-              <span>Eye Contact</span>
+              <span>Eye Contact</span> <InfoTooltip text="Tracks whether you're looking at the camera. An alert sounds if you look away too long." size={13} />
 
               {/* Audio Toggle & Tooltip */}
               <div className="group relative flex items-center">
@@ -122,12 +123,12 @@ export default function RealTimeFeedbackPanel({
         {/* Counter Metrics */}
         <div className={`grid grid-cols-2 gap-3 ${!isRecording ? 'opacity-50' : ''}`}>
           <div className="rounded-lg border border-gray-100 p-2.5">
-            <div className="text-[11px] text-gray-500 2xl:text-xs">Filler Words</div>
+            <div className="text-[11px] text-gray-500 2xl:text-xs">Filler Words <InfoTooltip text="Counts filler words like 'um', 'uh', 'like', and 'you know'. Fewer is better." size={12} /></div>
             <div className="mt-0.5 text-lg font-bold text-green-600 2xl:text-xl">{isRecording ? metrics.fillerWords : '--'}</div>
             <div className="text-[10px] text-gray-400">um, uh, like, you know</div>
           </div>
           <div className="rounded-lg border border-gray-100 p-2.5">
-            <div className="text-[11px] text-gray-500 2xl:text-xs">Pauses</div>
+            <div className="text-[11px] text-gray-500 2xl:text-xs">Pauses <InfoTooltip text="Strategic pauses, checks for Silences of more than 3 seconds gap." size={12} /></div>
             <div className="mt-0.5 text-lg font-bold text-gray-900 2xl:text-xl">{isRecording ? metrics.pauses : '--'}</div>
             <div className="text-[10px] text-gray-400">Strategic pauses detected</div>
           </div>
@@ -136,7 +137,7 @@ export default function RealTimeFeedbackPanel({
         {/* Monotone Level */}
         <div className={`rounded-lg border border-gray-100 p-2.5 ${!isRecording ? 'opacity-50' : ''}`}>
           <div className="flex justify-between items-center">
-            <span className="text-[11px] text-gray-500 2xl:text-xs">Monotone Level</span>
+            <span className="text-[11px] text-gray-500 2xl:text-xs">Monotone Level <InfoTooltip text="Measures variation in your pitch, volume, and tone." size={12} /></span>
             <span className={`text-sm font-bold ${isRecording && vocalVariety.monotoneScore > 0 ? monotoneTextColor(vocalVariety.monotoneScore) : 'text-gray-900'}`}>
               {isRecording && vocalVariety.monotoneScore > 0 ? `${vocalVariety.monotoneScore}%` : '--'}
             </span>

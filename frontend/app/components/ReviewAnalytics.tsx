@@ -29,6 +29,7 @@ import { pdf } from '@react-pdf/renderer';
 import { ReportDocument } from './ReportPDF';
 
 import { CustomVideoPlayer, CustomVideoPlayerHandle } from './CustomVideoPlayer';
+import InfoTooltip from './InfoTooltip';
 
 import {
   Persona,
@@ -324,7 +325,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
           <div className="flex flex-col items-center gap-6 md:flex-row md:items-start">
             <ScoreRing score={overallScore} />
             <div className="flex-1">
-              <h2 className="text-xl font-semibold text-gray-900">Performance Summary</h2>
+              <h2 className="text-xl font-semibold text-gray-900">Performance Summary <InfoTooltip text="Your overall presentation score based on pace, eye contact, volume, filler words, and pauses — weighted by your selected persona." /></h2>
               {aiFeedback ? (
                 <p className="mt-2 text-sm leading-relaxed text-gray-700">
                   {aiFeedback.performanceSummary.overallAssessment}
@@ -400,7 +401,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
 
           {/* Right: Timestamped Feedback */}
           <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 className="mb-1 text-lg font-semibold text-gray-900">Timestamped Feedback</h2>
+            <h2 className="mb-1 text-lg font-semibold text-gray-900">Timestamped Feedback <InfoTooltip text="Specific moments during your presentation where delivery metrics fell below best practice thresholds. Click any entry to jump to that point in the recording." /></h2>
             <p className="mb-4 text-sm text-gray-500">Moments where your delivery fell below best practices</p>
             {aiFeedback?.timestampedFeedback && aiFeedback.timestampedFeedback.length > 0 ? (
               <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
@@ -466,7 +467,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
         {/* Detailed Metrics */}
         {stats && (
           <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 className="mb-5 text-lg font-semibold text-gray-900">Detailed Metrics</h2>
+            <h2 className="mb-5 text-lg font-semibold text-gray-900">Detailed Metrics <InfoTooltip text="Breakdown of your delivery metrics averaged across all 30-second analysis windows." /></h2>
             <div className="space-y-5">
               {/* Speaking Pace */}
               <div>
@@ -535,7 +536,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
         {aiFeedback && aiFeedback.keyRecommendations.length > 0 && (
           <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
             <h2 className="mb-5 text-lg font-semibold text-gray-900">
-              Key Recommendations{feedbackPersona ? ` for ${feedbackPersona.title}` : ''}
+              Key Recommendations{feedbackPersona ? ` for ${feedbackPersona.title}` : ''} <InfoTooltip text="AI-generated suggestions tailored to your selected audience persona to help improve your next presentation." />
             </h2>
             <div className="space-y-4">
               {aiFeedback.keyRecommendations.map((rec, i) => (
@@ -564,7 +565,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
       {/* Content Strengths */}
       {aiFeedback && aiFeedback.performanceSummary.contentStrengths.length > 0 && (
         <div className="mb-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h2 className="mb-4 text-lg font-semibold text-gray-900">Content Strengths</h2>
+          <h2 className="mb-4 text-lg font-semibold text-gray-900">Content Strengths <InfoTooltip text="Aspects of your presentation content that the AI identified as effective — structure, clarity, and argument quality." /></h2>
           <ul className="space-y-3">
             {aiFeedback.performanceSummary.contentStrengths.map((strength, i) => (
               <li key={i} className="flex gap-3 text-sm text-gray-700">
@@ -580,7 +581,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
       {qaAnalytics?.qaFeedback && (
         <div className="mb-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-gray-900">Q&A Session Feedback</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Q&A Session Feedback <InfoTooltip text="Analysis of your responses during the Q&A session, including quality rating and per-question breakdown." /></h2>
             <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${qaAnalytics.qaFeedback.responseQuality === 'Excellent' ? 'bg-green-100 text-green-800' :
               qaAnalytics.qaFeedback.responseQuality === 'Good' ? 'bg-blue-100 text-blue-800' :
                 'bg-yellow-100 text-yellow-800'
@@ -658,7 +659,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
       {stats && (
         <div className="mb-6 rounded-xl border border-gray-200 bg-white shadow-sm">
           <div className="border-b border-gray-200 px-6 py-4">
-            <h2 className="text-lg font-semibold text-gray-900">Comparison with Best Practices</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Comparison with Best Practices <InfoTooltip text="How your metrics compare against established presentation best practices for your selected persona." /></h2>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -705,7 +706,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
             onClick={() => setShowWindows(!showWindows)}
             className="flex w-full items-center justify-between border-b border-gray-200 px-6 py-4 text-left hover:bg-gray-50 transition-colors"
           >
-            <h2 className="text-lg font-semibold text-gray-900">30-Second Window Analysis</h2>
+            <h2 className="text-lg font-semibold text-gray-900">30-Second Window Analysis <InfoTooltip text="Your presentation is divided into 30-second windows. This table shows how your metrics changed over time." /></h2>
             {showWindows ? <ChevronUp className="h-5 w-5 text-gray-500" /> : <ChevronDown className="h-5 w-5 text-gray-500" />}
           </button>
           {showWindows && (

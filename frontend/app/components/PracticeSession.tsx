@@ -700,7 +700,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
         >
           {showRightPanel && (
             <>
-              <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm 2xl:p-6 relative overflow-hidden animate-fade-in">
+              <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm 2xl:p-8 relative overflow-hidden animate-fade-in">
                 {isCalibrating ? (
                   calibrationStep === 1 ? (
                     <CalibrationPanel

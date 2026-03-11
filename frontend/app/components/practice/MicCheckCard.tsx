@@ -1,6 +1,7 @@
 import React from 'react';
 import { Mic, CheckCircle2, Volume2, MessageCircle, ChevronLeft } from 'lucide-react';
 import { MicCalibrationState } from '../../hooks/useMicCalibration';
+import InfoTooltip from '../InfoTooltip';
 
 interface MicCheckCardProps {
     micCalibration: MicCalibrationState;
@@ -41,7 +42,7 @@ export default function MicCheckCard({ micCalibration, onBack }: MicCheckCardPro
                     </button>
                 )}
                 <div className="h-7 w-7 rounded-full bg-maroon-100 text-maroon flex items-center justify-center font-bold shrink-0 font-sans text-sm">2</div>
-                <h3 className="font-serif text-base font-bold text-gray-900 2xl:text-xl">Microphone Check</h3>
+                <h3 className="font-serif text-base font-bold text-gray-900 2xl:text-xl">Microphone Check <InfoTooltip text="Speak to verify your microphone is working. The volume bars show your input level in real time." /></h3>
                 {micCalibration.hasSpeechDetected && (
                     <CheckCircle2 className="w-5 h-5 text-green-500 ml-auto shrink-0" />
                 )}
