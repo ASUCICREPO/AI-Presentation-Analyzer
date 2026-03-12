@@ -93,11 +93,6 @@ phases:
             echo "The backend is deployed — you can build and deploy the frontend manually."
             exit 0
           fi
-        else
-          echo "GitHub mode — Amplify builds the frontend from source automatically."
-        fi
-      - |
-        if [ -z "$GITHUB_TOKEN" ]; then
           echo "Changing to frontend directory..."
           cd $CODEBUILD_SRC_DIR/frontend
           echo "Creating .env.local with stack outputs..."
@@ -113,6 +108,10 @@ phases:
           npm run build
           echo "Creating deployment package..."
           cd out && zip -r build.zip .
+          echo "Persisting Amplify metadata for post_build..."
+          echo "$BARE_AMPLIFY_APP_ID" > $CODEBUILD_SRC_DIR/.bare_amplify_app_id
+        else
+          echo "GitHub mode — Amplify builds the frontend from source automatically."
         fi
     finally:
       - echo "Build phase completed"
@@ -126,7 +125,8 @@ phases:
 
       # Bare-mode: deploy frontend to Amplify
       - |
-        if [ -z "$GITHUB_TOKEN" ] && [ -n "$BARE_AMPLIFY_APP_ID" ]; then
+        if [ -z "$GITHUB_TOKEN" ] && [ -f "$CODEBUILD_SRC_DIR/.bare_amplify_app_id" ]; then
+          export BARE_AMPLIFY_APP_ID=$(cat $CODEBUILD_SRC_DIR/.bare_amplify_app_id)
           echo ""
           echo "=== DEPLOYING FRONTEND TO AMPLIFY ==="
           echo "Creating Amplify deployment..."
