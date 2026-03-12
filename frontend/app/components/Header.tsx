@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import Image from 'next/image';
-import { LogOut, User } from 'lucide-react';
+import { LogOut, User, HelpCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface Step {
@@ -14,6 +14,7 @@ interface HeaderProps {
   currentStep: number;
   onStepClick?: (step: number) => void;
   sessionId?: string;
+  onTutorialOpen?: () => void;
 }
 
 const steps: Step[] = [
@@ -24,7 +25,7 @@ const steps: Step[] = [
   { number: 5, label: 'Review Analytics' },
 ];
 
-export default function Header({ currentStep, onStepClick, sessionId }: HeaderProps) {
+export default function Header({ currentStep, onStepClick, sessionId, onTutorialOpen }: HeaderProps) {
   const { signOut, userEmail } = useAuth();
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -141,7 +142,21 @@ export default function Header({ currentStep, onStepClick, sessionId }: HeaderPr
         </nav>
 
         {/* Divider between stepper and avatar */}
-        <div className="mx-3 h-6 w-px bg-gray-200 sm:mx-4" />
+        <div className="mx-2 h-6 w-px bg-gray-200 sm:mx-3" />
+
+        {/* Tutorial button */}
+        {onTutorialOpen && (
+          <button
+            onClick={onTutorialOpen}
+            className="flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-50 hover:text-maroon font-sans"
+            title="Open Tutorial"
+          >
+            <HelpCircle size={14} />
+            <span className="hidden sm:inline">Tutorial</span>
+          </button>
+        )}
+
+        <div className="mx-2 h-6 w-px bg-gray-200 sm:mx-3" />
 
         {/* Avatar dropdown */}
         <div className="relative shrink-0" ref={dropdownRef}>

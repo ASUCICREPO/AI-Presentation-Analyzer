@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from './context/AuthContext';
 import Header from './components/Header';
 import PersonaSelection from './components/PersonaSelection';
@@ -9,6 +9,7 @@ import PracticeSession from './components/PracticeSession';
 import QASession from './components/QASession';
 import ReviewAnalytics from './components/ReviewAnalytics';
 import ConfirmationModal from './components/ConfirmationModal';
+import TutorialModal from './components/TutorialModal';
 import LoginPage from './components/LoginPage';
 import SignUpPage from './components/SignUpPage';
 import ConfirmSignUpPage from './components/ConfirmSignUpPage';
@@ -28,7 +29,7 @@ const PROCESSING_PHASES = [
 type ProcessingPhase = 0 | 1 | 2;
 
 export default function Home() {
-  const { isAuthenticated, isLoading, userId } = useAuth();
+  const { isAuthenticated, isLoading, userId, userEmail } = useAuth();
 
   // Auth page state
   const [authView, setAuthView] = useState<AuthView>('login');
@@ -58,8 +59,18 @@ export default function Home() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [pendingStep, setPendingStep] = useState<number | null>(null);
 
+  // Tutorial State
+  const [isTutorialOpen, setIsTutorialOpen] = useState(false);
+
   // Ref for PracticeSession exit cleanup
   const exitSessionRef = useRef<(() => void) | null>(null);
+
+  // Show tutorial for first-time users
+  useEffect(() => {
+    if (isAuthenticated && !localStorage.getItem('tutorial_completed')) {
+      setIsTutorialOpen(true);
+    }
+  }, [isAuthenticated]);
 
   // --- Auth navigation ---
   const handleSwitchToSignUp = () => setAuthView('signup');
@@ -146,16 +157,16 @@ export default function Home() {
     // Race: WebSocket delivery vs S3 polling — first non-null wins
     const qaRace = didQA
       ? new Promise<QAAnalyticsResponse | null>(resolve => {
-          let settled = false;
-          const tryResolve = (val: QAAnalyticsResponse | null) => {
-            if (val && !settled) { settled = true; resolve(val); }
-          };
-          qaFromWs.then(tryResolve);
-          qaFromS3.then(tryResolve);
-          Promise.all([qaFromWs, qaFromS3]).then(([ws, s3]) => {
-            if (!settled) resolve(ws ?? s3);
-          });
-        })
+        let settled = false;
+        const tryResolve = (val: QAAnalyticsResponse | null) => {
+          if (val && !settled) { settled = true; resolve(val); }
+        };
+        qaFromWs.then(tryResolve);
+        qaFromS3.then(tryResolve);
+        Promise.all([qaFromWs, qaFromS3]).then(([ws, s3]) => {
+          if (!settled) resolve(ws ?? s3);
+        });
+      })
       : Promise.resolve(null);
 
     const [feedback, qaResult] = await Promise.all([
@@ -265,7 +276,7 @@ export default function Home() {
   // --- Authenticated app ---
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header currentStep={currentStep} onStepClick={handleStepClick} sessionId={sessionId} />
+      <Header currentStep={currentStep} onStepClick={handleStepClick} sessionId={sessionId} onTutorialOpen={() => setIsTutorialOpen(true)} />
 
       <div key={currentStep} className="animate-step-enter">
         {currentStep === 1 && (
@@ -381,6 +392,13 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {/* Tutorial Modal */}
+      <TutorialModal
+        isOpen={isTutorialOpen}
+        onClose={() => setIsTutorialOpen(false)}
+        userName={userEmail ?? undefined}
+      />
 
       {/* Confirmation Modal */}
       <ConfirmationModal
