@@ -127,93 +127,19 @@ phases:
       - |
         if [ -z "$GITHUB_TOKEN" ] && [ -f "$CODEBUILD_SRC_DIR/.bare_amplify_app_id" ]; then
           export BARE_AMPLIFY_APP_ID=$(cat $CODEBUILD_SRC_DIR/.bare_amplify_app_id)
-          echo ""
-          echo "=== DEPLOYING FRONTEND TO AMPLIFY ==="
-          echo "Deployment configuration:"
-          echo "  App ID:     $BARE_AMPLIFY_APP_ID"
-          echo "  Branch:     $BRANCH_NAME"
-          echo "  Region:     $AWS_DEFAULT_REGION"
-          echo ""
-          echo "Validating build artifact..."
-          cd $CODEBUILD_SRC_DIR/frontend/out
-          if [ ! -f build.zip ]; then
-            echo "build.zip not found in $(pwd)"
-            echo "Directory contents:"
-            ls -lah
-            exit 1
-          fi
-          BUILD_SIZE=$(du -h build.zip | cut -f1)
-          echo "  build.zip size: $BUILD_SIZE"
-          echo ""
+          echo "Deploying frontend to Amplify..."
           echo "Creating Amplify deployment..."
           cd $CODEBUILD_SRC_DIR/frontend
-          aws amplify create-deployment \
-            --app-id "$BARE_AMPLIFY_APP_ID" \
-            --branch-name "$BRANCH_NAME" \
-            --region "$AWS_DEFAULT_REGION" \
-            --output json > deployment_response.json 2>&1
-          CREATE_DEPLOY_EXIT_CODE=$?
-          if [ $CREATE_DEPLOY_EXIT_CODE -ne 0 ]; then
-            echo "Failed to create Amplify deployment (exit code: $CREATE_DEPLOY_EXIT_CODE)"
-            echo ""
-            echo "AWS CLI output:"
-            cat deployment_response.json
-            echo ""
-            echo "Troubleshooting information:"
-            echo "  App ID: $BARE_AMPLIFY_APP_ID"
-            echo "  Branch: $BRANCH_NAME"
-            echo "  Region: $AWS_DEFAULT_REGION"
-            exit 1
-          fi
-          echo "Deployment created successfully"
-          echo ""
+          aws amplify create-deployment --app-id $BARE_AMPLIFY_APP_ID --branch-name $BRANCH_NAME --region $AWS_DEFAULT_REGION --output json > deployment_response.json
           echo "Extracting upload URL and job ID..."
-          if ! export UPLOAD_URL=$(node -e "const data=require('./deployment_response.json'); console.log(data.zipUploadUrl || '')" 2>&1); then
-            echo "Failed to parse zipUploadUrl from deployment response"
-            cat deployment_response.json
-            exit 1
-          fi
-          if ! export JOB_ID=$(node -e "const data=require('./deployment_response.json'); console.log(data.jobId || '')" 2>&1); then
-            echo "Failed to parse jobId from deployment response"
-            cat deployment_response.json
-            exit 1
-          fi
-          if [ -z "$UPLOAD_URL" ] || [ -z "$JOB_ID" ]; then
-            echo "Missing required fields in deployment response"
-            echo "  UPLOAD_URL: $UPLOAD_URL"
-            echo "  JOB_ID: $JOB_ID"
-            cat deployment_response.json
-            exit 1
-          fi
-          echo "  Job ID:     $JOB_ID"
-          echo "  Upload URL: ${UPLOAD_URL:0:50}..."
-          echo ""
+          export UPLOAD_URL=$(node -e "const data=require('./deployment_response.json'); console.log(data.zipUploadUrl)")
+          export JOB_ID=$(node -e "const data=require('./deployment_response.json'); console.log(data.jobId)")
           echo "Uploading build.zip to Amplify..."
           cd out
-          UPLOAD_OUTPUT=$(curl -X PUT -T build.zip "$UPLOAD_URL" -w "\nHTTP_CODE:%{http_code}" 2>&1)
-          UPLOAD_EXIT_CODE=$?
-          echo "$UPLOAD_OUTPUT"
-          if [ $UPLOAD_EXIT_CODE -ne 0 ]; then
-            echo "Failed to upload build.zip (exit code: $UPLOAD_EXIT_CODE)"
-            exit 1
-          fi
-          HTTP_CODE=$(echo "$UPLOAD_OUTPUT" | grep "HTTP_CODE" | cut -d: -f2)
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "Upload returned HTTP $HTTP_CODE"
-            exit 1
-          fi
-          echo ""
+          curl -X PUT -T build.zip "$UPLOAD_URL"
           echo "Starting deployment..."
-          aws amplify start-deployment \
-            --app-id "$BARE_AMPLIFY_APP_ID" \
-            --branch-name "$BRANCH_NAME" \
-            --job-id "$JOB_ID" \
-            --region "$AWS_DEFAULT_REGION" 2>&1
-          if [ $? -ne 0 ]; then
-            echo "Failed to start deployment"
-            exit 1
-          fi
-          echo "Deployment started successfully!"
+          aws amplify start-deployment --app-id $BARE_AMPLIFY_APP_ID --branch-name $BRANCH_NAME --job-id $JOB_ID --region $AWS_DEFAULT_REGION
+          echo "Deployment finished successfully!"
         fi
     finally:
       - echo "Post-build phase completed"
