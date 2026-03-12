@@ -36,19 +36,14 @@ Both methods deploy four CloudFormation stacks:
 ### Accounts
 
 - **AWS Account** — [Create one here](https://aws.amazon.com/)
-- **GitHub Account** — required for the automated deployment; also needed if you want Amplify to auto-build on every push (GitHub mode)
+- **GitHub Account** — optional; only needed if you want Amplify to auto-build on every push (GitHub mode). Not required for automated or bare-mode deployment with public repositories.
 
 ### For Automated Deployment (deploy.sh)
 
-The script is designed to run in **AWS CloudShell** or any bash environment with the AWS CLI configured. You need:
-
-| Requirement                  | Details                                                                                                                                                    |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| AWS CLI v2.x                 | Pre-installed in CloudShell. [Install guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) for local use.                 |
-| Bash shell                   | Pre-installed in CloudShell, macOS, and Linux. On Windows, use Git Bash, WSL, or CloudShell.                                                               |
-| AWS credentials configured   | Run `aws configure` or use CloudShell (auto-configured). Needs permissions for IAM, CodeBuild, and STS.                                                    |
-| GitHub repository URL        | Your fork of this repo in `owner/repo` format (e.g., `your-username/AI-Presentation-Coach`).                                                               |
-| GitHub Personal Access Token | Required for **private repositories**. Optional for public repos. See [Creating a GitHub Personal Access Token](#creating-a-github-personal-access-token). |
+| Requirement                                | Details                                                                                                                                                                       |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Access to AWS CloudShell                   | Log in to the [AWS Console](https://console.aws.amazon.com/) and click the CloudShell icon in the top navigation bar.                                                         |
+| AWS account with necessary IAM permissions | Needs permissions for IAM, CloudFormation, CodeBuild, STS, and all services listed under [AWS Permissions](#aws-permissions). `AdministratorAccess` simplifies initial setup. |
 
 ### For Manual Deployment (CDK CLI)
 
@@ -84,22 +79,16 @@ The deploying IAM user/role needs permissions for:
 
 > **Tip**: For initial deployment, `AdministratorAccess` simplifies setup. Scope down permissions for production.
 
-### Bedrock Model Access
-
-Before deploying, enable the following models in the [Amazon Bedrock console](https://console.aws.amazon.com/bedrock/home#/modelaccess):
-
-- **Amazon Nova Sonic** (`amazon.nova-2-sonic-v1:0`) — used by the live Q&A voice agent
-- **Amazon Nova Lite** (`global.amazon.nova-2-lite-v1:0`) — used for Q&A session analytics
-- A foundation model for post-meeting analytics (the Lambda uses `bedrock:InvokeModel` with Converse API)
-
 ---
 
 ## Creating a GitHub Personal Access Token
 
-A GitHub Personal Access Token (PAT) is needed when:
+A GitHub Personal Access Token (PAT) is only needed when:
 
 - Your repository is **private** (required for both deployment methods)
 - You want **GitHub mode** where Amplify auto-builds on every push
+
+> **Note**: If your repository is public and you don't need Amplify CI/CD, you can skip this section entirely. The automated deployment works without a GitHub account for public repos.
 
 ### Steps to Create a Token
 
@@ -145,9 +134,9 @@ cdk deploy --all \
   -c githubToken=ghp_xxxxxxxxxxxx
 ```
 
-### Bare Mode (Manual Deploy)
+### Bare Mode (Automated Deploy)
 
-Amplify creates the app shell without a source provider. When using `deploy.sh`, CodeBuild automatically builds the frontend and pushes the static export to Amplify. When using manual CDK deployment, you build and upload the frontend yourself. No GitHub PAT needed.
+Amplify creates the app shell without a source provider. When using `deploy.sh`, CodeBuild automatically builds the frontend and deploys it to Amplify — no manual steps needed. No GitHub PAT required for public repos.
 
 ```bash
 cdk deploy --all -c branchName=main
@@ -157,14 +146,14 @@ cdk deploy --all -c branchName=main
 
 ## Option A: Automated Deployment (deploy.sh + CodeBuild)
 
-This is the **recommended deployment method**. The `deploy.sh` script automates the entire process by creating an AWS CodeBuild project that clones your GitHub repo and runs `cdk deploy --all`.
+This is the **recommended deployment method**. The `deploy.sh` script automates the entire process by creating an AWS CodeBuild project that clones your repository and runs `cdk deploy --all`, then builds and deploys the frontend to Amplify automatically.
 
 ### What the Script Does
 
 1. Detects your AWS region and account ID from CLI config (or EC2 metadata in CloudShell)
 2. Prompts for GitHub repository (`owner/repo`), branch name, and optional GitHub PAT
 3. Creates an IAM service role for CodeBuild with `AdministratorAccess` (if it doesn't exist)
-4. Imports GitHub credentials into CodeBuild (for private repos)
+4. Imports GitHub credentials into CodeBuild (for private repos only)
 5. Creates a CodeBuild project named `ai-presentation-coach-deployer` (if it doesn't exist)
 6. Starts a build that runs the `buildspec-deploy.yml` pipeline
 
@@ -185,7 +174,7 @@ git clone https://github.com/YOUR-USERNAME/AI-Presentation-Coach
 cd AI-Presentation-Coach/
 ```
 
-> Replace `YOUR-USERNAME` with your actual GitHub username.
+> Replace `YOUR-USERNAME` with your actual GitHub username or organization.
 
 #### 3. Run the Deployment Script
 
@@ -216,7 +205,7 @@ Enter GitHub Personal Access Token (optional, press Enter to skip):
 ```
 
 - If you provide a GitHub token, the deployment runs in **GitHub mode** (Amplify auto-builds from source on every push)
-- If you skip the token, the deployment runs in **bare mode** (CodeBuild builds the frontend and deploys it to Amplify automatically — no manual steps needed)
+- If you skip the token, the deployment runs in **bare mode** (CodeBuild builds the frontend and deploys it to Amplify automatically — fully automated, no manual steps needed)
 
 #### 5. Monitor the Build
 
@@ -229,12 +218,12 @@ The script outputs direct links to the CodeBuild console and CloudWatch Logs. Yo
 
 ### What the Build Does (buildspec-deploy.yml)
 
-| Phase          | Actions                                                                                                                              |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| **install**    | Installs Node.js 18 and zip utility                                                                                                  |
-| **pre_build**  | Validates env vars, `cd backend && npm install`, runs `cdk bootstrap`                                                                |
-| **build**      | Runs `cdk deploy --all --require-approval never`                                                                                     |
-| **post_build** | Prints stack outputs. In bare mode (no token): builds the frontend, uploads `build.zip` to S3, and prints manual deploy instructions |
+| Phase          | Actions                                                                                                                                          |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **install**    | Installs Node.js 18 and zip utility                                                                                                              |
+| **pre_build**  | Validates env vars, `cd backend && npm install`, runs `cdk bootstrap`                                                                            |
+| **build**      | Runs `cdk deploy --all --require-approval never`                                                                                                 |
+| **post_build** | Prints stack outputs. In bare mode: builds the frontend, creates an Amplify deployment, and deploys the static export directly — fully automated |
 
 ### CodeBuild Configuration
 
@@ -286,8 +275,13 @@ npm install
 ### Step 4: Bootstrap CDK (First Time Only)
 
 ```bash
-npx cdk bootstrap
+npx cdk bootstrap -c branchName=main
 ```
+
+> **Note**: The `-c branchName` context parameter is required for bootstrap. If deploying in GitHub mode, include all context parameters:
+> ```bash
+> npx cdk bootstrap -c branchName=main -c githubOwner=your-org -c githubRepo=your-repo -c githubToken=ghp_xxxxxxxxxxxx
+> ```
 
 This creates the CDKToolkit stack with an S3 bucket and ECR repository that CDK uses for asset staging.
 
@@ -344,45 +338,19 @@ Save these — you'll need them for frontend configuration (bare mode) or local 
 
 No manual frontend configuration needed. The `FrontendConfigStack` automatically sets all `NEXT_PUBLIC_*` environment variables on the Amplify branch, and Amplify builds the frontend from source.
 
-### Bare Mode
+### Bare Mode (Automated via deploy.sh)
 
-> **Note**: If you deployed using `deploy.sh` without a GitHub token, CodeBuild builds the frontend and uploads `build.zip` to S3. You then deploy it to Amplify yourself using the instructions printed in the CodeBuild logs.
-
-In bare mode, CodeBuild:
+If you deployed using `deploy.sh` without a GitHub token, CodeBuild handles everything automatically:
 1. Deploys all four backend stacks via CDK
 2. Extracts backend stack outputs (Cognito, API Gateway, WebSocket URLs)
 3. Builds the Next.js frontend with those values baked in
-4. Uploads `build.zip` to S3 at `s3://ai-coach-deploy-artifacts-<ACCOUNT_ID>/bare-mode-builds/<BRANCH>/build.zip`
+4. Deploys the frontend directly to Amplify via the create-deployment API
 
-After the build completes, deploy the frontend to Amplify:
+No manual steps are required — the frontend is live once the build completes.
 
-**Option 1: Deploy via CLI** (run in CloudShell or any terminal with AWS CLI):
+### Bare Mode (Manual CDK Deployment — Option B)
 
-```bash
-# Download the build artifact from S3
-aws s3 cp s3://ai-coach-deploy-artifacts-<ACCOUNT_ID>/bare-mode-builds/<BRANCH>/build.zip ./build.zip
-
-# Create an Amplify deployment
-DEPLOY=$(aws amplify create-deployment --app-id <AMPLIFY_APP_ID> --branch-name <BRANCH> --output json)
-URL=$(echo $DEPLOY | python3 -c "import sys,json; print(json.load(sys.stdin)['zipUploadUrl'])")
-JOB=$(echo $DEPLOY | python3 -c "import sys,json; print(json.load(sys.stdin)['jobId'])")
-
-# Upload and start
-curl -X PUT -T build.zip "$URL"
-aws amplify start-deployment --app-id <AMPLIFY_APP_ID> --branch-name <BRANCH> --job-id $JOB
-```
-
-Replace `<ACCOUNT_ID>`, `<AMPLIFY_APP_ID>`, and `<BRANCH>` with your actual values (printed in the CodeBuild logs).
-
-**Option 2: Deploy via Amplify Console**:
-
-1. Download `build.zip` from S3 (see command above) or find it in the S3 console under the `ai-coach-deploy-artifacts-<ACCOUNT_ID>` bucket
-2. Go to the [Amplify Console](https://console.aws.amazon.com/amplify/)
-3. Select your app → click the branch → use "Deploy without Git provider" to upload `build.zip`
-
-#### Manual CDK Deployment (Option B)
-
-If you deployed manually using `cdk deploy` (Option B) instead of `deploy.sh`, Amplify doesn't build from source. You need to:
+If you deployed manually using `cdk deploy` (Option B), Amplify doesn't build from source. You need to:
 
 1. **Create `frontend/.env.local`** with the stack outputs:
 
@@ -408,12 +376,19 @@ If you deployed manually using `cdk deploy` (Option B) instead of `deploy.sh`, A
 3. **Deploy to Amplify** using the Amplify console or CLI:
 
    ```bash
-   # Using AWS CLI to create a deployment
-   aws amplify create-deployment --app-id <AmplifyAppId> --branch-name main
-   # Follow the returned instructions to upload the zip of frontend/out/
+   cd out
+   zip -r ../build.zip .
+   cd ..
+
+   DEPLOY=$(aws amplify create-deployment --app-id <AmplifyAppId> --branch-name main --output json)
+   URL=$(echo $DEPLOY | python3 -c "import sys,json; print(json.load(sys.stdin)['zipUploadUrl'])")
+   JOB=$(echo $DEPLOY | python3 -c "import sys,json; print(json.load(sys.stdin)['jobId'])")
+
+   curl -X PUT -T build.zip "$URL"
+   aws amplify start-deployment --app-id <AmplifyAppId> --branch-name main --job-id $JOB
    ```
 
-   Alternatively, upload the `frontend/out/` directory through the Amplify console under "Deploy without Git provider".
+   Alternatively, upload `build.zip` through the Amplify console under "Deploy without Git provider".
 
 ### Local Development
 
@@ -579,7 +554,7 @@ aws cloudformation delete-stack --stack-name CDKToolkit
 
 ```bash
 cd backend
-npx cdk bootstrap
+npx cdk bootstrap -c branchName=main
 ```
 
 ### Docker Not Running
@@ -587,12 +562,6 @@ npx cdk bootstrap
 **Symptom**: `Cannot connect to the Docker daemon` during `cdk deploy`
 
 **Fix**: Start Docker Desktop. The AgentCore stack builds a container image that requires Docker. This is handled automatically in CodeBuild (privileged mode is enabled).
-
-### Bedrock Model Access Denied
-
-**Symptom**: `AccessDeniedException` when invoking Bedrock models
-
-**Fix**: Go to the [Bedrock Model Access page](https://console.aws.amazon.com/bedrock/home#/modelaccess) and enable the required models (Nova Sonic, Nova Lite).
 
 ### IAM Role Propagation Delay
 
