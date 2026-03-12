@@ -20,7 +20,7 @@ phases:
       - echo "Stack Name - $STACK_NAME"
       - |
         if [ -z "$BRANCH_NAME" ] || [ -z "$STACK_NAME" ]; then
-          echo "Error - Required environment variables not set"
+          echo "Required environment variables not set"
           exit 1
         fi
       - |
@@ -89,7 +89,7 @@ phases:
           echo "  WebSocketUrl      = $BARE_WEBSOCKET_URL"
           echo "  AmplifyAppId      = $BARE_AMPLIFY_APP_ID"
           if [ -z "$BARE_AMPLIFY_APP_ID" ] || [ -z "$BARE_API_URL" ] || [ -z "$BARE_USER_POOL_ID" ]; then
-            echo "Error: Failed to retrieve required stack outputs."
+            echo "Failed to retrieve required stack outputs."
             echo "The backend is deployed — you can build and deploy the frontend manually."
             exit 0
           fi
@@ -137,7 +137,7 @@ phases:
           echo "Validating build artifact..."
           cd $CODEBUILD_SRC_DIR/frontend/out
           if [ ! -f build.zip ]; then
-            echo "ERROR: build.zip not found in $(pwd)"
+            echo "build.zip not found in $(pwd)"
             echo "Directory contents:"
             ls -lah
             exit 1
@@ -154,7 +154,7 @@ phases:
             --output json > deployment_response.json 2>&1
           CREATE_DEPLOY_EXIT_CODE=$?
           if [ $CREATE_DEPLOY_EXIT_CODE -ne 0 ]; then
-            echo "ERROR: Failed to create Amplify deployment (exit code: $CREATE_DEPLOY_EXIT_CODE)"
+            echo "Failed to create Amplify deployment (exit code: $CREATE_DEPLOY_EXIT_CODE)"
             echo ""
             echo "AWS CLI output:"
             cat deployment_response.json
@@ -169,17 +169,17 @@ phases:
           echo ""
           echo "Extracting upload URL and job ID..."
           if ! export UPLOAD_URL=$(node -e "const data=require('./deployment_response.json'); console.log(data.zipUploadUrl || '')" 2>&1); then
-            echo "ERROR: Failed to parse zipUploadUrl from deployment response"
+            echo "Failed to parse zipUploadUrl from deployment response"
             cat deployment_response.json
             exit 1
           fi
           if ! export JOB_ID=$(node -e "const data=require('./deployment_response.json'); console.log(data.jobId || '')" 2>&1); then
-            echo "ERROR: Failed to parse jobId from deployment response"
+            echo "Failed to parse jobId from deployment response"
             cat deployment_response.json
             exit 1
           fi
           if [ -z "$UPLOAD_URL" ] || [ -z "$JOB_ID" ]; then
-            echo "ERROR: Missing required fields in deployment response"
+            echo "Missing required fields in deployment response"
             echo "  UPLOAD_URL: $UPLOAD_URL"
             echo "  JOB_ID: $JOB_ID"
             cat deployment_response.json
@@ -194,12 +194,12 @@ phases:
           UPLOAD_EXIT_CODE=$?
           echo "$UPLOAD_OUTPUT"
           if [ $UPLOAD_EXIT_CODE -ne 0 ]; then
-            echo "ERROR: Failed to upload build.zip (exit code: $UPLOAD_EXIT_CODE)"
+            echo "Failed to upload build.zip (exit code: $UPLOAD_EXIT_CODE)"
             exit 1
           fi
           HTTP_CODE=$(echo "$UPLOAD_OUTPUT" | grep "HTTP_CODE" | cut -d: -f2)
           if [ "$HTTP_CODE" != "200" ]; then
-            echo "ERROR: Upload returned HTTP $HTTP_CODE"
+            echo "Upload returned HTTP $HTTP_CODE"
             exit 1
           fi
           echo ""
@@ -210,7 +210,7 @@ phases:
             --job-id "$JOB_ID" \
             --region "$AWS_DEFAULT_REGION" 2>&1
           if [ $? -ne 0 ]; then
-            echo "ERROR: Failed to start deployment"
+            echo "Failed to start deployment"
             exit 1
           fi
           echo "Deployment started successfully!"
