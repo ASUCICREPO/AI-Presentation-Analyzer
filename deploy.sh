@@ -134,17 +134,16 @@ echo -e "${BLUE}Stack Name: $STACK_NAME${NC}"
 echo ""
 
 # --------------------------------------------------
-# 4. GitHub token (optional — needed for private repos)
+# 4. GitHub token (optional)
 # --------------------------------------------------
 echo -e "${YELLOW}Enter GitHub Personal Access Token (optional, press Enter to skip):${NC}"
-echo -e "${YELLOW}Required only for private repositories${NC}"
 read -rs -p "> " GITHUB_TOKEN
 echo ""
 
 if [ -n "$GITHUB_TOKEN" ]; then
     echo -e "${GREEN}✓ GitHub token provided${NC}"
 else
-    echo -e "${BLUE}ℹ Proceeding without GitHub token (public repository)${NC}"
+    echo -e "${BLUE}ℹ No token provided — skipping${NC}"
 fi
 echo ""
 
