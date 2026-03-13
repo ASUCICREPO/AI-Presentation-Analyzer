@@ -339,11 +339,7 @@ ENVIRONMENT='{
   ]
 }'
 
-if [ -n "$GITHUB_TOKEN" ]; then
-    SOURCE='{"type":"GITHUB","location":"'"${GITHUB_URL}.git"'","buildspec":"buildspec-deploy.yml"}'
-else
-    SOURCE='{"type":"GITHUB","location":"'"${GITHUB_URL}.git"'","buildspec":"buildspec-deploy.yml","auth":{"type":"NONE"}}'
-fi
+SOURCE='{"type":"GITHUB","location":"'"${GITHUB_URL}.git"'","buildspec":"buildspec-deploy.yml"}'
 ARTIFACTS='{"type":"NO_ARTIFACTS"}'
 
 aws codebuild create-project \
