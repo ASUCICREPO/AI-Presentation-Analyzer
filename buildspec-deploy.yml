@@ -166,17 +166,62 @@ phases:
         if [ -z "$GITHUB_TOKEN" ] && [ -f "$CODEBUILD_SRC_DIR/.bare_amplify_app_id" ]; then
           export BARE_AMPLIFY_APP_ID=$(cat $CODEBUILD_SRC_DIR/.bare_amplify_app_id)
           echo "Deploying frontend to Amplify..."
-          echo "Creating Amplify deployment..."
           cd $CODEBUILD_SRC_DIR/frontend
-          aws amplify create-deployment --app-id $BARE_AMPLIFY_APP_ID --branch-name $BRANCH_NAME --region $AWS_DEFAULT_REGION --output json > deployment_response.json
+
+          echo "Cancelling any in-progress Amplify jobs..."
+          ACTIVE_JOBS=$(aws amplify list-jobs \
+            --app-id "$BARE_AMPLIFY_APP_ID" \
+            --branch-name "$BRANCH_NAME" \
+            --region "$AWS_DEFAULT_REGION" \
+            --query "jobSummaries[?status=='PENDING' || status=='RUNNING'].jobId" \
+            --output text 2>/dev/null || true)
+          if [ -n "$ACTIVE_JOBS" ] && [ "$ACTIVE_JOBS" != "None" ]; then
+            for JID in $ACTIVE_JOBS; do
+              echo "  Stopping job $JID..."
+              aws amplify stop-job \
+                --app-id "$BARE_AMPLIFY_APP_ID" \
+                --branch-name "$BRANCH_NAME" \
+                --job-id "$JID" \
+                --region "$AWS_DEFAULT_REGION" 2>/dev/null || true
+            done
+            echo "  Waiting for jobs to stop..."
+            sleep 5
+          fi
+
+          echo "Creating Amplify deployment..."
+          if ! aws amplify create-deployment \
+            --app-id "$BARE_AMPLIFY_APP_ID" \
+            --branch-name "$BRANCH_NAME" \
+            --region "$AWS_DEFAULT_REGION" \
+            --output json > deployment_response.json; then
+            echo "ERROR: Failed to create Amplify deployment."
+            cat deployment_response.json 2>/dev/null || true
+            echo "Backend is deployed but frontend deployment failed."
+            exit 1
+          fi
+
           echo "Extracting upload URL and job ID..."
           export UPLOAD_URL=$(node -e "const data=require('./deployment_response.json'); console.log(data.zipUploadUrl)")
           export JOB_ID=$(node -e "const data=require('./deployment_response.json'); console.log(data.jobId)")
+          if [ -z "$UPLOAD_URL" ] || [ -z "$JOB_ID" ]; then
+            echo "ERROR: Could not extract upload URL or job ID from deployment response."
+            cat deployment_response.json
+            exit 1
+          fi
+
           echo "Uploading build.zip to Amplify..."
           cd out
-          curl -X PUT -T build.zip "$UPLOAD_URL"
+          if ! curl --fail -s -X PUT -T build.zip "$UPLOAD_URL"; then
+            echo "ERROR: Failed to upload build.zip to Amplify."
+            exit 1
+          fi
+
           echo "Starting deployment..."
-          aws amplify start-deployment --app-id $BARE_AMPLIFY_APP_ID --branch-name $BRANCH_NAME --job-id $JOB_ID --region $AWS_DEFAULT_REGION
+          aws amplify start-deployment \
+            --app-id "$BARE_AMPLIFY_APP_ID" \
+            --branch-name "$BRANCH_NAME" \
+            --job-id "$JOB_ID" \
+            --region "$AWS_DEFAULT_REGION"
           echo "Deployment finished successfully!"
         fi
     finally:
