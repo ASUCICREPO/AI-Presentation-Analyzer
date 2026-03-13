@@ -347,6 +347,7 @@ aws codebuild create-project \
     --name "$PROJECT_NAME" \
     --description "AI Presentation Coach deploy – $GITHUB_REPO @ $BRANCH_NAME" \
     --source "$SOURCE" \
+    --source-version "$BRANCH_NAME" \
     --artifacts "$ARTIFACTS" \
     --environment "$ENVIRONMENT" \
     --service-role "$ROLE_ARN" \
@@ -366,7 +367,6 @@ echo -e "${BLUE}Starting CodeBuild deployment...${NC}"
 
 BUILD_OUTPUT=$(aws codebuild start-build \
     --project-name "$PROJECT_NAME" \
-    --source-version "$BRANCH_NAME" \
     --region "$AWS_REGION" \
     --no-cli-pager \
     --output json)
