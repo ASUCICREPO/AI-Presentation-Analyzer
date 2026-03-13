@@ -40,31 +40,58 @@ echo ""
 # --------------------------------------------------
 # 2. GitHub repository (accepts URL or owner/repo)
 # --------------------------------------------------
-echo -e "${YELLOW}Enter GitHub repository (URL or owner/repo):${NC}"
-echo -e "${YELLOW}  Examples: https://github.com/owner/repo.git  |  git@github.com:owner/repo.git  |  owner/repo${NC}"
-read -rp "> " GITHUB_INPUT
 
-if [ -z "$GITHUB_INPUT" ]; then
-    echo -e "${RED}Error: GitHub repository is required.${NC}"
-    exit 1
-fi
+# Try to auto-detect from git remote
+DETECTED_URL=$(git remote get-url origin 2>/dev/null || echo "")
 
-GITHUB_INPUT="${GITHUB_INPUT%.git}"
-GITHUB_INPUT="${GITHUB_INPUT%/}"
+parse_github_url() {
+    local input="$1"
+    input="${input%.git}"
+    input="${input%/}"
 
-if [[ "$GITHUB_INPUT" =~ ^https?://github\.com/([^/]+/[^/]+) ]]; then
-    GITHUB_OWNER="${BASH_REMATCH[1]%%/*}"
-    GITHUB_REPO_NAME="${BASH_REMATCH[1]#*/}"
-elif [[ "$GITHUB_INPUT" =~ ^git@github\.com:([^/]+)/([^/]+) ]]; then
-    GITHUB_OWNER="${BASH_REMATCH[1]}"
-    GITHUB_REPO_NAME="${BASH_REMATCH[2]}"
-elif [[ "$GITHUB_INPUT" =~ ^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$ ]]; then
-    GITHUB_OWNER="${GITHUB_INPUT%%/*}"
-    GITHUB_REPO_NAME="${GITHUB_INPUT#*/}"
+    if [[ "$input" =~ ^https?://github\.com/([^/]+)/([^/]+) ]]; then
+        GITHUB_OWNER="${BASH_REMATCH[1]}"
+        GITHUB_REPO_NAME="${BASH_REMATCH[2]}"
+    elif [[ "$input" =~ ^git@github\.com:([^/]+)/([^/]+) ]]; then
+        GITHUB_OWNER="${BASH_REMATCH[1]}"
+        GITHUB_REPO_NAME="${BASH_REMATCH[2]}"
+    elif [[ "$input" =~ ^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$ ]]; then
+        GITHUB_OWNER="${input%%/*}"
+        GITHUB_REPO_NAME="${input#*/}"
+    else
+        return 1
+    fi
+}
+
+if [ -n "$DETECTED_URL" ] && parse_github_url "$DETECTED_URL"; then
+    echo -e "${GREEN}Detected repository: ${GITHUB_OWNER}/${GITHUB_REPO_NAME}${NC}"
+    read -rp "Is this correct? (Y/n): " CONFIRM
+    CONFIRM=$(printf '%s' "${CONFIRM:-y}" | tr '[:upper:]' '[:lower:]')
+
+    if [[ "$CONFIRM" != "y" && "$CONFIRM" != "yes" ]]; then
+        echo -e "${YELLOW}Enter GitHub repository (URL or owner/repo):${NC}"
+        read -rp "> " GITHUB_INPUT
+        if ! parse_github_url "$GITHUB_INPUT"; then
+            echo -e "${RED}Error: Could not parse repository from '$GITHUB_INPUT'.${NC}"
+            exit 1
+        fi
+    fi
 else
-    echo -e "${RED}Error: Could not parse repository from '$GITHUB_INPUT'.${NC}"
-    echo -e "${YELLOW}Accepted formats: https://github.com/owner/repo  |  git@github.com:owner/repo  |  owner/repo${NC}"
-    exit 1
+    echo -e "${YELLOW}Could not detect repository from git remote.${NC}"
+    echo -e "${YELLOW}Enter GitHub repository (URL or owner/repo):${NC}"
+    echo -e "${YELLOW}  Examples: https://github.com/owner/repo.git  |  git@github.com:owner/repo.git  |  owner/repo${NC}"
+    read -rp "> " GITHUB_INPUT
+
+    if [ -z "$GITHUB_INPUT" ]; then
+        echo -e "${RED}Error: GitHub repository is required.${NC}"
+        exit 1
+    fi
+
+    if ! parse_github_url "$GITHUB_INPUT"; then
+        echo -e "${RED}Error: Could not parse repository from '$GITHUB_INPUT'.${NC}"
+        echo -e "${YELLOW}Accepted formats: https://github.com/owner/repo  |  git@github.com:owner/repo  |  owner/repo${NC}"
+        exit 1
+    fi
 fi
 
 GITHUB_REPO="${GITHUB_OWNER}/${GITHUB_REPO_NAME}"
@@ -76,8 +103,23 @@ echo ""
 # --------------------------------------------------
 # 3. Branch
 # --------------------------------------------------
-echo -e "${YELLOW}Enter branch name (e.g., main, develop, feature/new-ui):${NC}"
-read -rp "> " BRANCH_NAME
+DETECTED_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+
+if [ -n "$DETECTED_BRANCH" ]; then
+    echo -e "${GREEN}Detected branch: ${DETECTED_BRANCH}${NC}"
+    read -rp "Is this correct? (Y/n): " CONFIRM
+    CONFIRM=$(printf '%s' "${CONFIRM:-y}" | tr '[:upper:]' '[:lower:]')
+
+    if [[ "$CONFIRM" == "y" || "$CONFIRM" == "yes" ]]; then
+        BRANCH_NAME="$DETECTED_BRANCH"
+    else
+        echo -e "${YELLOW}Enter branch name:${NC}"
+        read -rp "> " BRANCH_NAME
+    fi
+else
+    echo -e "${YELLOW}Enter branch name (e.g., main, develop, feature/new-ui):${NC}"
+    read -rp "> " BRANCH_NAME
+fi
 
 if [ -z "$BRANCH_NAME" ]; then
     echo -e "${RED}Error: Branch name is required.${NC}"
