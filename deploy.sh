@@ -136,14 +136,14 @@ echo ""
 # --------------------------------------------------
 # 4. GitHub token (optional)
 # --------------------------------------------------
-echo -e "${YELLOW}Enter GitHub Personal Access Token (optional, press Enter to skip):${NC}"
+echo -e "${YELLOW}Enter GitHub Personal Access Token (needed for private repos and Amplify CI/CD, press Enter to skip):${NC}"
 read -rs -p "> " GITHUB_TOKEN
 echo ""
 
 if [ -n "$GITHUB_TOKEN" ]; then
     echo -e "${GREEN}✓ GitHub token provided${NC}"
 else
-    echo -e "${BLUE}ℹ No token provided — skipping${NC}"
+    echo -e "${BLUE}ℹ No token — proceeding as public repository${NC}"
 fi
 echo ""
 
@@ -304,10 +304,10 @@ fi
 echo ""
 
 # --------------------------------------------------
-# 6. Import GitHub credentials (if token provided)
+# 6. Import GitHub credentials (only if token provided)
 # --------------------------------------------------
 if [ -n "$GITHUB_TOKEN" ]; then
-    echo -e "${BLUE}Configuring GitHub authentication...${NC}"
+    echo -e "${BLUE}Importing GitHub credentials...${NC}"
     aws codebuild import-source-credentials \
         --server-type GITHUB \
         --auth-type PERSONAL_ACCESS_TOKEN \
@@ -339,7 +339,11 @@ ENVIRONMENT='{
   ]
 }'
 
-SOURCE='{"type":"GITHUB","location":"'"${GITHUB_URL}.git"'","buildspec":"buildspec-deploy.yml"}'
+if [ -n "$GITHUB_TOKEN" ]; then
+    SOURCE='{"type":"GITHUB","location":"'"${GITHUB_URL}.git"'","buildspec":"buildspec-deploy.yml"}'
+else
+    SOURCE='{"type":"GITHUB","location":"'"${GITHUB_URL}.git"'","buildspec":"buildspec-deploy.yml","auth":{"type":"NONE"}}'
+fi
 ARTIFACTS='{"type":"NO_ARTIFACTS"}'
 
 aws codebuild create-project \
