@@ -49,9 +49,9 @@ parse_github_url() {
     input="${input%.git}"
     input="${input%/}"
 
-    if [[ "$input" =~ ^https?://github\.com/([^/]+)/([^/]+) ]]; then
-        GITHUB_OWNER="${BASH_REMATCH[1]}"
-        GITHUB_REPO_NAME="${BASH_REMATCH[2]}"
+    if [[ "$input" =~ ^https?://([^@]+@)?github\.com/([^/]+)/([^/]+) ]]; then
+        GITHUB_OWNER="${BASH_REMATCH[2]}"
+        GITHUB_REPO_NAME="${BASH_REMATCH[3]}"
     elif [[ "$input" =~ ^git@github\.com:([^/]+)/([^/]+) ]]; then
         GITHUB_OWNER="${BASH_REMATCH[1]}"
         GITHUB_REPO_NAME="${BASH_REMATCH[2]}"
