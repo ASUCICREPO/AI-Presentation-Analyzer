@@ -39,24 +39,38 @@ echo -e "${GREEN}✓ AWS Account ID: $AWS_ACCOUNT_ID${NC}"
 echo ""
 
 # Prompt for GitHub repository
-echo -e "${YELLOW}Enter GitHub repository (format: owner/repo):${NC}"
-read -p "> " GITHUB_REPO
+echo -e "${YELLOW}Enter GitHub repository (URL or owner/repo):${NC}"
+echo -e "${YELLOW}  Examples: https://github.com/owner/repo.git  |  git@github.com:owner/repo.git  |  owner/repo${NC}"
+read -p "> " GITHUB_INPUT
 
-if [ -z "$GITHUB_REPO" ]; then
+if [ -z "$GITHUB_INPUT" ]; then
     echo -e "${RED}Error: GitHub repository is required.${NC}"
     exit 1
 fi
 
-# Validate format
-if [[ ! "$GITHUB_REPO" =~ ^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$ ]]; then
-    echo -e "${RED}Error: Invalid repository format. Use: owner/repo${NC}"
+# Strip .git suffix and trailing slashes
+GITHUB_INPUT="${GITHUB_INPUT%.git}"
+GITHUB_INPUT="${GITHUB_INPUT%/}"
+
+# Extract owner/repo from various URL formats
+if [[ "$GITHUB_INPUT" =~ ^https?://github\.com/([^/]+/[^/]+) ]]; then
+    GITHUB_OWNER="${BASH_REMATCH[1]%%/*}"
+    GITHUB_REPO_NAME="${BASH_REMATCH[1]#*/}"
+elif [[ "$GITHUB_INPUT" =~ ^git@github\.com:([^/]+)/([^/]+) ]]; then
+    GITHUB_OWNER="${BASH_REMATCH[1]}"
+    GITHUB_REPO_NAME="${BASH_REMATCH[2]}"
+elif [[ "$GITHUB_INPUT" =~ ^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$ ]]; then
+    GITHUB_OWNER=$(echo "$GITHUB_INPUT" | cut -d'/' -f1)
+    GITHUB_REPO_NAME=$(echo "$GITHUB_INPUT" | cut -d'/' -f2)
+else
+    echo -e "${RED}Error: Could not parse repository from '$GITHUB_INPUT'.${NC}"
+    echo -e "${YELLOW}Accepted formats: https://github.com/owner/repo  |  git@github.com:owner/repo  |  owner/repo${NC}"
     exit 1
 fi
 
-GITHUB_OWNER=$(echo "$GITHUB_REPO" | cut -d'/' -f1)
-GITHUB_REPO_NAME=$(echo "$GITHUB_REPO" | cut -d'/' -f2)
-
-echo -e "${GREEN}✓ Repository: $GITHUB_REPO${NC}"
+GITHUB_REPO="${GITHUB_OWNER}/${GITHUB_REPO_NAME}"
+echo -e "${GREEN}✓ Owner: $GITHUB_OWNER${NC}"
+echo -e "${GREEN}✓ Repo:  $GITHUB_REPO_NAME${NC}"
 echo ""
 
 # Prompt for branch
