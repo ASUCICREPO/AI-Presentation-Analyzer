@@ -219,7 +219,8 @@ else
               "Action": [
                 "bedrock:*",
                 "bedrock-agent:*",
-                "bedrock-agent-runtime:*"
+                "bedrock-agent-runtime:*",
+                "bedrockagentcore:*"
               ],
               "Resource": "*"
             },
@@ -250,7 +251,10 @@ else
             {
               "Sid": "APIGateway",
               "Effect": "Allow",
-              "Action": "apigateway:*",
+              "Action": [
+                "apigateway:*",
+                "execute-api:*"
+              ],
               "Resource": "*"
             },
             {
