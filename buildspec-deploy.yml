@@ -8,7 +8,6 @@ phases:
       - echo "Installing dependencies..."
       - node --version
       - npm --version
-      # zip is needed for bare-mode frontend deployment to Amplify
       - yum install -y zip
     finally:
       - echo "Install phase completed"
@@ -29,7 +28,7 @@ phases:
           CDK_CONTEXT="$CDK_CONTEXT -c githubOwner=$GITHUB_OWNER -c githubRepo=$GITHUB_REPO -c githubToken=$GITHUB_TOKEN"
           echo "GitHub mode enabled for $GITHUB_OWNER/$GITHUB_REPO"
         else
-          echo "Bare mode (no GitHub CI/CD) — frontend will be built and deployed by this build"
+          echo "Bare mode (no GitHub CI/CD) -- frontend will be built and deployed by this build"
         fi
         export CDK_CONTEXT
       - echo "Changing to backend directory..."
@@ -51,13 +50,13 @@ phases:
       - npx cdk deploy --all $CDK_CONTEXT --require-approval never --verbose
       - echo "CDK deployment complete."
 
-      # ──────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------------
       # Bare-mode frontend build
       # When no GitHub token was provided, Amplify has no source
-      # provider — we build the Next.js frontend here and deploy the
+      # provider -- we build the Next.js frontend here and deploy the
       # static export to Amplify via the create-deployment API.
       # In GitHub mode this entire section is skipped.
-      # ──────────────────────────────────────────────────────────────
+      # ----------------------------------------------------------------
       - |
         if [ -z "$GITHUB_TOKEN" ]; then
           echo ""
@@ -90,7 +89,7 @@ phases:
           echo "  AmplifyAppId      = $BARE_AMPLIFY_APP_ID"
           if [ -z "$BARE_AMPLIFY_APP_ID" ] || [ -z "$BARE_API_URL" ] || [ -z "$BARE_USER_POOL_ID" ]; then
             echo "Failed to retrieve required stack outputs."
-            echo "The backend is deployed — you can build and deploy the frontend manually."
+            echo "The backend is deployed -- you can build and deploy the frontend manually."
             exit 0
           fi
           echo "Changing to frontend directory..."
@@ -111,7 +110,7 @@ phases:
           echo "Persisting Amplify metadata for post_build..."
           echo "$BARE_AMPLIFY_APP_ID" > $CODEBUILD_SRC_DIR/.bare_amplify_app_id
         else
-          echo "GitHub mode — Amplify builds the frontend from source automatically."
+          echo "GitHub mode -- Amplify builds the frontend from source automatically."
         fi
     finally:
       - echo "Build phase completed"
@@ -122,6 +121,45 @@ phases:
       - echo "Stack Name - $STACK_NAME"
       - echo "Retrieving stack outputs..."
       - aws cloudformation describe-stacks --stack-name $STACK_NAME --query 'Stacks[0].Outputs' --output table || echo "Could not retrieve outputs"
+
+      # Seed personas into DynamoDB
+      - |
+        echo "Looking for UserPersonaTable in stack resources..."
+        PERSONA_TABLE=$(aws cloudformation list-stack-resources \
+          --stack-name "$STACK_NAME" \
+          --query "StackResourceSummaries[?contains(LogicalResourceId, 'UserPersonaTable')].PhysicalResourceId" \
+          --output text)
+        if [ -n "$PERSONA_TABLE" ] && [ "$PERSONA_TABLE" != "None" ]; then
+          echo "Seeding personas into table: $PERSONA_TABLE"
+          node -e "
+            const fs = require('fs');
+            const personas = JSON.parse(fs.readFileSync('$CODEBUILD_SRC_DIR/backend/persona/personas.json', 'utf8'));
+            function m(v) {
+              if (v === null || v === undefined) return { NULL: true };
+              if (typeof v === 'string') return { S: v };
+              if (typeof v === 'number') return { N: String(v) };
+              if (typeof v === 'boolean') return { BOOL: v };
+              if (Array.isArray(v)) return { L: v.map(m) };
+              if (typeof v === 'object') {
+                const o = {};
+                for (const [k, val] of Object.entries(v)) o[k] = m(val);
+                return { M: o };
+              }
+            }
+            for (const p of personas) {
+              const item = {};
+              for (const [k, v] of Object.entries(p)) item[k] = m(v);
+              console.log(JSON.stringify(item));
+            }
+          " | while IFS= read -r item; do
+            aws dynamodb put-item \
+              --table-name "$PERSONA_TABLE" \
+              --item "$item"
+          done
+          echo "Personas seeded successfully."
+        else
+          echo "WARNING: UserPersonaTable not found in stack $STACK_NAME -- skipping persona seeding."
+        fi
 
       # Bare-mode: deploy frontend to Amplify
       - |

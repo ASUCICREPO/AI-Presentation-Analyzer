@@ -176,9 +176,123 @@ else
         --assume-role-policy-document "$TRUST_DOC" \
         --query 'Role.Arn' --output text)
 
+    POLICY_NAME="${PROJECT_NAME}-policy"
+
+    POLICY_ARN=$(aws iam create-policy \
+        --policy-name "$POLICY_NAME" \
+        --policy-document '{
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "CloudFormation",
+              "Effect": "Allow",
+              "Action": "cloudformation:*",
+              "Resource": "*"
+            },
+            {
+              "Sid": "IAM",
+              "Effect": "Allow",
+              "Action": "iam:*",
+              "Resource": "*"
+            },
+            {
+              "Sid": "Lambda",
+              "Effect": "Allow",
+              "Action": "lambda:*",
+              "Resource": "*"
+            },
+            {
+              "Sid": "DynamoDB",
+              "Effect": "Allow",
+              "Action": "dynamodb:*",
+              "Resource": "*"
+            },
+            {
+              "Sid": "S3",
+              "Effect": "Allow",
+              "Action": "s3:*",
+              "Resource": "*"
+            },
+            {
+              "Sid": "Bedrock",
+              "Effect": "Allow",
+              "Action": [
+                "bedrock:*",
+                "bedrock-agent:*",
+                "bedrock-agent-runtime:*"
+              ],
+              "Resource": "*"
+            },
+            {
+              "Sid": "SecretsManager",
+              "Effect": "Allow",
+              "Action": "secretsmanager:*",
+              "Resource": "*"
+            },
+            {
+              "Sid": "Amplify",
+              "Effect": "Allow",
+              "Action": "amplify:*",
+              "Resource": "*"
+            },
+            {
+              "Sid": "CodeBuild",
+              "Effect": "Allow",
+              "Action": "codebuild:*",
+              "Resource": "*"
+            },
+            {
+              "Sid": "CloudWatchLogs",
+              "Effect": "Allow",
+              "Action": "logs:*",
+              "Resource": "*"
+            },
+            {
+              "Sid": "APIGateway",
+              "Effect": "Allow",
+              "Action": "apigateway:*",
+              "Resource": "*"
+            },
+            {
+              "Sid": "Cognito",
+              "Effect": "Allow",
+              "Action": [
+                "cognito-idp:*",
+                "cognito-identity:*"
+              ],
+              "Resource": "*"
+            },
+            {
+              "Sid": "SSM",
+              "Effect": "Allow",
+              "Action": "ssm:*",
+              "Resource": "*"
+            },
+            {
+              "Sid": "ECR",
+              "Effect": "Allow",
+              "Action": "ecr:*",
+              "Resource": "*"
+            },
+            {
+              "Sid": "STSCdkRoles",
+              "Effect": "Allow",
+              "Action": "sts:AssumeRole",
+              "Resource": "arn:aws:iam::*:role/cdk-*"
+            },
+            {
+              "Sid": "STSIdentity",
+              "Effect": "Allow",
+              "Action": "sts:GetCallerIdentity",
+              "Resource": "*"
+            }
+          ]
+        }' \
+        --query 'Policy.Arn' --output text)
+
     aws iam attach-role-policy \
         --role-name "$ROLE_NAME" \
-        --policy-arn "arn:aws:iam::aws:policy/AdministratorAccess"
+        --policy-arn "$POLICY_ARN"
 
     echo -e "${GREEN}✓ IAM role created: $ROLE_ARN${NC}"
     echo -e "${BLUE}Waiting for IAM role to propagate...${NC}"
