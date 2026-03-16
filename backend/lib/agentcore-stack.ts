@@ -66,6 +66,11 @@ export class AgentCoreStack extends cdk.Stack {
         `arn:aws:bedrock:*:${this.account}:inference-profile/*`,
       ],
     }));
+    agentCoreRuntime.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['aws-marketplace:ViewSubscriptions', 'aws-marketplace:Subscribe'],
+      resources: ['*'],
+    }));
 
     // Policy lives inside AgentCoreStack so the agentRuntimeArn token never
     // crosses into AIPresentationCoachStack — that would create a cycle.

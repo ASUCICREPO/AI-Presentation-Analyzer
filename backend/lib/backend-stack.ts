@@ -402,7 +402,6 @@ export class AIPresentationCoachStack extends cdk.Stack {
     // Grant Lambda read access to DynamoDB personas table
     personasTable.grantReadData(postMeetingAnalyticsLambda);
 
-    // Grant Lambda permission to invoke any Bedrock model via Converse API
     postMeetingAnalyticsLambda.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['bedrock:InvokeModel'],
@@ -410,6 +409,11 @@ export class AIPresentationCoachStack extends cdk.Stack {
         'arn:aws:bedrock:*::foundation-model/*',
         `arn:aws:bedrock:*:${this.account}:inference-profile/*`,
       ],
+    }));
+    postMeetingAnalyticsLambda.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['aws-marketplace:ViewSubscriptions', 'aws-marketplace:Subscribe'],
+      resources: ['*'],
     }));
 
     // Analytics resource
