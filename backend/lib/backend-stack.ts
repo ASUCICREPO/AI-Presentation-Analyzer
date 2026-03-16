@@ -551,6 +551,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
       { id: 'AwsSolutions-IAM5', reason: 'Resource wildcard is scoped to objects within the uploads bucket via CDK grantReadWrite().', appliesTo: ['Resource::<AIPresentationCoachPresentationsVideos1B0D776E.Arn>/*'] },
       { id: 'AwsSolutions-IAM5', reason: 'DynamoDB read actions require wildcard for table indexes.', appliesTo: ['Action::dynamodb:BatchGet*', 'Action::dynamodb:DescribeStream', 'Action::dynamodb:DescribeTable', 'Action::dynamodb:Get*', 'Action::dynamodb:Query', 'Action::dynamodb:Scan'] },
       { id: 'AwsSolutions-IAM5', reason: 'Bedrock InvokeModel wildcard allows easy model switching for analytics feedback generation. Cross-region inference profiles route to multiple regions.', appliesTo: ['Resource::arn:aws:bedrock:*::foundation-model/*', `Resource::arn:aws:bedrock:*:<AWS::AccountId>:inference-profile/*`] },
+      { id: 'AwsSolutions-IAM5', reason: 'AWS Marketplace ViewSubscriptions/Subscribe do not support resource-level ARNs — Resource: * is required by the API.', appliesTo: ['Resource::*'] },
     ], true);
 
     // AwsSolutions-IAM5: Transcribe streaming APIs do not support resource-level permissions; wildcard is required
