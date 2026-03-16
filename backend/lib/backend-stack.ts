@@ -12,8 +12,8 @@ import * as bedrock from 'aws-cdk-lib/aws-bedrock';
 import { NagSuppressions } from 'cdk-nag';
 
 export interface AIPresentationCoachStackProps extends cdk.StackProps {
-  /** CORS origins for S3 and API Gateway. Defaults to ['*'] when not provided. */
-  allowedOrigins?: string[];
+  /** CORS origins for S3 and API Gateway. Must be provided explicitly — no wildcard fallback. */
+  allowedOrigins: string[];
 }
 
 export class AIPresentationCoachStack extends cdk.Stack {
@@ -28,10 +28,10 @@ export class AIPresentationCoachStack extends cdk.Stack {
   public readonly personasTable: dynamodb.TableV2;
   public readonly uploadsBucket: s3.Bucket;
 
-  constructor(scope: Construct, id: string, props?: AIPresentationCoachStackProps) {
+  constructor(scope: Construct, id: string, props: AIPresentationCoachStackProps) {
     super(scope, id, props);
 
-    const allowedOrigins = props?.allowedOrigins ?? ['*'];
+    const allowedOrigins = props.allowedOrigins;
 
     // ──────────────────────────────────────────────
     // S3 bucket for uploads
@@ -91,6 +91,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
         'PRESENTATION_TIMEOUT': '1200', //Max Presentation video duration timeout 20 minutes
         'JSON_UPLOAD_TIMEOUT': '60', //JSON data upload timeout 1 minute
         'MULTIPART_PART_URL_TIMEOUT': '300', //Multipart part URL timeout 5 minutes
+        'ALLOWED_ORIGINS': cdk.Fn.join(',', allowedOrigins),
       },
     });
 
@@ -240,10 +241,12 @@ export class AIPresentationCoachStack extends cdk.Stack {
     apiGateway.deploymentStage.node.addDependency(apiGatewayAccount);
 
     // Add CORS headers to Gateway error responses (auth failures, etc.)
+    const gatewayResponseOrigin = cdk.Fn.join('', ["'", cdk.Fn.select(0, allowedOrigins), "'"]);
+
     apiGateway.addGatewayResponse('Default4XX', {
       type: apigateway.ResponseType.DEFAULT_4XX,
       responseHeaders: {
-        'Access-Control-Allow-Origin': "'*'",
+        'Access-Control-Allow-Origin': gatewayResponseOrigin,
         'Access-Control-Allow-Headers': "'Content-Type,Authorization'",
         'Access-Control-Allow-Methods': "'GET,POST,PUT,DELETE,OPTIONS'",
       },
@@ -251,7 +254,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
     apiGateway.addGatewayResponse('Default5XX', {
       type: apigateway.ResponseType.DEFAULT_5XX,
       responseHeaders: {
-        'Access-Control-Allow-Origin': "'*'",
+        'Access-Control-Allow-Origin': gatewayResponseOrigin,
         'Access-Control-Allow-Headers': "'Content-Type,Authorization'",
         'Access-Control-Allow-Methods': "'GET,POST,PUT,DELETE,OPTIONS'",
       },
@@ -302,6 +305,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
       environment: {
         'PERSONA_TABLE_NAME': personasTable.tableName,
         'MAX_ITEMS_PER_PAGE': '20',
+        'ALLOWED_ORIGINS': cdk.Fn.join(',', allowedOrigins),
       },
     });
 
@@ -388,6 +392,7 @@ export class AIPresentationCoachStack extends cdk.Stack {
       environment: {
         'UPLOADS_BUCKET': presentationAndSessionUploadsBucket.bucketName,
         'PERSONA_TABLE_NAME': personasTable.tableName,
+        'ALLOWED_ORIGINS': cdk.Fn.join(',', allowedOrigins),
       },
     });
 

@@ -26,6 +26,9 @@ class _DecimalEncoder(json.JSONEncoder):
 
 PERSONA_TABLE_NAME: str = os.environ.get("PERSONA_TABLE_NAME")
 MAX_ITEMS_PER_PAGE: int = int(os.environ.get("MAX_ITEMS_PER_PAGE", 20)) # Default to 20 items per page for pagination
+ALLOWED_ORIGINS: list[str] = [
+    o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
 
 if not PERSONA_TABLE_NAME:
     print("[!]Error: PERSONA_TABLE_NAME environment variable is not set.")
@@ -34,14 +37,26 @@ if not PERSONA_TABLE_NAME:
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table(PERSONA_TABLE_NAME)
 
+_current_event: dict = {}
+
+
+def _get_cors_origin() -> str:
+    """Return the request Origin if it matches ALLOWED_ORIGINS, else empty string."""
+    headers = (_current_event or {}).get("headers", {})
+    origin = headers.get("origin") or headers.get("Origin", "")
+    if origin in ALLOWED_ORIGINS:
+        return origin
+    return ALLOWED_ORIGINS[0] if ALLOWED_ORIGINS else ""
+
+
 def _response(status_code: int, body: dict) -> dict:
     """Return a properly formatted API Gateway proxy response with CORS headers."""
     return {
         "statusCode": status_code,
         "headers": {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Allow-Origin": _get_cors_origin(),
+            "Access-Control-Allow-Headers": "Content-Type,Authorization",
             "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
         },
         "body": json.dumps(body, cls=_DecimalEncoder),
@@ -180,6 +195,9 @@ def lambda_handler(event, context):
         DELETE /personas/{personaID}  → delete persona
     """
     print(f"Event: {json.dumps(event)}")
+
+    global _current_event
+    _current_event = event
 
     method = event.get('httpMethod', '')
 

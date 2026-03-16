@@ -12,6 +12,9 @@ MULTIPART_PART_URL_TIMEOUT: int = int(os.environ.get("MULTIPART_PART_URL_TIMEOUT
 UPLOADS_BUCKET: str = os.environ.get("UPLOADS_BUCKET")
 PERSONA_GUARDRAIL_ID: str = os.environ.get("PERSONA_GUARDRAIL_ID", "")
 PERSONA_GUARDRAIL_VERSION: str = os.environ.get("PERSONA_GUARDRAIL_VERSION", "")
+ALLOWED_ORIGINS: list[str] = [
+    o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
 
 # ─── Constants — fixed S3 filenames (overwrite on re-upload) ──────────
 AUTHORIZED_REQUEST_TYPES = [
@@ -79,12 +82,24 @@ def scan_persona_text(text: str) -> dict:
 
 
 # ─── CORS response helper ────────────────────────────────────────────
+def _get_cors_origin(event: dict) -> str:
+    """Return the request Origin if it matches ALLOWED_ORIGINS, else empty string."""
+    origin = (event or {}).get("headers", {}).get("origin") or \
+             (event or {}).get("headers", {}).get("Origin", "")
+    if origin in ALLOWED_ORIGINS:
+        return origin
+    return ALLOWED_ORIGINS[0] if ALLOWED_ORIGINS else ""
+
+
+_current_event: dict = {}
+
+
 def _response(status_code: int, body: dict) -> dict:
     return {
         "statusCode": status_code,
         "headers": {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": _get_cors_origin(_current_event),
             "Access-Control-Allow-Headers": "Content-Type,Authorization",
             "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
         },
@@ -303,6 +318,9 @@ def lambda_handler(event, context):
         body: { "upload_id": "..." }
     """
     print(f"[INFO] Received event: {json.dumps(event)}")
+
+    global _current_event
+    _current_event = event
 
     method = event.get('httpMethod', '')
 

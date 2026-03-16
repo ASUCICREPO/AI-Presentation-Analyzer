@@ -11,16 +11,32 @@ bedrock_runtime = boto3.client('bedrock-runtime')
 BUCKET_NAME = os.environ.get('UPLOADS_BUCKET')
 PERSONA_TABLE_NAME = os.environ.get('PERSONA_TABLE_NAME')
 BEDROCK_MODEL_ID = 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
+ALLOWED_ORIGINS: list[str] = [
+    o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
 
 FEEDBACK_FILE = 'ai_feedback.json'
 STATUS_FILE = 'ai_feedback_status.json'
 STALE_THRESHOLD_SEC = 120
 
-CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type,Authorization",
-    "Access-Control-Allow-Methods": "GET,OPTIONS",
-}
+_current_event: dict = {}
+
+
+def _get_cors_origin() -> str:
+    """Return the request Origin if it matches ALLOWED_ORIGINS, else empty string."""
+    headers = (_current_event or {}).get("headers", {})
+    origin = headers.get("origin") or headers.get("Origin", "")
+    if origin in ALLOWED_ORIGINS:
+        return origin
+    return ALLOWED_ORIGINS[0] if ALLOWED_ORIGINS else ""
+
+
+def _cors_headers() -> dict:
+    return {
+        "Access-Control-Allow-Origin": _get_cors_origin(),
+        "Access-Control-Allow-Headers": "Content-Type,Authorization",
+        "Access-Control-Allow-Methods": "GET,OPTIONS",
+    }
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -28,7 +44,7 @@ CORS_HEADERS = {
 def api_response(status_code, body):
     return {
         "statusCode": status_code,
-        "headers": CORS_HEADERS,
+        "headers": _cors_headers(),
         "body": json.dumps(body),
     }
 
@@ -338,6 +354,9 @@ def generate_feedback(persona, transcript, persona_customization=None,
 
 def lambda_handler(event, context):
     try:
+        global _current_event
+        _current_event = event
+
         claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
         user_sub = claims.get('sub')
         if not user_sub:
