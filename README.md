@@ -6,9 +6,11 @@ An AI-powered presentation coaching tool that lets users record or upload their 
 
 ## Visual Demo
 
-![User Interface Demo](./docs/media/user-interface.gif)
+<video src="AI Presentation Coach Tool.mov" controls width="100%">
+  Your browser does not support the video tag.
+</video>
 
-> **[PLACEHOLDER]** Please provide a GIF or screenshot of the application interface and save it as `docs/media/user-interface.gif`
+> Watch the full walkthrough of the AI Presentation Analyzer in action.
 
 ---
 
