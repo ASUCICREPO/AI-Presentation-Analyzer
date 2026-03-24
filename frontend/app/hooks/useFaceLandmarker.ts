@@ -8,6 +8,9 @@ import {
   FaceLandmarkerResult,
 } from '@mediapipe/tasks-vision';
 
+/** Must match the installed `@mediapipe/tasks-vision` version (see package.json). Using `@latest` here breaks when npm ships a newer WASM than your bundled JS. */
+const MEDIAPIPE_TASKS_VISION_VERSION = '0.10.32';
+
 export interface UseFaceLandmarkerOptions {
   numFaces?: number;
   minFaceDetectionConfidence?: number;
@@ -55,25 +58,32 @@ export function useFaceLandmarker(options: UseFaceLandmarkerOptions = {}): UseFa
       setError(null);
 
       try {
-        // Load the vision WASM files
-        const vision = await FilesetResolver.forVisionTasks(
-          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
-        );
+        // Load WASM from the same package version as the imported JS API.
+        const wasmBase = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_TASKS_VISION_VERSION}/wasm`;
+        const vision = await FilesetResolver.forVisionTasks(wasmBase);
 
-        // Create the FaceLandmarker
-        const landmarker = await FaceLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: MODEL_URL,
-            delegate: 'GPU',
-          },
-          runningMode: 'VIDEO',
-          numFaces,
-          minFaceDetectionConfidence,
-          minFacePresenceConfidence,
-          minTrackingConfidence,
-          outputFaceBlendshapes,
-          outputFacialTransformationMatrixes,
-        });
+        const createWithDelegate = (delegate: 'GPU' | 'CPU') =>
+          FaceLandmarker.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath: MODEL_URL,
+              delegate,
+            },
+            runningMode: 'VIDEO',
+            numFaces,
+            minFaceDetectionConfidence,
+            minFacePresenceConfidence,
+            minTrackingConfidence,
+            outputFaceBlendshapes,
+            outputFacialTransformationMatrixes,
+          });
+
+        let landmarker: FaceLandmarker;
+        try {
+          landmarker = await createWithDelegate('GPU');
+        } catch (gpuErr) {
+          console.warn('FaceLandmarker GPU init failed, falling back to CPU:', gpuErr);
+          landmarker = await createWithDelegate('CPU');
+        }
 
         if (isMounted) {
           faceLandmarkerRef.current = landmarker;

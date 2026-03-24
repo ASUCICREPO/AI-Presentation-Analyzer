@@ -414,6 +414,8 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
           const now = Date.now();
 
           if (!isLookingAtScreen) {
+            // User is looking away — reset the "looking back" debounce
+            // but keep the look-away timer running.
             lookBackStartTimeRef.current = null;
 
             if (lookAwayStartTimeRef.current === null) {
@@ -423,7 +425,6 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
             const durationLookingAway = now - lookAwayStartTimeRef.current;
 
             if (durationLookingAway > ANALYSIS_CONFIG.TIMING.LOOK_AWAY_THRESHOLD_MS) {
-              // Show "distracted" in the UI after the threshold
               setGazeDisplayDistracted(true);
 
               if (!alertPlayedRef.current) {
@@ -432,13 +433,15 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
               }
             }
           } else {
-            lookAwayStartTimeRef.current = null;
-
+            // User appears to be looking at camera — but don't reset
+            // the look-away timer until sustained gaze is confirmed,
+            // otherwise single-frame noise kills the accumulation.
             if (lookBackStartTimeRef.current === null) {
               lookBackStartTimeRef.current = now;
             }
 
             if (now - lookBackStartTimeRef.current > ANALYSIS_CONFIG.TIMING.LOOK_BACK_THRESHOLD_MS) {
+              lookAwayStartTimeRef.current = null;
               alertPlayedRef.current = false;
               setGazeDisplayDistracted(false);
             }
