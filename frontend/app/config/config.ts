@@ -233,21 +233,21 @@ export const ANALYSIS_CONFIG = {
   // Blendshape thresholds for gaze detection
   // Higher values require more extreme head/eye movement to trigger "looking away"
   GAZE_THRESHOLDS: {
-    LOOK_LEFT: 0.6,
-    LOOK_RIGHT: 0.4,
-    LOOK_UP: 0.45,
-    LOOK_DOWN: 0.6,
+    LOOK_LEFT: 0.5,
+    LOOK_RIGHT: 0.5,
+    LOOK_UP: 0.3,
+    LOOK_DOWN: 0.5,
     // Dynamic thresholds for when user is surprised (eyes wide open)
     SURPRISE_MULTIPLIER: {
-      GENERAL: 0.8,
-      LOOK_UP: 0.7,
+      GENERAL: 0.7,
+      LOOK_UP: 0.6,
     },
   },
 
   // Timing configurations (in milliseconds)
   TIMING: {
     // How long the user must look away before an alert triggers
-    LOOK_AWAY_THRESHOLD_MS: 5000,
+    LOOK_AWAY_THRESHOLD_MS: 3000,
     // How long the user must hold gaze at center to reset the alert state
     LOOK_BACK_THRESHOLD_MS: 500,
   },
