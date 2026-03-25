@@ -60,6 +60,15 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
   const lookAwayStartTimeRef = useRef<number | null>(null);
   const lookBackStartTimeRef = useRef<number | null>(null);
   const alertPlayedRef = useRef(false);
+
+  // Stable refs for values consumed inside the rAF loop.
+  // The loop reads from these refs so it never needs to be recreated when
+  // state changes — eliminating the dual-loop race that reset gaze timers.
+  const isRecordingRef = useRef(false);
+  const isPausedRef2 = useRef(false);
+  const isCalibrationRef = useRef(false);
+  const showMeshRef = useRef(false);
+
   // Debounced "distracted" flag — only true after looking away for 3+ seconds
   const [gazeDisplayDistracted, setGazeDisplayDistracted] = useState(false);
 
@@ -70,6 +79,13 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
 
   // Runtime toggle for real-time feedback panel (config provides default)
   const [showFeedback, setShowFeedback] = useState(ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK);
+
+  // Keep loop refs in sync with state so the rAF loop always sees fresh values
+  // without needing to be recreated (which caused dual-loop races).
+  useEffect(() => { isRecordingRef.current = isRecording; }, [isRecording]);
+  useEffect(() => { isPausedRef2.current = isPaused; }, [isPaused]);
+  useEffect(() => { isCalibrationRef.current = isCalibrating; }, [isCalibrating]);
+  useEffect(() => { showMeshRef.current = showMesh; }, [showMesh]);
 
   // Time-limit alert tracking (each fires once)
   const shownAlertsRef = useRef<Set<string>>(new Set());
@@ -400,7 +416,13 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
 
     if (result) {
       const ctx = canvas.getContext('2d');
-      if (isCalibrating && showMesh) {
+      // Read volatile state from refs — avoids stale closures and dual-loop races
+      const recording = isRecordingRef.current;
+      const paused = isPausedRef2.current;
+      const calibrating = isCalibrationRef.current;
+      const mesh = showMeshRef.current;
+
+      if (calibrating && mesh) {
         drawResults(canvas, result);
       } else {
         ctx?.clearRect(0, 0, canvas.width, canvas.height);
@@ -410,7 +432,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
         const { isLookingAtScreen } = analyzeGaze(result.faceBlendshapes);
 
         // Audio Alert & Debounced Display Logic
-        if (isRecording && !isPaused) {
+        if (recording && !paused) {
           const now = Date.now();
 
           if (!isLookingAtScreen) {
@@ -456,7 +478,9 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
     }
 
     animationFrameRef.current = requestAnimationFrame(loop);
-  }, [cameraActive, mpStatus, detectForVideo, drawResults, analyzeGaze, isCalibrating, showMesh, isRecording, isPaused, playAlertSound]);
+    // Only stable values in deps — volatile state is read via refs above.
+    // This ensures there is exactly ONE loop running at all times.
+  }, [cameraActive, mpStatus, detectForVideo, drawResults, analyzeGaze, playAlertSound]);
 
   // Camera handling
   const startCamera = async () => {
