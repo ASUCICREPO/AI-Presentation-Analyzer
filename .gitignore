@@ -1,0 +1,71 @@
+# CDK asset staging directory
+.cdk.staging
+cdk.out
+test-api.sh
+# Dependencies
+node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+.cursor
+# Testing
+/coverage
+response.json
+# Next.js
+.next/
+out/
+
+# Production
+/build
+/temp
+# Compiled JavaScript files (CDK backend only)
+backend/**/*.js
+!backend/jest.config.js
+backend/**/*.d.ts
+
+# TypeScript cache
+*.tsbuildinfo
+next-env.d.ts
+
+# OS files
+.DS_Store
+*.pem
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Environment variables
+.env
+**/.env
+**/.env.local
+**/.env*
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Vercel
+.vercel
+
+#Agentic IDEs
+.claude
+
+# Lambda layer dependencies (built locally)
+backend/agentcore/python/
+
+# DynamoDB seed data (local reference only — do not commit)
+backend/seed/
+
+# Test files for post-meeting analytics
+backend/test-post-meeting-prompt.py
+backend/test-prompt-output.json
