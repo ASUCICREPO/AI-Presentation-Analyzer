@@ -234,7 +234,7 @@ export const ANALYSIS_CONFIG = {
   // Higher values require more extreme head/eye movement to trigger "looking away"
   GAZE_THRESHOLDS: {
     LOOK_LEFT: 0.5,
-    LOOK_RIGHT: 0.4,
+    LOOK_RIGHT: 0.5,
     LOOK_UP: 0.3,
     LOOK_DOWN: 0.5,
     // Dynamic thresholds for when user is surprised (eyes wide open)
