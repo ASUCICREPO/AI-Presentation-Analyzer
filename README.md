@@ -158,7 +158,7 @@ For developers looking to extend or modify this project, see the [Modification G
 This application was developed by:
 
 - <a href="https://www.linkedin.com/in/shakthiarun22/" target="_blank">Shakthi Arun</a>
-- <a href="https://www.linkedin.com/in/sreeram-s-5454961aa/" target="_blank">Sreeram S</a>
+- <a href="https://www.linkedin.com/in/sreeram-s-5454961aa/" target="_blank">Sreeram Saravana Prasad</a>
 - <a href="https://www.linkedin.com/in/aadityajindal12/" target="_blank">Aaditya Jindal</a>
 - <a href="https://www.linkedin.com/in/aryankhanna2004/" target="_blank">Aryan Khanna</a>
 
