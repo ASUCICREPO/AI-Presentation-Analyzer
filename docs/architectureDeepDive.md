@@ -49,7 +49,7 @@ After the practice session completes, the user initiates a live Q&A:
 2. AgentCore loads the selected persona from the **Persona DynamoDB Table** and fetches the session `transcript.json` from S3 to build a context-aware system prompt using a Jinja2 template.
 3. A **Strands BidiAgent** backed by **Amazon Nova 2 Sonic** handles the bidirectional audio conversation. The frontend streams 16-bit PCM audio at 16 kHz and receives back synthesized speech audio and real-time transcripts over the same WebSocket.
 4. A `SessionTimeGuard` hook monitors elapsed time and injects timer nudges into the agent so it naturally wraps up within the configured `qaTimeLimitSec` persona limit.
-5. At session end, the agent generates structured Q&A analytics using **Claude Haiku 4.5** via the Bedrock Converse API and saves `qa_analytics.json` to S3 before closing the connection.
+5. At session end, the agent generates structured Q&A analytics using **Amazon Nova 2 Lite** via the Bedrock Converse API and saves `qa_analytics.json` to S3 before closing the connection.
 
 ### 5. Post-Meeting Review — Analytics Generation
 
@@ -96,7 +96,8 @@ Administrators manage AI personas through the REST API:
 
 - **Amazon Bedrock AgentCore** — Managed container runtime for the bidirectional voice Q&A agent. Runs the Strands BidiAgent as a Docker container with native WebSocket support.
 - **Amazon Nova 2 Sonic** (`amazon.nova-2-sonic-v1:0`) — Multimodal speech-to-speech model powering the real-time voice Q&A conversation.
-- **Claude Haiku 4.5** (`global.anthropic.claude-haiku-4-5-20251001-v1:0`) — Used for both post-meeting analytics generation (via the Post Meeting Analytics Lambda) and Q&A session analytics (via the AgentCore runtime). Accessed through the Bedrock Converse API with tool-use for structured JSON output.
+- **Claude Haiku 4.5** (`global.anthropic.claude-haiku-4-5-20251001-v1:0`) — Used for post-meeting analytics generation via the Post Meeting Analytics Lambda. Accessed through the Bedrock Converse API with tool-use for structured JSON output.
+- **Amazon Nova 2 Lite** (`global.amazon.nova-2-lite-v1:0`) — Used for Q&A session analytics generation within the AgentCore runtime.
 - **Bedrock Guardrail** — Content safety layer applied to all persona customization uploads and reads. Filters hate speech, insults, sexual content, violence, misconduct, and prompt injection attacks at HIGH strength.
 - **Amazon Transcribe** — Real-time streaming speech-to-text for live transcription during practice sessions.
 
@@ -191,9 +192,9 @@ During development the frontend initially used the browser's built-in Web Speech
 
 The live Q&A agent was built using the **Strands SDK BidiAgent** running on **Amazon Bedrock AgentCore** rather than a traditional Lambda-based approach. Two factors drove this decision. First, AgentCore provides native bidirectional WebSocket connectivity — the client connects directly to a persistent AgentCore WebSocket endpoint and streams audio in real time without any polling or chunking overhead. A Lambda function cannot maintain a persistent WebSocket connection across multiple audio frames. Second, AgentCore's billing model does not charge for token I/O — only for compute time. Because Nova 2 Sonic processes continuous audio streams, the token volume per session is very high; a standard Bedrock inference billing model would make each Q&A session significantly more expensive. AgentCore's pricing structure keeps per-session costs predictable and low.
 
-### Claude Haiku 4.5 for Structured Analytics Output
+### Claude Haiku 4.5 for Post-Meeting Analytics
 
-Both the post-meeting analytics Lambda and the AgentCore Q&A feedback generation use **Claude Haiku 4.5** (`global.anthropic.claude-haiku-4-5-20251001-v1:0`). At the time of development this was the model that supported the Bedrock Converse API's tool-use (structured output) feature, which allows the response to be constrained to a strict JSON schema via a tool definition. This eliminates the need for fragile response parsing — the Lambda receives a typed JSON object directly from `toolUse.input` with guaranteed fields. Haiku 4.5 also provides strong reasoning quality at low latency and cost, which is well suited to the analytics use case where multiple fields (five recommendations, performance summary, per-metric delivery feedback, per-question Q&A breakdown) need to be populated reliably in a single inference call.
+The Post Meeting Analytics Lambda uses **Claude Haiku 4.5** (`global.anthropic.claude-haiku-4-5-20251001-v1:0`) for generating structured post-session feedback. At the time of development this was the model that supported the Bedrock Converse API's tool-use (structured output) feature, which allows the response to be constrained to a strict JSON schema via a tool definition. This eliminates the need for fragile response parsing — the Lambda receives a typed JSON object directly from `toolUse.input` with guaranteed fields. Haiku 4.5 also provides strong reasoning quality at low latency and cost, which is well suited to the analytics use case where multiple fields (five recommendations, performance summary, per-metric delivery feedback) need to be populated reliably in a single inference call. The AgentCore Q&A feedback generation uses **Amazon Nova 2 Lite** (`global.amazon.nova-2-lite-v1:0`) for its structured Q&A analytics output.
 
 ### On-Device Gaze Detection
 

@@ -6,11 +6,7 @@ An AI-powered presentation coaching tool that lets users record or upload their 
 
 ## Visual Demo
 
-<video src="AI Presentation Coach Tool.mov" controls width="100%">
-  Your browser does not support the video tag.
-</video>
-
-> Watch the full walkthrough of the AI Presentation Analyzer in action.
+[Watch the full walkthrough of the AI Presentation Analyzer in action](https://drive.google.com/file/d/10Pk6qEWwBwCO9xxWBtK4-kOi8Jtl3oln/view?usp=drive_link)
 
 ---
 
