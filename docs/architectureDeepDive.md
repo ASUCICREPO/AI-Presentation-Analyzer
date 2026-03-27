@@ -6,7 +6,7 @@ This document provides a detailed explanation of the AI Presentation Analyzer ar
 
 ## Architecture Diagram
 
-![Architecture Diagram](./media/ArchitectureDiagram.drawio.png)
+![Architecture Diagram](./media/ArchitectureDiagram.jpg)
 
 ---
 
