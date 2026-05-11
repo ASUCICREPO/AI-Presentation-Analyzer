@@ -105,7 +105,6 @@ function ScoreRing({ score }: { score: number }) {
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-4xl font-bold text-gray-900">{score}</span>
         <span className="text-xs text-gray-500">Overall Score</span>
       </div>
     </div>
