@@ -465,6 +465,19 @@ def lambda_handler(event, context):
                 print(f"[ERROR] Failed to fetch QA analytics: {e}")
                 return _response(500, {'message': 'Failed to fetch QA analytics'})
 
+        # Route: fetch transcript.json for download
+        if action == 'get_transcript':
+            key = f"{user_id}/{session_id}/transcript.json"
+            try:
+                obj = s3_client.get_object(Bucket=UPLOADS_BUCKET, Key=key)
+                data = json.loads(obj['Body'].read().decode('utf-8'))
+                return _response(200, data)
+            except s3_client.exceptions.NoSuchKey:
+                return _response(404, {'message': 'Transcript not found'})
+            except ClientError as e:
+                print(f"[ERROR] Failed to fetch transcript: {e}")
+                return _response(500, {'message': 'Failed to fetch transcript'})
+
         # Route: presigned POST URL for file upload
         request_type = qs.get('request_type')
         if not request_type or request_type not in AUTHORIZED_REQUEST_TYPES:

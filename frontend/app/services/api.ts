@@ -402,6 +402,20 @@ export async function fetchQAAnalytics(sessionId: string): Promise<QAAnalyticsRe
   }
 }
 
+export async function fetchTranscript(sessionId: string): Promise<{ sessionId: string; transcripts: { text: string; isFinal: boolean; timestamp: string }[] } | null> {
+  const headers = await authHeaders();
+  try {
+    const res = await fetch(
+      `${API_BASE_URL}/s3_urls?action=get_transcript&session_id=${sessionId}`,
+      { headers },
+    );
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Upload a JSON object to S3 using a presigned POST URL.
  * Convenience wrapper around getPresignedUrl + POST with JSON body.

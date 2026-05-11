@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { SessionAnalytics } from '../hooks/useSessionAnalytics';
-import { AIFeedbackResponse, QAAnalyticsResponse, getVideoPlaybackUrl } from '../services/api';
+import { AIFeedbackResponse, QAAnalyticsResponse, getVideoPlaybackUrl, fetchTranscript } from '../services/api';
 import {
   Download,
   TrendingUp,
@@ -127,6 +127,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [isVideoDownloading, setIsVideoDownloading] = useState(false);
+  const [isTranscriptDownloading, setIsTranscriptDownloading] = useState(false);
   const videoRef = useRef<CustomVideoPlayerHandle>(null);
 
   // Fetch video playback URL on mount
@@ -244,6 +245,35 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
     }
   };
 
+  const handleDownloadTranscript = async () => {
+    if (isTranscriptDownloading) return;
+    setIsTranscriptDownloading(true);
+    try {
+      const data = await fetchTranscript(sessionData.sessionId);
+      if (!data || !data.transcripts || data.transcripts.length === 0) {
+        console.error('No transcript data available');
+        return;
+      }
+      const text = data.transcripts
+        .filter((t) => t.isFinal)
+        .map((t) => t.text)
+        .join(' ');
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `transcript_${sessionData.sessionId}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Transcript download failed:', err);
+    } finally {
+      setIsTranscriptDownloading(false);
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6">
       {/* No-AI Banner */}
@@ -299,6 +329,16 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
               {isVideoDownloading ? 'Downloading...' : 'Download Video'}
             </button>
           )}
+          <button
+            onClick={handleDownloadTranscript}
+            disabled={isTranscriptDownloading}
+            className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            {isTranscriptDownloading
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Download className="h-4 w-4" />}
+            {isTranscriptDownloading ? 'Downloading...' : 'Download Transcript'}
+          </button>
           <button
             onClick={onBackToStart}
             className="flex items-center gap-2 rounded-lg bg-maroon px-4 py-2 text-white hover:bg-maroon/90 transition-colors"
