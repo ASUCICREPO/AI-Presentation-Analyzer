@@ -44,12 +44,25 @@ interface ReviewAnalyticsProps {
   aiFeedback: AIFeedbackResponse | null;
   qaAnalytics: QAAnalyticsResponse | null;
   persona: Persona | null;
+  /** Per-session override of persona best-practice thresholds. */
+  bestPracticesOverride?: Partial<PersonaBestPractices> | null;
   onBackToStart: () => void;
 }
 
-function resolveBestPractices(persona: Persona | null): PersonaBestPractices {
-  if (!persona?.bestPractices) return DEFAULT_BEST_PRACTICES;
-  return { ...DEFAULT_BEST_PRACTICES, ...persona.bestPractices };
+function resolveBestPractices(
+  persona: Persona | null,
+  override?: Partial<PersonaBestPractices> | null,
+): PersonaBestPractices {
+  const personaBp = persona?.bestPractices
+    ? { ...DEFAULT_BEST_PRACTICES, ...persona.bestPractices }
+    : DEFAULT_BEST_PRACTICES;
+  if (!override) return personaBp;
+  return {
+    wpm: { ...personaBp.wpm, ...(override.wpm ?? {}) },
+    eyeContact: { ...personaBp.eyeContact, ...(override.eyeContact ?? {}) },
+    fillerWords: { ...personaBp.fillerWords, ...(override.fillerWords ?? {}) },
+    pauses: { ...personaBp.pauses, ...(override.pauses ?? {}) },
+  };
 }
 
 function resolveScoringWeights(persona: Persona | null): PersonaScoringWeights {
@@ -120,7 +133,7 @@ function MetricBar({ value, max, color }: { value: number; max: number; color: s
   );
 }
 
-export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, persona, onBackToStart }: ReviewAnalyticsProps) {
+export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, persona, bestPracticesOverride, onBackToStart }: ReviewAnalyticsProps) {
   const { windows } = sessionData;
   const [showWindows, setShowWindows] = useState(false);
   const [dismissedBanner, setDismissedBanner] = useState(false);
@@ -138,7 +151,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
     getPresentationPdfUrl(sessionData.sessionId).then(setSlidesUrl);
   }, [sessionData.sessionId]);
 
-  const bp = resolveBestPractices(persona);
+  const bp = resolveBestPractices(persona, bestPracticesOverride);
   const weights = resolveScoringWeights(persona);
   const BEST_PRACTICES = buildBestPracticeChecks(bp);
 

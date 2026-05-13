@@ -7,6 +7,9 @@ interface CustomizePersonaProps {
   value: string;
   onChange: (value: string) => void;
   isVisible: boolean;
+  /** When true, renders without an outer border/rounded shell so the
+   *  component nests cleanly inside another card (e.g. PersonaCard). */
+  nested?: boolean;
 }
 
 function countWords(text: string): number {
@@ -17,6 +20,7 @@ export default function CustomizePersona({
   value,
   onChange,
   isVisible,
+  nested = false,
 }: CustomizePersonaProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -37,8 +41,12 @@ export default function CustomizePersona({
 
   if (!isVisible) return null;
 
+  const containerClasses = nested
+    ? 'overflow-hidden'
+    : 'rounded-xl border border-gray-200 bg-white overflow-hidden';
+
   return (
-    <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+    <div className={containerClasses}>
       {/* Collapsible Header */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}

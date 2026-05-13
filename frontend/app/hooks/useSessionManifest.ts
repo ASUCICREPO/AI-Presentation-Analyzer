@@ -2,6 +2,7 @@
 
 import { useRef, useCallback } from 'react';
 import { uploadJsonToS3 } from '../services/api';
+import { PersonaBestPractices } from '../config/config';
 
 // ─── Manifest shape ──────────────────────────────────────────────────
 export type ManifestStatus = 'in_progress' | 'completed' | 'aborted';
@@ -22,6 +23,12 @@ export interface SessionManifest {
   hasPresentationPdf?: boolean;
   /** Whether persona customization text was provided */
   hasPersonaCustomization?: boolean;
+  /** Per-session override of persona best-practice thresholds.
+   *  Only fields the user adjusted are present; unspecified fields
+   *  fall through to the persona's stored defaults. */
+  bestPracticesOverride?: Partial<PersonaBestPractices> | null;
+  /** Initial state of the in-session real-time feedback toggle. */
+  realtimeFeedbackDefault?: boolean;
 }
 
 /**
@@ -47,7 +54,12 @@ export function useSessionManifest(sessionId: string, personaId: string) {
 
   // ─── Create — call once when the session starts ────────────────────
   const create = useCallback(
-    async (opts?: { hasPresentationPdf?: boolean; hasPersonaCustomization?: boolean }) => {
+    async (opts?: {
+      hasPresentationPdf?: boolean;
+      hasPersonaCustomization?: boolean;
+      bestPracticesOverride?: Partial<PersonaBestPractices> | null;
+      realtimeFeedbackDefault?: boolean;
+    }) => {
       const now = new Date().toISOString();
       const m: SessionManifest = {
         sessionId,
@@ -58,6 +70,8 @@ export function useSessionManifest(sessionId: string, personaId: string) {
         lastUpdated: now,
         hasPresentationPdf: opts?.hasPresentationPdf ?? false,
         hasPersonaCustomization: opts?.hasPersonaCustomization ?? false,
+        bestPracticesOverride: opts?.bestPracticesOverride ?? null,
+        realtimeFeedbackDefault: opts?.realtimeFeedbackDefault,
       };
       manifestRef.current = m;
 
@@ -73,7 +87,18 @@ export function useSessionManifest(sessionId: string, personaId: string) {
 
   // ─── Update — merge partial fields and flush to S3 ─────────────────
   const update = useCallback(
-    async (patch: Partial<Pick<SessionManifest, 'videoParts' | 'hasPresentationPdf' | 'hasPersonaCustomization'>>) => {
+    async (
+      patch: Partial<
+        Pick<
+          SessionManifest,
+          | 'videoParts'
+          | 'hasPresentationPdf'
+          | 'hasPersonaCustomization'
+          | 'bestPracticesOverride'
+          | 'realtimeFeedbackDefault'
+        >
+      >,
+    ) => {
       if (!manifestRef.current) return;
       // Prevent concurrent flushes from stacking up
       if (flushingRef.current) return;
