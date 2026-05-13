@@ -268,20 +268,7 @@ export default function TutorialModal({ isOpen, onClose, userName }: TutorialMod
                                 <p className="text-lg font-bold text-gray-900">Ready to Begin!</p>
                                 <p className="text-sm text-gray-500">You now know how to use the Presentation Analyzer platform.</p>
                             </div>
-                            <p className="text-sm font-semibold text-gray-900">Quick Recap:</p>
-                            <div className="space-y-2">
-                                {[
-                                    { n: 1, text: 'Select and customize your audience persona', color: 'bg-blue-500' },
-                                    { n: 2, text: 'Upload your presentation materials', color: 'bg-green-500' },
-                                    { n: 3, text: 'Record with real-time AI feedback', color: 'bg-red-500' },
-                                    { n: 4, text: 'Review analytics and practice Q&A', color: 'bg-amber-500' },
-                                ].map(item => (
-                                    <div key={item.n} className="flex items-center gap-3 rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
-                                        <span className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-white ${item.color}`}>{item.n}</span>
-                                        <span className="text-sm text-gray-700">{item.text}</span>
-                                    </div>
-                                ))}
-                            </div>
+
                             <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
                                 <div className="flex items-start gap-2">
                                     <Lightbulb size={16} className="mt-0.5 flex-shrink-0 text-amber-500" />
@@ -313,8 +300,8 @@ export default function TutorialModal({ isOpen, onClose, userName }: TutorialMod
                                 key={i}
                                 onClick={() => setStep(i + 1)}
                                 className={`transition-all duration-200 rounded-full ${i + 1 === step
-                                        ? 'h-2.5 w-6 bg-maroon-600'
-                                        : 'h-2.5 w-2.5 bg-gray-300 hover:bg-gray-400'
+                                    ? 'h-2.5 w-6 bg-maroon-600'
+                                    : 'h-2.5 w-2.5 bg-gray-300 hover:bg-gray-400'
                                     }`}
                                 aria-label={`Go to step ${i + 1}`}
                             />
