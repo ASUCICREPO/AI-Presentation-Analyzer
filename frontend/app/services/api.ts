@@ -373,6 +373,21 @@ export async function getVideoPlaybackUrl(sessionId: string): Promise<string | n
   }
 }
 
+export async function getPresentationPdfUrl(sessionId: string): Promise<string | null> {
+  const headers = await authHeaders();
+  try {
+    const res = await fetch(
+      `${API_BASE_URL}/s3_urls?action=get_pdf_url&session_id=${sessionId}`,
+      { headers },
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.url ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getManifestData(sessionId: string): Promise<SessionManifest | null> {
   const headers = await authHeaders();
   try {

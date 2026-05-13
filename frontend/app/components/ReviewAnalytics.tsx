@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { SessionAnalytics } from '../hooks/useSessionAnalytics';
-import { AIFeedbackResponse, QAAnalyticsResponse, getVideoPlaybackUrl, fetchTranscript } from '../services/api';
+import { AIFeedbackResponse, QAAnalyticsResponse, getVideoPlaybackUrl, getPresentationPdfUrl, fetchTranscript } from '../services/api';
 import {
   Download,
   TrendingUp,
@@ -128,11 +128,14 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [isVideoDownloading, setIsVideoDownloading] = useState(false);
   const [isTranscriptDownloading, setIsTranscriptDownloading] = useState(false);
+  const [isSlidesDownloading, setIsSlidesDownloading] = useState(false);
+  const [slidesUrl, setSlidesUrl] = useState<string | null>(null);
   const videoRef = useRef<CustomVideoPlayerHandle>(null);
 
   // Fetch video playback URL on mount
   useEffect(() => {
     getVideoPlaybackUrl(sessionData.sessionId).then(setVideoUrl);
+    getPresentationPdfUrl(sessionData.sessionId).then(setSlidesUrl);
   }, [sessionData.sessionId]);
 
   const bp = resolveBestPractices(persona);
@@ -274,6 +277,27 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
     }
   };
 
+  const handleDownloadSlides = async () => {
+    if (isSlidesDownloading || !slidesUrl) return;
+    setIsSlidesDownloading(true);
+    try {
+      const res = await fetch(slidesUrl);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `presentation_${sessionData.sessionId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Slides download failed:', err);
+    } finally {
+      setIsSlidesDownloading(false);
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6">
       {/* No-AI Banner */}
@@ -339,6 +363,18 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
               : <Download className="h-4 w-4" />}
             {isTranscriptDownloading ? 'Downloading...' : 'Download Transcript'}
           </button>
+          {slidesUrl && (
+            <button
+              onClick={handleDownloadSlides}
+              disabled={isSlidesDownloading}
+              className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              {isSlidesDownloading
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Download className="h-4 w-4" />}
+              {isSlidesDownloading ? 'Downloading...' : 'Download Slides'}
+            </button>
+          )}
           <button
             onClick={onBackToStart}
             className="flex items-center gap-2 rounded-lg bg-maroon px-4 py-2 text-white hover:bg-maroon/90 transition-colors"

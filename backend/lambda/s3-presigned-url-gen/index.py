@@ -208,6 +208,21 @@ def get_video_playback_url(user_id: str, session_id: str) -> Optional[str]:
         return None
 
 
+def get_presentation_pdf_url(user_id: str, session_id: str) -> Optional[str]:
+    """Generate a presigned GET URL for downloading the presentation PDF."""
+    key = _build_s3_key(user_id, session_id, 'ppt')
+    try:
+        url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': UPLOADS_BUCKET, 'Key': key},
+            ExpiresIn=PRESENTATION_TIMEOUT,
+        )
+        return url
+    except ClientError as e:
+        print(f"[ERROR] Failed to generate presentation PDF URL: {e}")
+        return None
+
+
 def get_manifest_data(user_id: str, session_id: str) -> Optional[dict]:
     """Fetch and parse the manifest.json file from S3."""
     key = _build_s3_key(user_id, session_id, 'manifest')
@@ -443,6 +458,13 @@ def lambda_handler(event, context):
             url = get_video_playback_url(user_id, session_id)
             if not url:
                 return _response(404, {'message': 'Video not found or URL generation failed'})
+            return _response(200, {'url': url})
+
+        # Route: presigned GET URL for presentation PDF download
+        if action == 'get_pdf_url':
+            url = get_presentation_pdf_url(user_id, session_id)
+            if not url:
+                return _response(404, {'message': 'Presentation PDF not found or URL generation failed'})
             return _response(200, {'url': url})
 
         # Route: fetch manifest.json data
