@@ -16,6 +16,7 @@ interface QAOrbPanelProps {
   onEnd: () => void;
   onToggleMute: () => void;
   onSkip: () => void;
+  onSkipQuestion: () => void;
 }
 
 const STATE_CONFIG: Record<string, { label: string; dotClass: string; textClass: string }> = {
@@ -34,6 +35,7 @@ export default function QAOrbPanel({
   onEnd,
   onToggleMute,
   onSkip,
+  onSkipQuestion,
 }: QAOrbPanelProps) {
   const stateInfo = agentState ? STATE_CONFIG[agentState] : null;
 
@@ -112,14 +114,22 @@ export default function QAOrbPanel({
             <div className="flex items-center justify-center gap-3 w-full">
               <button
                 onClick={onToggleMute}
-                className={`flex h-10 w-10 items-center justify-center rounded-full transition ${
-                  isMuted
-                    ? 'bg-red-100 text-red-600 hover:bg-red-200'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
+                className={`flex h-10 w-10 items-center justify-center rounded-full transition ${isMuted
+                  ? 'bg-red-100 text-red-600 hover:bg-red-200'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
               >
                 {isMuted ? <MicOff size={18} /> : <Mic size={18} />}
+              </button>
+
+              <button
+                onClick={onSkipQuestion}
+                className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-600 transition-all hover:border-gray-300 hover:bg-gray-50 active:scale-[0.98] font-sans"
+                title="Skip this question and ask a different one"
+              >
+                <ArrowRight size={14} />
+                Skip Question
               </button>
 
               <button
