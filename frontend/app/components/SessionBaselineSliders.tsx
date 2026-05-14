@@ -187,28 +187,28 @@ export default function SessionBaselineSliders({
 
   const updateWpm = (range: [number, number]) => {
     onChange({
-      ...value,
+      ...(value ?? {}),
       wpm: { ...defaults.wpm, ...value?.wpm, min: range[0], max: range[1] },
     });
   };
 
   const updateEye = (n: number) => {
     onChange({
-      ...value,
+      ...(value ?? {}),
       eyeContact: { ...defaults.eyeContact, ...value?.eyeContact, min: n },
     });
   };
 
   const updateFiller = (n: number) => {
     onChange({
-      ...value,
+      ...(value ?? {}),
       fillerWords: { ...defaults.fillerWords, ...value?.fillerWords, max: n },
     });
   };
 
   const updatePauses = (n: number) => {
     onChange({
-      ...value,
+      ...(value ?? {}),
       pauses: { ...defaults.pauses, ...value?.pauses, min: n },
     });
   };
