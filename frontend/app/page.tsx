@@ -15,7 +15,7 @@ import SignUpPage from './components/SignUpPage';
 import ConfirmSignUpPage from './components/ConfirmSignUpPage';
 import { SessionAnalytics } from './hooks/useSessionAnalytics';
 import { AIFeedbackResponse, QAAnalyticsResponse, fetchQAAnalytics } from './services/api';
-import { generateSessionId, Persona, PersonaBestPractices, ANALYSIS_CONFIG } from './config/config';
+import { generateSessionId, Persona, PersonaBestPractices, ANALYSIS_CONFIG, resolveEffectiveBestPractices } from './config/config';
 import { Loader2 } from 'lucide-react';
 
 type AuthView = 'login' | 'signup' | 'confirm';
@@ -333,6 +333,7 @@ export default function Home() {
             hasPresentationPdf={pdfUploaded}
             hasPersonaCustomization={customNotes.trim().length > 0}
             bestPracticesOverride={baselineOverride}
+            effectiveBestPractices={resolveEffectiveBestPractices(selectedPersonaData, baselineOverride)}
             realtimeFeedbackDefault={realtimeFeedbackDefault}
             onBack={handleBackToUpload}
             onComplete={handlePracticeComplete}
