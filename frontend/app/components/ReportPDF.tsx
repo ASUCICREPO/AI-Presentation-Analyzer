@@ -410,6 +410,7 @@ function ScoreRingSvg({ score }: { score: number }) {
         />
       </Svg>
       <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ fontSize: 20, fontWeight: 700, color: '#111827' }}>{Math.round(score)}</Text>
         <Text style={{ fontSize: 7, color: '#6B7280', marginTop: 2 }}>Overall Score</Text>
       </View>
     </View>

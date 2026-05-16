@@ -136,6 +136,10 @@ interface PersonaCardProps {
   communicationStyle: string;
   isSelected: boolean;
   onSelect: () => void;
+  /** Optional extra content rendered inside the expandable section
+   *  below the persona details. Used to host customization UI directly
+   *  inside the selected card. */
+  expandedExtra?: React.ReactNode;
 }
 
 export default function PersonaCard({
@@ -148,19 +152,29 @@ export default function PersonaCard({
   communicationStyle,
   isSelected,
   onSelect,
+  expandedExtra,
 }: PersonaCardProps) {
   const detailsRef = useRef<HTMLDivElement>(null);
   const [detailsHeight, setDetailsHeight] = useState(0);
   const accent = getAccent(expertise);
   const IconComponent = getIconComponent(icon);
 
+  // Observe the details panel size so the collapsible region grows/shrinks
+  // when its content changes (e.g., textarea grows, sliders mount).
   useEffect(() => {
     const el = detailsRef.current;
     if (!el) return;
-    requestAnimationFrame(() => {
-      setDetailsHeight(el.scrollHeight);
-    });
-  }, [isSelected, keyPriorities, communicationStyle]);
+
+    const measure = () => setDetailsHeight(el.scrollHeight);
+    measure();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(measure);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    return undefined;
+  }, [isSelected, keyPriorities, communicationStyle, expandedExtra]);
 
   return (
     <div
@@ -321,6 +335,18 @@ export default function PersonaCard({
               </div>
             </div>
           </div>
+
+          {/* Optional extra content (e.g., customize panel + sliders) */}
+          {expandedExtra && (
+            <div
+              className="mt-5 space-y-4 border-t border-gray-200/60 pt-5 2xl:mt-7 2xl:space-y-5 2xl:pt-7"
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+              role="presentation"
+            >
+              {expandedExtra}
+            </div>
+          )}
         </div>
       </div>
     </div>

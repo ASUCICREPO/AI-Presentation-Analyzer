@@ -59,6 +59,7 @@ phases:
       # ----------------------------------------------------------------
       - |
         if [ -z "$GITHUB_TOKEN" ]; then
+          set -euo pipefail
           echo ""
           echo "=== BARE-MODE FRONTEND BUILD ==="
           echo ""
@@ -105,8 +106,19 @@ phases:
           npm ci
           echo "Building Next.js static export..."
           npm run build
+          if [ ! -d out ]; then
+            echo "ERROR: 'out' directory not produced by 'npm run build'."
+            echo "Listing frontend contents for debugging:"
+            ls -la
+            exit 1
+          fi
           echo "Creating deployment package..."
-          cd out && zip -r build.zip .
+          ( cd out && zip -r build.zip . )
+          if [ ! -f out/build.zip ]; then
+            echo "ERROR: out/build.zip was not created."
+            exit 1
+          fi
+          echo "Build artifact ready: $(du -h out/build.zip | cut -f1) at $CODEBUILD_SRC_DIR/frontend/out/build.zip"
           echo "Persisting Amplify metadata for post_build..."
           echo "$BARE_AMPLIFY_APP_ID" > $CODEBUILD_SRC_DIR/.bare_amplify_app_id
         else
@@ -164,8 +176,15 @@ phases:
       # Bare-mode: deploy frontend to Amplify
       - |
         if [ -z "$GITHUB_TOKEN" ] && [ -f "$CODEBUILD_SRC_DIR/.bare_amplify_app_id" ]; then
+          set -eo pipefail
           export BARE_AMPLIFY_APP_ID=$(cat $CODEBUILD_SRC_DIR/.bare_amplify_app_id)
-          echo "Deploying frontend to Amplify..."
+          BUILD_ZIP="$CODEBUILD_SRC_DIR/frontend/out/build.zip"
+          if [ ! -f "$BUILD_ZIP" ]; then
+            echo "ERROR: Expected build artifact not found at $BUILD_ZIP."
+            echo "The build phase did not produce the static export. Aborting."
+            exit 1
+          fi
+          echo "Deploying frontend to Amplify (artifact: $BUILD_ZIP)..."
           cd $CODEBUILD_SRC_DIR/frontend
 
           echo "Cancelling any in-progress Amplify jobs..."
@@ -210,8 +229,7 @@ phases:
           fi
 
           echo "Uploading build.zip to Amplify..."
-          cd out
-          if ! curl --fail -s -X PUT -T build.zip "$UPLOAD_URL"; then
+          if ! curl --fail -s -X PUT -T "$BUILD_ZIP" "$UPLOAD_URL"; then
             echo "ERROR: Failed to upload build.zip to Amplify."
             exit 1
           fi

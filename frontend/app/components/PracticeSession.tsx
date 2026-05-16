@@ -10,7 +10,7 @@ import { useDetailedMetrics } from '../hooks/useDetailedMetrics';
 import { useSessionManifest } from '../hooks/useSessionManifest';
 import { useMicCalibration } from '../hooks/useMicCalibration';
 import { uploadJsonToS3, pollAnalytics, AIFeedbackResponse } from '../services/api';
-import { ANALYSIS_CONFIG, PRESENTATION_LIMITS, DEFAULT_TIME_LIMIT_SEC } from '../config/config';
+import { ANALYSIS_CONFIG, PRESENTATION_LIMITS, DEFAULT_TIME_LIMIT_SEC, DEFAULT_BEST_PRACTICES, PersonaBestPractices } from '../config/config';
 
 import { toast } from 'sonner';
 
@@ -31,14 +31,24 @@ interface PracticeSessionProps {
   timeLimitSec?: number;
   hasPresentationPdf?: boolean;
   hasPersonaCustomization?: boolean;
+  /** Per-session override of persona best-practice thresholds. */
+  bestPracticesOverride?: Partial<PersonaBestPractices> | null;
+  /** Fully-resolved best-practice thresholds for this session
+   *  (DEFAULTS ← persona.bestPractices ← per-session override). */
+  effectiveBestPractices?: PersonaBestPractices;
+  /** Initial state of the in-session real-time feedback toggle. */
+  realtimeFeedbackDefault?: boolean;
   onBack: () => void;
   onComplete: (sessionData: SessionAnalytics, analyticsPromise: Promise<AIFeedbackResponse | null>) => void;
   exitSessionRef?: MutableRefObject<(() => void) | null>;
 }
 
-export default function PracticeSession({ personaTitle, personaId, sessionId, timeLimitSec, hasPresentationPdf, hasPersonaCustomization, onBack, onComplete, exitSessionRef }: PracticeSessionProps) {
+export default function PracticeSession({ personaTitle, personaId, sessionId, timeLimitSec, hasPresentationPdf, hasPersonaCustomization, bestPracticesOverride, effectiveBestPractices, realtimeFeedbackDefault, onBack, onComplete, exitSessionRef }: PracticeSessionProps) {
   // Resolve the effective time cap for this session
   const maxDuration = timeLimitSec ?? DEFAULT_TIME_LIMIT_SEC;
+  // Fall back to generic defaults if the parent didn't compute the
+  // resolved thresholds (defensive — page.tsx always provides this).
+  const targets: PersonaBestPractices = effectiveBestPractices ?? DEFAULT_BEST_PRACTICES;
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [timer, setTimer] = useState(0);
@@ -77,8 +87,11 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
   const [calibrationStep, setCalibrationStep] = useState<1 | 2>(1);
   const [showMesh, setShowMesh] = useState(false);
 
-  // Runtime toggle for real-time feedback panel (config provides default)
-  const [showFeedback, setShowFeedback] = useState(ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK);
+  // Runtime toggle for real-time feedback panel — default comes from the
+  // persona-step toggle (with config fallback). User can flip during session.
+  const [showFeedback, setShowFeedback] = useState(
+    realtimeFeedbackDefault ?? ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK,
+  );
 
   // Keep loop refs in sync with state so the rAF loop always sees fresh values
   // without needing to be recreated (which caused dual-loop races).
@@ -573,6 +586,8 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
       manifest.create({
         hasPresentationPdf: hasPresentationPdf ?? false,
         hasPersonaCustomization: hasPersonaCustomization ?? false,
+        bestPracticesOverride: bestPracticesOverride ?? null,
+        realtimeFeedbackDefault: realtimeFeedbackDefault ?? ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK,
       });
 
       // Start both audio analysis and vocal variety in parallel
@@ -746,6 +761,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
                     isDistracted={gazeDisplayDistracted}
                     metrics={feedbackMetrics}
                     vocalVariety={vocalVariety.metrics}
+                    targets={targets}
                   />
                 )}
               </div>
