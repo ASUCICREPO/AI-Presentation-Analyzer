@@ -9,7 +9,7 @@ import { useVideoRecording } from '../hooks/useVideoRecording';
 import { useDetailedMetrics } from '../hooks/useDetailedMetrics';
 import { useSessionManifest } from '../hooks/useSessionManifest';
 import { useMicCalibration } from '../hooks/useMicCalibration';
-import { uploadJsonToS3, pollAnalytics, AIFeedbackResponse } from '../services/api';
+import { uploadJsonToS3, pollAnalytics, AIFeedbackResponse, getPresentationPdfUrl } from '../services/api';
 import { ANALYSIS_CONFIG, PRESENTATION_LIMITS, DEFAULT_TIME_LIMIT_SEC, DEFAULT_BEST_PRACTICES, PersonaBestPractices } from '../config/config';
 
 import { toast } from 'sonner';
@@ -86,6 +86,17 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [calibrationStep, setCalibrationStep] = useState<1 | 2>(1);
   const [showMesh, setShowMesh] = useState(false);
+
+  // PDF slide viewer
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [showSlides, setShowSlides] = useState(true);
+
+  // Fetch PDF URL on mount if presentation was uploaded
+  useEffect(() => {
+    if (hasPresentationPdf) {
+      getPresentationPdfUrl(sessionId).then(setPdfUrl);
+    }
+  }, [hasPresentationPdf, sessionId]);
 
   // Runtime toggle for real-time feedback panel — default comes from the
   // persona-step toggle (with config fallback). User can flip during session.
@@ -801,6 +812,31 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
           isRecording={isRecording && !isPaused}
           isTranscribing={isTranscribing && isRecording && !isPaused}
         />
+      )}
+
+      {/* 5. Slide Viewer — shown when PDF was uploaded */}
+      {pdfUrl && (
+        <div className="mt-4 2xl:mt-6">
+          <button
+            onClick={() => setShowSlides(!showSlides)}
+            className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors font-sans"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${showSlides ? 'rotate-90' : ''}`}>
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+            {showSlides ? 'Hide Slides' : 'Show Slides'}
+          </button>
+          {showSlides && (
+            <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+              <iframe
+                src={pdfUrl}
+                className="w-full"
+                style={{ height: '500px' }}
+                title="Presentation Slides"
+              />
+            </div>
+          )}
+        </div>
       )}
 
     </div>
