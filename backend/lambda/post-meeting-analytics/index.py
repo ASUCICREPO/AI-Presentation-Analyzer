@@ -295,6 +295,19 @@ def generate_feedback(persona, transcript, persona_customization=None,
         " volume, eyeContact, fillerWords, pauses — each EXACTLY 2 sentences"
         " (observation + one tip), under 30 words.",
         "",
+    ])
+
+    if pdf_bytes:
+        parts.extend([
+            "slideFeedback: Since a presentation PDF was provided, return EXACTLY 3-5"
+            " observations about the slides. Each needs a title (under 8 words) and"
+            " description (2-3 sentences, under 60 words). Focus on visual design,"
+            " text density, layout clarity, consistency, readability, and use of"
+            " visuals/charts. Be specific — reference slide numbers or sections when possible.",
+            "",
+        ])
+
+    parts.extend([
         f"Tone: {communication_style}. Lead with strengths. Be honest —"
         " praise confidently when earned, critique directly when needed. Be concise.",
     ])
@@ -341,6 +354,18 @@ def generate_feedback(persona, transcript, persona_customization=None,
                                         }
                                     },
                                     "required": ["overallAssessment", "contentStrengths", "deliveryFeedback"]
+                                },
+                                "slideFeedback": {
+                                    "type": "array",
+                                    "description": "Feedback on slide design and visuals. Only populate if a presentation PDF was provided.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "title": {"type": "string"},
+                                            "description": {"type": "string"}
+                                        },
+                                        "required": ["title", "description"]
+                                    }
                                 }
                             },
                             "required": ["keyRecommendations", "performanceSummary"]

@@ -19,6 +19,7 @@ export interface AIFeedbackResponse {
       pauses: string;
     };
   };
+  slideFeedback?: { title: string; description: string }[];
   generatedAt: string;
   model: string;
   includedFiles: Record<string, boolean>;

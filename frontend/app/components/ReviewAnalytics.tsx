@@ -847,6 +847,24 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
         </div>
       )}
 
+      {/* Slide Feedback */}
+      {aiFeedback?.slideFeedback && aiFeedback.slideFeedback.length > 0 && (
+        <div className="mb-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+          <h2 className="mb-1 text-lg font-semibold text-gray-900">
+            Slide Feedback <InfoTooltip text="AI-generated feedback on your slide design, layout, and visual presentation based on the uploaded PDF." />
+          </h2>
+          <p className="mb-4 text-sm text-gray-500">Observations on your slide design and visual presentation</p>
+          <div className="space-y-3">
+            {aiFeedback.slideFeedback.map((item, i) => (
+              <div key={i} className="rounded-lg border border-gray-100 bg-gray-50 p-4">
+                <h3 className="text-sm font-semibold text-gray-900">{item.title}</h3>
+                <p className="mt-1 text-sm leading-relaxed text-gray-700">{item.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {windows.length === 0 && !aiFeedback && (
         <div className="flex min-h-[40vh] items-center justify-center">
           <p className="text-gray-500">No analytics data available</p>
