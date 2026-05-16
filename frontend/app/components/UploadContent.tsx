@@ -161,7 +161,10 @@ export default function UploadContent({ personaName, sessionId, initialFileName,
             </button>
 
             <p className="mt-4 text-xs text-gray-400 font-sans 2xl:text-base 2xl:mt-6">
-              Supported format: PDF
+              Supported format: PDF only (max 20 pages recommended)
+            </p>
+            <p className="mt-2 text-xs text-gray-400 font-sans 2xl:text-sm">
+              The AI agent can assess text content, slide structure, and layout. It cannot evaluate animations, embedded videos, or speaker notes.
             </p>
           </div>
         </div>
