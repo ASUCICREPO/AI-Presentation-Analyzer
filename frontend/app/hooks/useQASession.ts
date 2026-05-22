@@ -25,7 +25,6 @@ export interface UseQASessionReturn extends QASessionState {
   startSession: () => Promise<void>;
   endSession: () => Promise<QAAnalyticsResponse | null>;
   toggleMute: () => void;
-  skipQuestion: () => void;
 }
 
 export function useQASession(
@@ -422,11 +421,6 @@ export function useQASession(
     };
   }, [stopAudioCapture, stopTimer]);
 
-  const skipQuestion = useCallback(() => {
-    if (status !== 'active') return;
-    wsClientRef.current?.sendText('Skip this question. Please move on to a different question.');
-  }, [status]);
-
   return {
     status,
     timer,
@@ -442,6 +436,5 @@ export function useQASession(
     startSession,
     endSession,
     toggleMute,
-    skipQuestion,
   };
 }

@@ -166,7 +166,6 @@ export default function QASession({
             onEnd={handleEndSession}
             onToggleMute={qa.toggleMute}
             onSkip={onSkip}
-            onSkipQuestion={qa.skipQuestion}
           />
         </div>
       </div>
@@ -215,8 +214,8 @@ export default function QASession({
           {[...qa.transcriptEntries].reverse().map((entry, index) => (
             <div key={index} className="flex gap-3 items-start">
               <span className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[11px] font-medium mt-0.5 ${entry.role === 'assistant'
-                  ? 'bg-maroon/10 text-maroon'
-                  : 'bg-gray-100 text-gray-500'
+                ? 'bg-maroon/10 text-maroon'
+                : 'bg-gray-100 text-gray-500'
                 }`}>
                 {entry.role === 'assistant' ? displayPersonaName : 'You'}
               </span>

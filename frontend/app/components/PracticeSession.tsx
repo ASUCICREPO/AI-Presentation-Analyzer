@@ -824,7 +824,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${showSlides ? 'rotate-90' : ''}`}>
               <path d="m9 18 6-6-6-6" />
             </svg>
-            {showSlides ? 'Hide Slides' : 'Show Slides'}
+            {showSlides ? 'Hide PDF' : 'View PDF'}
           </button>
           {showSlides && (
             <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">

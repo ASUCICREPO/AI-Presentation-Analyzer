@@ -84,12 +84,12 @@ function buildBestPracticeChecks(bp: PersonaBestPractices) {
     },
     fillers: {
       label: bp.fillerWords.label ?? 'Filler Words',
-      range: `${bp.fillerWords.max} or fewer`,
+      range: `${bp.fillerWords.max} or fewer per window`,
       check: (v: number) => v <= bp.fillerWords.max,
     },
     pauses: {
       label: bp.pauses.label ?? 'Strategic Pauses',
-      range: `${bp.pauses.min}+ pauses`,
+      range: `${bp.pauses.min}+ per window`,
       check: (v: number) => v >= bp.pauses.min,
     },
   };
@@ -162,8 +162,10 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
     const avgVolume = Math.round(windows.reduce((s, w) => s + w.volumeLevel.average, 0) / windows.length);
     const avgEyeContact = Math.round(windows.reduce((s, w) => s + w.eyeContactScore, 0) / windows.length);
     const totalFillers = windows.reduce((s, w) => s + w.fillerWords, 0);
+    const avgFillersPerWindow = windows.length > 0 ? Math.ceil(totalFillers / windows.length) : 0;
     const totalPauses = windows.reduce((s, w) => s + w.pauses, 0);
-    return { avgWpm, avgVolume, avgEyeContact, totalFillers, totalPauses };
+    const avgPausesPerWindow = windows.length > 0 ? Math.ceil(totalPauses / windows.length) : 0;
+    return { avgWpm, avgVolume, avgEyeContact, totalFillers, avgFillersPerWindow, totalPauses, avgPausesPerWindow };
   })();
 
   const overallScore = (() => {
@@ -172,10 +174,10 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
     const paceScore = BEST_PRACTICES.wpm.check(stats.avgWpm) ? 100
       : stats.avgWpm >= bp.wpm.min - wpmOuter && stats.avgWpm <= bp.wpm.max + wpmOuter ? 70 : 40;
     const eyeScore = Math.min(stats.avgEyeContact, 100);
-    const fillerScore = stats.totalFillers <= bp.fillerWords.max ? 100
-      : stats.totalFillers <= bp.fillerWords.max * 2 ? 70 : 40;
-    const pauseScore = stats.totalPauses >= bp.pauses.min ? 100
-      : stats.totalPauses >= Math.floor(bp.pauses.min / 2) ? 70 : 40;
+    const fillerScore = stats.avgFillersPerWindow <= bp.fillerWords.max ? 100
+      : stats.avgFillersPerWindow <= bp.fillerWords.max * 2 ? 70 : 40;
+    const pauseScore = stats.avgPausesPerWindow >= bp.pauses.min ? 100
+      : stats.avgPausesPerWindow >= Math.floor(bp.pauses.min / 2) ? 70 : 40;
     return Math.round(
       paceScore * weights.pace +
       eyeScore * weights.eyeContact +
@@ -436,7 +438,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
                     <AlertTriangle className="h-3.5 w-3.5" /> Improve eye contact
                   </span>
                 )}
-                {BEST_PRACTICES.fillers.check(stats.totalFillers) && (
+                {BEST_PRACTICES.fillers.check(stats.avgFillersPerWindow) && (
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-800">
                     <CheckCircle2 className="h-3.5 w-3.5" /> Minimal fillers
                   </span>
@@ -598,8 +600,8 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
               <div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="flex items-center gap-1.5 font-medium text-gray-700"><MessageCircle className="h-4 w-4 text-orange-500" />Filler Words</span>
-                  <span className={`font-bold ${stats.totalFillers <= bp.fillerWords.max ? 'text-green-600' : stats.totalFillers <= bp.fillerWords.max * 2 ? 'text-yellow-600' : 'text-red-600'}`}>
-                    {stats.totalFillers} detected
+                  <span className={`font-bold ${stats.avgFillersPerWindow <= bp.fillerWords.max ? 'text-green-600' : stats.avgFillersPerWindow <= bp.fillerWords.max * 2 ? 'text-yellow-600' : 'text-red-600'}`}>
+                    {stats.avgFillersPerWindow}/window (avg)
                   </span>
                 </div>
                 {aiFeedback && (
@@ -764,8 +766,8 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
                 {[
                   { key: 'wpm' as const, value: stats.avgWpm, display: `${stats.avgWpm} wpm` },
                   { key: 'eyeContact' as const, value: stats.avgEyeContact, display: `${stats.avgEyeContact}%` },
-                  { key: 'fillers' as const, value: stats.totalFillers, display: `${stats.totalFillers}` },
-                  { key: 'pauses' as const, value: stats.totalPauses, display: `${stats.totalPauses}` },
+                  { key: 'fillers' as const, value: stats.avgFillersPerWindow, display: `${stats.avgFillersPerWindow}/window` },
+                  { key: 'pauses' as const, value: stats.avgPausesPerWindow, display: `${stats.avgPausesPerWindow}/window` },
                 ].map((row) => {
                   const bp = BEST_PRACTICES[row.key];
                   const passing = bp.check(row.value);
