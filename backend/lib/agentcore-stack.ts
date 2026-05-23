@@ -46,8 +46,17 @@ export class AgentCoreStack extends cdk.Stack {
     // filter so violations are caught regardless of which side of the
     // conversation they originate from.  PROMPT_ATTACK only applies to
     // INPUT (Bedrock rejects outputStrength != NONE for that filter type).
+    // Bedrock guardrail names are account-global (not stack-scoped), so a
+    // hardcoded name collides on any second deployment in the same account
+    // (e.g. dev + customer-feedbacks). Suffix with the stack name to keep
+    // each environment isolated. Names are limited to 50 chars and the
+    // pattern ^[0-9a-zA-Z-_]+$, so we sanitize and truncate defensively.
+    const guardrailName = `QAAgentGuard-${this.stackName}`
+      .replace(/[^0-9a-zA-Z-_]/g, '-')
+      .slice(0, 50);
+
     const guardrailConfig: bedrockl1.CfnGuardrailProps = {
-      name: 'QAAgentGuard',
+      name: guardrailName,
       description: 'Q&A voice agent safety policy: content filters, denied topics, and PII anonymization.',
       blockedInputMessaging:
         "I can't engage with that — let's stay focused on your presentation. Could you rephrase or pick a different angle?",
