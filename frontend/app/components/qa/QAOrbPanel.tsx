@@ -112,11 +112,10 @@ export default function QAOrbPanel({
             <div className="flex items-center justify-center gap-3 w-full">
               <button
                 onClick={onToggleMute}
-                className={`flex h-10 w-10 items-center justify-center rounded-full transition ${
-                  isMuted
-                    ? 'bg-red-100 text-red-600 hover:bg-red-200'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
+                className={`flex h-10 w-10 items-center justify-center rounded-full transition ${isMuted
+                  ? 'bg-red-100 text-red-600 hover:bg-red-200'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
                 title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
               >
                 {isMuted ? <MicOff size={18} /> : <Mic size={18} />}

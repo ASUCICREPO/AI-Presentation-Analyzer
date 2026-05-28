@@ -15,7 +15,7 @@ import SignUpPage from './components/SignUpPage';
 import ConfirmSignUpPage from './components/ConfirmSignUpPage';
 import { SessionAnalytics } from './hooks/useSessionAnalytics';
 import { AIFeedbackResponse, QAAnalyticsResponse, fetchQAAnalytics } from './services/api';
-import { generateSessionId, Persona } from './config/config';
+import { generateSessionId, Persona, PersonaBestPractices, ANALYSIS_CONFIG, resolveEffectiveBestPractices } from './config/config';
 import { Loader2 } from 'lucide-react';
 
 type AuthView = 'login' | 'signup' | 'confirm';
@@ -43,6 +43,11 @@ export default function Home() {
   const [selectedPersonaQATimeLimit, setSelectedPersonaQATimeLimit] = useState<number | undefined>(undefined);
   const [selectedPersonaData, setSelectedPersonaData] = useState<Persona | null>(null);
   const [customNotes, setCustomNotes] = useState('');
+  // Per-session overrides chosen on the persona step. Reset on persona change & restart.
+  const [baselineOverride, setBaselineOverride] = useState<Partial<PersonaBestPractices> | null>(null);
+  const [realtimeFeedbackDefault, setRealtimeFeedbackDefault] = useState<boolean>(
+    ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK,
+  );
   const [pdfUploaded, setPdfUploaded] = useState(false);
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string>(generateSessionId);
@@ -84,6 +89,10 @@ export default function Home() {
   // --- App handlers ---
   const handlePersonaSelect = (id: string | null) => {
     setSelectedPersona(id);
+    // Switching personas clears the override so sliders snap to the new
+    // persona's defaults. Realtime toggle is reset to the config default.
+    setBaselineOverride(null);
+    setRealtimeFeedbackDefault(ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK);
   };
 
   const handleContinueToUpload = () => {
@@ -207,6 +216,8 @@ export default function Home() {
     setPdfUploaded(false);
     setUploadedFileName(null);
     setCustomNotes('');
+    setBaselineOverride(null);
+    setRealtimeFeedbackDefault(ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK);
     window.scrollTo({ top: 0 });
   };
 
@@ -289,6 +300,10 @@ export default function Home() {
             onPersonaDataChange={setSelectedPersonaData}
             customNotes={customNotes}
             onCustomNotesChange={setCustomNotes}
+            baselineOverride={baselineOverride}
+            onBaselineOverrideChange={setBaselineOverride}
+            realtimeFeedbackDefault={realtimeFeedbackDefault}
+            onRealtimeFeedbackDefaultChange={setRealtimeFeedbackDefault}
             sessionId={sessionId}
             onContinue={handleContinueToUpload}
           />
@@ -317,6 +332,9 @@ export default function Home() {
             timeLimitSec={selectedPersonaTimeLimit}
             hasPresentationPdf={pdfUploaded}
             hasPersonaCustomization={customNotes.trim().length > 0}
+            bestPracticesOverride={baselineOverride}
+            effectiveBestPractices={resolveEffectiveBestPractices(selectedPersonaData, baselineOverride)}
+            realtimeFeedbackDefault={realtimeFeedbackDefault}
             onBack={handleBackToUpload}
             onComplete={handlePracticeComplete}
             exitSessionRef={exitSessionRef}
@@ -379,6 +397,7 @@ export default function Home() {
             aiFeedback={aiFeedback}
             qaAnalytics={qaAnalytics}
             persona={selectedPersonaData}
+            bestPracticesOverride={baselineOverride}
             onBackToStart={handleBackToStart}
           />
         )}

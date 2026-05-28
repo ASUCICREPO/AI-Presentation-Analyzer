@@ -19,6 +19,7 @@ export interface AIFeedbackResponse {
       pauses: string;
     };
   };
+  slideFeedback?: { title: string; description: string }[];
   generatedAt: string;
   model: string;
   includedFiles: Record<string, boolean>;
@@ -373,6 +374,21 @@ export async function getVideoPlaybackUrl(sessionId: string): Promise<string | n
   }
 }
 
+export async function getPresentationPdfUrl(sessionId: string): Promise<string | null> {
+  const headers = await authHeaders();
+  try {
+    const res = await fetch(
+      `${API_BASE_URL}/s3_urls?action=get_pdf_url&session_id=${sessionId}`,
+      { headers },
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.url ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getManifestData(sessionId: string): Promise<SessionManifest | null> {
   const headers = await authHeaders();
   try {
@@ -397,6 +413,20 @@ export async function fetchQAAnalytics(sessionId: string): Promise<QAAnalyticsRe
     if (!res.ok) return null;
     const data: QAAnalyticsResponse = await res.json();
     return normalizeQAFeedback(data);
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchTranscript(sessionId: string): Promise<{ sessionId: string; transcripts: { text: string; isFinal: boolean; timestamp: string }[] } | null> {
+  const headers = await authHeaders();
+  try {
+    const res = await fetch(
+      `${API_BASE_URL}/s3_urls?action=get_transcript&session_id=${sessionId}`,
+      { headers },
+    );
+    if (!res.ok) return null;
+    return res.json();
   } catch {
     return null;
   }

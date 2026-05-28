@@ -120,6 +120,44 @@ export const DEFAULT_SCORING_WEIGHTS: PersonaScoringWeights = {
   pauses: 0.25,
 };
 
+/**
+ * Resolve the effective best-practice thresholds for a session.
+ *
+ * Layered precedence (later wins per-field):
+ *   DEFAULT_BEST_PRACTICES  ←  persona.bestPractices  ←  per-session override
+ *
+ * Always returns a fully-populated PersonaBestPractices object, so callers
+ * can read fields like `wpm.min`/`fillerWords.max` without null checks.
+ */
+export function resolveEffectiveBestPractices(
+  persona: Persona | null | undefined,
+  override?: Partial<PersonaBestPractices> | null,
+): PersonaBestPractices {
+  const personaBp = persona?.bestPractices;
+  return {
+    wpm: {
+      ...DEFAULT_BEST_PRACTICES.wpm,
+      ...personaBp?.wpm,
+      ...override?.wpm,
+    },
+    eyeContact: {
+      ...DEFAULT_BEST_PRACTICES.eyeContact,
+      ...personaBp?.eyeContact,
+      ...override?.eyeContact,
+    },
+    fillerWords: {
+      ...DEFAULT_BEST_PRACTICES.fillerWords,
+      ...personaBp?.fillerWords,
+      ...override?.fillerWords,
+    },
+    pauses: {
+      ...DEFAULT_BEST_PRACTICES.pauses,
+      ...personaBp?.pauses,
+      ...override?.pauses,
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Session
 // ---------------------------------------------------------------------------

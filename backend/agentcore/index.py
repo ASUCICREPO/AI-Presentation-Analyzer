@@ -21,7 +21,9 @@ import boto3
 import aioboto3
 import os
 import json
+import re
 import time
+from collections import deque
 from jinja2 import Template
 from opentelemetry import baggage, context as otel_context
 
@@ -45,6 +47,74 @@ MODEL_ID=os.getenv("MODEL_ID", "amazon.nova-2-sonic-v1:0") #Nova 2 Sonic default
 QA_ANALYTICS_MODEL_ID = os.environ["QA_ANALYTICS_MODEL_ID"]
 _runtime_name = os.getenv("AGENT_RUNTIME_NAME", "")
 CLOUDWATCH_LOG_GROUP = f"/aws/bedrock-agentcore/runtimes/{_runtime_name}-DEFAULT" if _runtime_name else ""
+GUARDRAIL_ID = os.environ["BEDROCK_GUARDRAIL_ID"]
+GUARDRAIL_VERSION = os.environ["BEDROCK_GUARDRAIL_VERSION"]
+
+# ── Output-side guardrail gate tuning ────────────────────────────────
+# Pattern 1 (speculative-transcript gating) buffers Nova Sonic audio
+# chunks until the corresponding *speculative* text passes ApplyGuardrail.
+# Nova emits speculative text a few hundred ms ahead of the audio that
+# renders it, giving us a free moderation window without breaking the
+# real-time feel of the conversation.
+#
+# Trigger a screening call as soon as either condition is met:
+#   • an unscreened sentence terminator (.?!) is observed, OR
+#   • the unscreened-suffix has grown past this many chars (smaller =
+#     faster reaction, more API calls; larger = fewer calls, more
+#     audio buffered behind the gate).
+GUARDRAIL_SCREEN_CHAR_BUDGET = 120
+# Hard cap on how long we hold audio waiting for a verdict.  If
+# ApplyGuardrail is slow or unreachable we fail-open after this delay
+# rather than freeze the conversation.  100-300 ms is a typical
+# ApplyGuardrail latency, so 800 ms gives plenty of headroom.
+GUARDRAIL_GATE_TIMEOUT_SEC = 0.8
+
+_SENTENCE_TERMINATOR_RE = re.compile(r'[.!?]\s')
+
+# Shared bedrock-runtime client for ApplyGuardrail / Converse calls.
+# boto3 clients are thread-safe; reuse one per process to avoid the
+# 200-300 ms cold-init cost on every guardrail check.
+_bedrock_runtime_client = boto3.client('bedrock-runtime', region_name=REGION)
+
+
+async def apply_guardrail_to_text(text: str, source: Literal['INPUT', 'OUTPUT']) -> tuple[bool, str]:
+    """Run the configured Bedrock guardrail against a piece of transcript text.
+
+    Nova Sonic's bidirectional streaming API does not accept a guardrail config
+    in its sessionStart event, so we enforce the guardrail out-of-band on
+    finalized transcript events using the standalone ApplyGuardrail API.
+
+    Args:
+        text: User or assistant utterance (final transcript).
+        source: 'INPUT' for user turns, 'OUTPUT' for assistant turns.
+
+    Returns:
+        (intervened, sanitized_text). When the guardrail did not intervene,
+        sanitized_text == text. On any error the call fails open and returns
+        the original text so the conversation continues.
+    """
+    if not text or not text.strip():
+        return False, text
+
+    try:
+        response = await asyncio.to_thread(
+            lambda: _bedrock_runtime_client.apply_guardrail(
+                guardrailIdentifier=GUARDRAIL_ID,
+                guardrailVersion=GUARDRAIL_VERSION,
+                source=source,
+                content=[{'text': {'text': text}}],
+            )
+        )
+    except Exception as e:
+        print(f"[Guardrail] apply_guardrail({source}) failed, failing open: {e}", flush=True)
+        return False, text
+
+    if response.get('action') != 'GUARDRAIL_INTERVENED':
+        return False, text
+
+    outputs = response.get('outputs') or []
+    sanitized = outputs[0]['text'] if outputs and 'text' in outputs[0] else text
+    return True, sanitized
 
 
 def build_qa_system_prompt(persona_name: str, persona_prompt: str, custom_instructions: str, transcript_text: str, session_duration: float) -> str:
@@ -206,47 +276,316 @@ class WebSocketBidiInput(BidiInput):
 
 
 class WebSocketBidiOutput(BidiOutput):
-    """Bridge BidiAgent output events back to the browser WebSocket.
+    """Bridge BidiAgent output events back to the browser WebSocket with a
+    pre-emptive output guardrail (Pattern 1: speculative-transcript gating).
 
-    Converts BidiOutputEvent objects into JSON frames the frontend understands:
-    - audio  -> {"type": "audio", "data": "<base64 PCM>"}
-    - transcript -> {"type": "transcript", "role": ..., "text": ..., "is_partial": ...}
-    - interruption -> {"type": "interruption"}
+    Frame protocol to the browser:
+      audio          -> {"type": "audio", "data": "<base64 PCM>"}
+      transcript     -> {"type": "transcript", "role": ..., "text": ..., "is_partial": ...}
+      interruption   -> {"type": "interruption"}
+      audio_clear    -> {"type": "audio_clear"}             (drop any queued audio)
+      guardrail_intervention -> {"type": "guardrail_intervention", "role": ..., ...}
 
-    Also collects finalized transcript entries for post-session analytics.
+    How the gate works
+    ------------------
+    Nova Sonic emits assistant transcript events tagged generationStage
+    SPECULATIVE *before* it streams the audio chunks that render that
+    text.  We accumulate the speculative text and run ApplyGuardrail
+    against it; while a screening call is in flight we hold any audio
+    chunks behind an asyncio gate.  When the verdict comes back:
+
+      • allowed   → release the buffered audio, reopen the gate
+      • blocked   → drop all buffered audio, mark the turn blocked,
+                    tell the browser to clear its playback queue, send
+                    a corrective directive to the agent.  Subsequent
+                    audio for the same turn keeps getting dropped until
+                    the response completes (BidiResponseCompleteEvent).
+
+    Per-turn state resets on BidiResponseCompleteEvent (assistant turn
+    ended) or BidiInterruptionEvent (user barged in).  The user-input
+    side keeps the original post-hoc enforcement in place since by the
+    time we see a final user transcript Nova Sonic has already started
+    its response — the speculative gate above catches that response.
     """
 
     def __init__(self, websocket: WebSocket):
         self._ws = websocket
         self.transcript_entries: list[dict] = []
+        self._agent: BidiAgent | None = None
+        self._guardrail_tasks: set[asyncio.Task] = set()
+
+        # ── Per-turn output gate state ───────────────────────────────
+        # Open by default; closed while a screening call is in flight.
+        self._gate = asyncio.Event()
+        self._gate.set()
+        # Audio chunks that arrived while the gate was closed.
+        self._pending_audio: deque[str] = deque()
+        # Speculative text accumulated for the current assistant turn.
+        self._speculative_buffer: str = ""
+        # How many chars of _speculative_buffer have already been screened
+        # (so we don't re-check the same prefix repeatedly).
+        self._screened_chars: int = 0
+        # Set true when the current turn was blocked — drop everything
+        # else until the turn completes.
+        self._turn_blocked: bool = False
+        # Lock so only one screening call runs per turn at a time.
+        self._screen_lock = asyncio.Lock()
 
     async def start(self, agent: BidiAgent) -> None:
-        pass
+        self._agent = agent
 
+    # ── Per-turn lifecycle ──────────────────────────────────────────
+    def _reset_turn_state(self) -> None:
+        """Reset the per-turn gate when the assistant turn ends or the
+        user interrupts."""
+        self._gate.set()
+        self._pending_audio.clear()
+        self._speculative_buffer = ""
+        self._screened_chars = 0
+        self._turn_blocked = False
+
+    # ── User-side post-hoc check (input violations) ─────────────────
+    def _spawn_input_guardrail_check(self, text: str) -> None:
+        """Fire-and-forget guardrail enforcement for a finalized USER
+        transcript.  The model has already started responding by the
+        time this resolves, but the speculative gate above catches the
+        response — this just sanitizes the stored transcript and steers
+        the *next* turn back on-topic if the user violated policy."""
+        if not GUARDRAIL_ID or not text or not text.strip():
+            return
+        task = asyncio.create_task(self._run_input_guardrail(text))
+        self._guardrail_tasks.add(task)
+        task.add_done_callback(self._guardrail_tasks.discard)
+
+    async def _run_input_guardrail(self, original_text: str) -> None:
+        try:
+            intervened, sanitized = await apply_guardrail_to_text(original_text, 'INPUT')
+        except Exception as e:
+            print(f"[Guardrail] input check raised, ignoring: {e}", flush=True)
+            return
+
+        if not intervened:
+            return
+
+        print("[Guardrail] intervened on user input", flush=True)
+
+        # Replace the stored transcript so analytics / S3 stay clean.
+        for entry in reversed(self.transcript_entries):
+            if entry['role'] == 'user' and entry['text'] == original_text.strip():
+                entry['text'] = sanitized.strip() or '[content blocked by content policy]'
+                break
+
+        try:
+            await self._ws.send_json({
+                "type": "guardrail_intervention",
+                "role": "user",
+                "sanitized_text": sanitized,
+            })
+        except (WebSocketDisconnect, Exception):
+            pass
+
+        if self._agent is not None:
+            try:
+                await self._agent.send(BidiTextInputEvent(
+                    text=(
+                        "SYSTEM NOTICE: The presenter's last response triggered a "
+                        "content-policy guardrail and was blocked. Briefly and politely "
+                        "acknowledge that you can't engage on that, then ask your next "
+                        "question grounded in the presentation transcript."
+                    ),
+                    role="user",
+                ))
+            except Exception as e:
+                print(f"[Guardrail] failed to inject corrective directive: {e}", flush=True)
+
+    # ── Output-side speculative gate ────────────────────────────────
+    def _should_screen_now(self) -> bool:
+        """Decide whether the unscreened suffix is ripe for a guardrail call."""
+        suffix = self._speculative_buffer[self._screened_chars:]
+        if not suffix:
+            return False
+        if _SENTENCE_TERMINATOR_RE.search(suffix):
+            return True
+        return len(suffix) >= GUARDRAIL_SCREEN_CHAR_BUDGET
+
+    async def _screen_speculative(self) -> None:
+        """Run ApplyGuardrail on everything accumulated for the current
+        turn.  Holds the audio gate closed for the duration of the call
+        and reacts to the verdict."""
+        async with self._screen_lock:
+            text_to_screen = self._speculative_buffer
+            already_screened = self._screened_chars
+            if len(text_to_screen) <= already_screened:
+                return
+
+            # Close the gate while we wait for a verdict.
+            self._gate.clear()
+
+            try:
+                intervened, sanitized = await asyncio.wait_for(
+                    apply_guardrail_to_text(text_to_screen, 'OUTPUT'),
+                    timeout=GUARDRAIL_GATE_TIMEOUT_SEC,
+                )
+            except asyncio.TimeoutError:
+                print(
+                    f"[Guardrail] OUTPUT screen timed out after "
+                    f"{GUARDRAIL_GATE_TIMEOUT_SEC}s, failing open",
+                    flush=True,
+                )
+                # Fail open: release whatever we held back so the user
+                # doesn't experience an indefinite freeze.
+                await self._release_pending_audio()
+                self._screened_chars = len(text_to_screen)
+                self._gate.set()
+                return
+            except Exception as e:
+                print(f"[Guardrail] OUTPUT screen raised, failing open: {e}", flush=True)
+                await self._release_pending_audio()
+                self._screened_chars = len(text_to_screen)
+                self._gate.set()
+                return
+
+            if intervened:
+                await self._handle_blocked_turn(sanitized)
+                return
+
+            # Allowed — record what we screened and release buffered audio.
+            self._screened_chars = len(text_to_screen)
+            await self._release_pending_audio()
+            self._gate.set()
+
+    async def _release_pending_audio(self) -> None:
+        """Flush every audio chunk that arrived while the gate was closed."""
+        while self._pending_audio:
+            chunk = self._pending_audio.popleft()
+            try:
+                await self._ws.send_json({"type": "audio", "data": chunk})
+            except (WebSocketDisconnect, Exception):
+                # Stop draining if the client is gone.
+                self._pending_audio.clear()
+                return
+
+    async def _handle_blocked_turn(self, sanitized: str) -> None:
+        """The assistant's planned utterance violated policy.  Drop any
+        buffered audio for this turn, tell the browser to flush its
+        playback queue, and ask the agent to retry with a safe
+        redirect."""
+        print(
+            f"[Guardrail] OUTPUT blocked (speculative='{self._speculative_buffer[:120]}...')",
+            flush=True,
+        )
+        self._turn_blocked = True
+        self._pending_audio.clear()
+        # Keep the gate closed for the rest of this turn so any audio
+        # that arrives after the block is dropped on receipt.
+        self._gate.clear()
+
+        try:
+            await self._ws.send_json({"type": "audio_clear"})
+        except (WebSocketDisconnect, Exception):
+            pass
+
+        try:
+            await self._ws.send_json({
+                "type": "guardrail_intervention",
+                "role": "assistant",
+                "sanitized_text": sanitized,
+            })
+        except (WebSocketDisconnect, Exception):
+            pass
+
+        # Steer the agent so its next utterance is the safe redirect.
+        if self._agent is not None:
+            try:
+                await self._agent.send(BidiTextInputEvent(
+                    text=(
+                        "SYSTEM NOTICE: Your previous response was blocked by a "
+                        "content-policy guardrail and was not delivered to the "
+                        "presenter. Briefly acknowledge that you can't go down that "
+                        "path, then ask a different question grounded in the "
+                        "presentation transcript. Do not retry the blocked content."
+                    ),
+                    role="user",
+                ))
+            except Exception as e:
+                print(f"[Guardrail] failed to send redirect directive: {e}", flush=True)
+
+    # ── Strands callback ────────────────────────────────────────────
     async def __call__(self, event: BidiOutputEvent) -> None:
         try:
             if isinstance(event, BidiAudioStreamEvent):
-                await self._ws.send_json({"type": "audio", "data": event.audio})
+                if self._turn_blocked:
+                    # Whole turn is dead; drop every chunk silently.
+                    return
+                if self._gate.is_set():
+                    await self._ws.send_json({"type": "audio", "data": event.audio})
+                else:
+                    # Buffered behind the gate until the screening call
+                    # for this turn returns.
+                    self._pending_audio.append(event.audio)
 
             elif isinstance(event, BidiTranscriptStreamEvent):
+                # Always forward the transcript to the UI for live display.
+                # We mark assistant transcripts that haven't been screened
+                # yet as partial so the UI can render them tentatively.
                 await self._ws.send_json({
                     "type": "transcript",
                     "role": event.role,
                     "text": event.text,
                     "is_partial": not event.is_final,
                 })
-                # Collect finalized transcripts for analytics
+
+                # Speculative assistant text — feed the gate.  Skip if
+                # the turn is already blocked.
+                if (
+                    event.role == "assistant"
+                    and not event.is_final
+                    and not self._turn_blocked
+                    and event.text
+                ):
+                    self._speculative_buffer += event.text
+                    if self._should_screen_now():
+                        # Run screening in the background so the Strands
+                        # event loop isn't blocked.
+                        asyncio.create_task(self._screen_speculative())
+
+                # Final user transcript: collect for analytics and run
+                # the post-hoc INPUT check (post-hoc here is fine — the
+                # speculative gate handles assistant output).
                 if event.is_final and event.text and event.text.strip():
-                    self.transcript_entries.append({
-                        "role": event.role,
-                        "text": event.text.strip(),
-                    })
+                    if event.role == "user" or not self._turn_blocked:
+                        self.transcript_entries.append({
+                            "role": event.role,
+                            "text": event.text.strip(),
+                        })
+                    if event.role == "user":
+                        self._spawn_input_guardrail_check(event.text.strip())
 
             elif isinstance(event, BidiInterruptionEvent):
-                await self._ws.send_json({"type": "interruption"})
+                # User barged in — abandon any in-flight gate, drop
+                # buffered audio (Nova Sonic stops generating it anyway),
+                # and let the next turn start fresh.
+                self._reset_turn_state()
+                try:
+                    await self._ws.send_json({"type": "interruption"})
+                except (WebSocketDisconnect, Exception):
+                    pass
 
             elif isinstance(event, BidiResponseCompleteEvent):
-                pass
+                # Assistant turn complete.  If we never had to screen
+                # (short reply that didn't trip the budget) do a final
+                # screen now on the leftover suffix so the persisted
+                # transcript is sanitized.  Then reset for the next turn.
+                if (
+                    not self._turn_blocked
+                    and self._speculative_buffer
+                    and self._screened_chars < len(self._speculative_buffer)
+                ):
+                    try:
+                        await self._screen_speculative()
+                    except Exception as e:
+                        print(f"[Guardrail] tail screen failed: {e}", flush=True)
+                self._reset_turn_state()
 
         except WebSocketDisconnect:
             pass
@@ -254,7 +593,17 @@ class WebSocketBidiOutput(BidiOutput):
             print(f"[Warning] Failed to send output event: {e}", flush=True)
 
     async def stop(self) -> None:
-        pass
+        # Drain any in-flight INPUT-side guardrail tasks so analytics
+        # see the sanitized transcript even when the session ends right
+        # after a violation.
+        if self._guardrail_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*self._guardrail_tasks, return_exceptions=True),
+                    timeout=2.0,
+                )
+            except asyncio.TimeoutError:
+                pass
 
 
 async def load_persona(persona_id: str) -> dict:
@@ -427,7 +776,7 @@ Use a {communication_style} tone. Be concise — no long paragraphs."""
         "toolChoice": {"tool": {"name": "provide_qa_feedback"}}
     }
 
-    bedrock = boto3.client('bedrock-runtime', region_name=REGION)
+    bedrock = _bedrock_runtime_client
     response = await asyncio.to_thread(
         lambda: bedrock.converse(
             modelId=QA_ANALYTICS_MODEL_ID,

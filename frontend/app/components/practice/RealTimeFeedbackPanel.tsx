@@ -1,7 +1,7 @@
 import React from 'react';
 import { Volume2, VolumeX, Eye, Mic } from 'lucide-react';
 import { VocalVarietyMetrics } from '@/app/hooks/useVocalVariety';
-import { ANALYSIS_CONFIG } from '@/app/config/config';
+import { ANALYSIS_CONFIG, PersonaBestPractices, DEFAULT_BEST_PRACTICES } from '@/app/config/config';
 import InfoTooltip from '../InfoTooltip';
 
 interface RealTimeFeedbackPanelProps {
@@ -17,6 +17,8 @@ interface RealTimeFeedbackPanelProps {
     pauses: number;
   };
   vocalVariety: VocalVarietyMetrics;
+  /** Resolved best-practice thresholds (persona + per-session override). */
+  targets?: PersonaBestPractices;
 }
 
 // Color helper for monotone score (inverted — high = bad)
@@ -33,7 +35,16 @@ export default function RealTimeFeedbackPanel({
   isDistracted,
   metrics,
   vocalVariety,
+  targets = DEFAULT_BEST_PRACTICES,
 }: RealTimeFeedbackPanelProps) {
+  // Effective targets — fall back to defaults for any missing fields so the
+  // UI never shows stale/hardcoded numbers.
+  const wpmMin = targets.wpm?.min ?? DEFAULT_BEST_PRACTICES.wpm.min;
+  const wpmMax = targets.wpm?.max ?? DEFAULT_BEST_PRACTICES.wpm.max;
+  const eyeMin = targets.eyeContact?.min ?? DEFAULT_BEST_PRACTICES.eyeContact.min;
+  const fillerMax = targets.fillerWords?.max ?? DEFAULT_BEST_PRACTICES.fillerWords.max;
+  const pausesMin = targets.pauses?.min ?? DEFAULT_BEST_PRACTICES.pauses.min;
+
   return (
     <div className="animate-fade-in">
       <div className="flex items-center justify-between mb-3">
@@ -53,9 +64,9 @@ export default function RealTimeFeedbackPanel({
             <span className="font-semibold text-gray-900">{isRecording ? metrics.speakingPace : '--'} wpm</span>
           </div>
           <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
-            <div className="h-full bg-green-500 transition-all duration-500" style={{ width: isRecording ? `${Math.min(100, Math.round((metrics.speakingPace / 180) * 100))}%` : '0%' }} />
+            <div className="h-full bg-green-500 transition-all duration-500" style={{ width: isRecording ? `${Math.min(100, Math.round((metrics.speakingPace / Math.max(1, wpmMax * 1.125)) * 100))}%` : '0%' }} />
           </div>
-          <div className="mt-0.5 text-[10px] text-gray-400">Target: 130-160 wpm</div>
+          <div className="mt-0.5 text-[10px] text-gray-400">Target: {wpmMin}-{wpmMax} wpm</div>
         </div>
 
         {/* Metric: Volume Level */}
@@ -118,6 +129,7 @@ export default function RealTimeFeedbackPanel({
               {isRecording ? (!isDistracted ? "Great! Maintaining eye contact." : "Check camera!") : "Waiting to start..."}
             </span>
           </div>
+          <div className="mt-0.5 text-[10px] text-gray-400">Target: ≥ {eyeMin}% of the time</div>
         </div>
 
         {/* Counter Metrics */}
@@ -125,12 +137,12 @@ export default function RealTimeFeedbackPanel({
           <div className="rounded-lg border border-gray-100 p-2.5">
             <div className="text-[11px] text-gray-500 2xl:text-xs">Filler Words <InfoTooltip text="Counts filler words like 'um', 'uh', 'like', and 'you know'. Fewer is better." size={12} /></div>
             <div className="mt-0.5 text-lg font-bold text-green-600 2xl:text-xl">{isRecording ? metrics.fillerWords : '--'}</div>
-            <div className="text-[10px] text-gray-400">um, uh, like, you know</div>
+            <div className="text-[10px] text-gray-400">Target: ≤ {fillerMax} per 30s</div>
           </div>
           <div className="rounded-lg border border-gray-100 p-2.5">
             <div className="text-[11px] text-gray-500 2xl:text-xs">Pauses <InfoTooltip text="Strategic pauses, checks for Silences of more than 3 seconds gap." size={12} /></div>
             <div className="mt-0.5 text-lg font-bold text-gray-900 2xl:text-xl">{isRecording ? metrics.pauses : '--'}</div>
-            <div className="text-[10px] text-gray-400">Strategic pauses detected</div>
+            <div className="text-[10px] text-gray-400">Target: ≥ {pausesMin} per 30s</div>
           </div>
         </div>
 

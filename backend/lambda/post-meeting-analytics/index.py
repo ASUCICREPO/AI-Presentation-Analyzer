@@ -125,15 +125,23 @@ _FALLBACK_BP = {
     'pauses': {'min': 1},
 }
 
-def _resolve_best_practices(persona):
-    """Pull bestPractices from the persona; fall back to defaults per field."""
+def _resolve_best_practices(persona, override=None):
+    """Merge persona.bestPractices with optional per-session override.
+
+    Priority per field: override → persona → fallback default.
+    `override` is the `bestPracticesOverride` dict from the manifest
+    (may be None or partial).
+    """
     persona_bp = persona.get('bestPractices', {}) if persona else {}
+    override = override or {}
     resolved = {}
     for key, default in _FALLBACK_BP.items():
+        merged = dict(default)
         if key in persona_bp and isinstance(persona_bp[key], dict):
-            resolved[key] = {**default, **persona_bp[key]}
-        else:
-            resolved[key] = dict(default)
+            merged.update(persona_bp[key])
+        if key in override and isinstance(override[key], dict):
+            merged.update(override[key])
+        resolved[key] = merged
     return resolved
 
 def _window_timestamp(window_number):
@@ -144,14 +152,15 @@ def _window_timestamp(window_number):
     end = f"{end_secs // 60:02d}:{end_secs % 60:02d}"
     return f"{start} - {end}"
 
-def generate_timestamped_feedback(session_analytics, persona=None):
+def generate_timestamped_feedback(session_analytics, persona=None, override=None):
     """Check each 30-second window against the persona's best-practice
-    thresholds. Returns events only where a metric is below standard."""
+    thresholds (with optional per-session override). Returns events only
+    where a metric is below standard."""
     windows = session_analytics.get('windows', [])
     if not windows:
         return []
 
-    bp = _resolve_best_practices(persona)
+    bp = _resolve_best_practices(persona, override)
     events = []
 
     for w in windows:
@@ -182,7 +191,8 @@ def generate_timestamped_feedback(session_analytics, persona=None):
 # ─── Bedrock feedback generation (prompt-based JSON, no outputConfig) ─────────
 
 def generate_feedback(persona, transcript, persona_customization=None,
-                      pdf_bytes=None, session_analytics=None):
+                      pdf_bytes=None, session_analytics=None,
+                      best_practices_override=None):
     persona_name = persona.get('name', persona.get('title', 'a professional evaluator'))
     description = persona.get('description', '')
     communication_style = persona.get('communicationStyle', '')
@@ -208,6 +218,25 @@ def generate_feedback(persona, transcript, persona_customization=None,
         f"- Expertise: {expertise}",
         f"- Key Priorities: {priorities_text}",
     ]
+
+    # Surface effective thresholds (persona defaults + any per-session override)
+    # so deliveryFeedback evaluates against the same numbers the UI uses.
+    effective_bp = _resolve_best_practices(persona, best_practices_override)
+    parts.extend([
+        "",
+        "Delivery Thresholds (use these as the standard for deliveryFeedback):",
+        f"- Speaking Pace target: {effective_bp['wpm']['min']}-{effective_bp['wpm']['max']} wpm",
+        f"- Eye Contact minimum: {effective_bp['eyeContact']['min']}%",
+        f"- Filler Words: {effective_bp['fillerWords']['max']} or fewer per 30s window",
+        f"- Strategic Pauses: {effective_bp['pauses']['min']} or more per 30s window",
+    ])
+
+    if best_practices_override:
+        parts.append(
+            "Note: the listed thresholds reflect a per-session adjustment the"
+            " presenter chose for THIS session — evaluate against these, not"
+            " the persona's stored defaults."
+        )
 
     if persona_customization:
         parts.extend(["", "Additional Custom Instructions:", persona_customization])
@@ -266,6 +295,19 @@ def generate_feedback(persona, transcript, persona_customization=None,
         " volume, eyeContact, fillerWords, pauses — each EXACTLY 2 sentences"
         " (observation + one tip), under 30 words.",
         "",
+    ])
+
+    if pdf_bytes:
+        parts.extend([
+            "slideFeedback: Since a presentation PDF was provided, return EXACTLY 3-5"
+            " observations about the slides. Each needs a title (under 8 words) and"
+            " description (2-3 sentences, under 60 words). Focus on visual design,"
+            " text density, layout clarity, consistency, readability, and use of"
+            " visuals/charts. Be specific — reference slide numbers or sections when possible.",
+            "",
+        ])
+
+    parts.extend([
         f"Tone: {communication_style}. Lead with strengths. Be honest —"
         " praise confidently when earned, critique directly when needed. Be concise.",
     ])
@@ -312,6 +354,18 @@ def generate_feedback(persona, transcript, persona_customization=None,
                                         }
                                     },
                                     "required": ["overallAssessment", "contentStrengths", "deliveryFeedback"]
+                                },
+                                "slideFeedback": {
+                                    "type": "array",
+                                    "description": "Feedback on slide design and visuals. Only populate if a presentation PDF was provided.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "title": {"type": "string"},
+                                            "description": {"type": "string"}
+                                        },
+                                        "required": ["title", "description"]
+                                    }
                                 }
                             },
                             "required": ["keyRecommendations", "performanceSummary"]
@@ -427,6 +481,11 @@ def lambda_handler(event, context):
             if not persona_id:
                 raise ValueError("Persona not found in manifest")
 
+            # Per-session override (may be null/missing for older manifests)
+            best_practices_override = manifest.get('bestPracticesOverride') or None
+            if best_practices_override:
+                print(f"Per-session bestPractices override: {json.dumps(best_practices_override)}")
+
             # Persona
             persona = get_persona(persona_id)
             if not persona:
@@ -469,12 +528,15 @@ def lambda_handler(event, context):
             feedback = generate_feedback(
                 persona, transcript, persona_customization,
                 pdf_bytes, session_analytics,
+                best_practices_override=best_practices_override,
             )
 
-            # Generate timestamped feedback from window data + persona thresholds
+            # Generate timestamped feedback from window data + (possibly overridden) thresholds
             timestamped = []
             if session_analytics:
-                timestamped = generate_timestamped_feedback(session_analytics, persona)
+                timestamped = generate_timestamped_feedback(
+                    session_analytics, persona, override=best_practices_override,
+                )
 
             result = {
                 'status': 'completed',

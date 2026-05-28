@@ -9,8 +9,8 @@ import { useVideoRecording } from '../hooks/useVideoRecording';
 import { useDetailedMetrics } from '../hooks/useDetailedMetrics';
 import { useSessionManifest } from '../hooks/useSessionManifest';
 import { useMicCalibration } from '../hooks/useMicCalibration';
-import { uploadJsonToS3, pollAnalytics, AIFeedbackResponse } from '../services/api';
-import { ANALYSIS_CONFIG, PRESENTATION_LIMITS, DEFAULT_TIME_LIMIT_SEC } from '../config/config';
+import { uploadJsonToS3, pollAnalytics, AIFeedbackResponse, getPresentationPdfUrl } from '../services/api';
+import { ANALYSIS_CONFIG, PRESENTATION_LIMITS, DEFAULT_TIME_LIMIT_SEC, DEFAULT_BEST_PRACTICES, PersonaBestPractices } from '../config/config';
 
 import { toast } from 'sonner';
 
@@ -31,14 +31,24 @@ interface PracticeSessionProps {
   timeLimitSec?: number;
   hasPresentationPdf?: boolean;
   hasPersonaCustomization?: boolean;
+  /** Per-session override of persona best-practice thresholds. */
+  bestPracticesOverride?: Partial<PersonaBestPractices> | null;
+  /** Fully-resolved best-practice thresholds for this session
+   *  (DEFAULTS ← persona.bestPractices ← per-session override). */
+  effectiveBestPractices?: PersonaBestPractices;
+  /** Initial state of the in-session real-time feedback toggle. */
+  realtimeFeedbackDefault?: boolean;
   onBack: () => void;
   onComplete: (sessionData: SessionAnalytics, analyticsPromise: Promise<AIFeedbackResponse | null>) => void;
   exitSessionRef?: MutableRefObject<(() => void) | null>;
 }
 
-export default function PracticeSession({ personaTitle, personaId, sessionId, timeLimitSec, hasPresentationPdf, hasPersonaCustomization, onBack, onComplete, exitSessionRef }: PracticeSessionProps) {
+export default function PracticeSession({ personaTitle, personaId, sessionId, timeLimitSec, hasPresentationPdf, hasPersonaCustomization, bestPracticesOverride, effectiveBestPractices, realtimeFeedbackDefault, onBack, onComplete, exitSessionRef }: PracticeSessionProps) {
   // Resolve the effective time cap for this session
   const maxDuration = timeLimitSec ?? DEFAULT_TIME_LIMIT_SEC;
+  // Fall back to generic defaults if the parent didn't compute the
+  // resolved thresholds (defensive — page.tsx always provides this).
+  const targets: PersonaBestPractices = effectiveBestPractices ?? DEFAULT_BEST_PRACTICES;
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [timer, setTimer] = useState(0);
@@ -77,8 +87,22 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
   const [calibrationStep, setCalibrationStep] = useState<1 | 2>(1);
   const [showMesh, setShowMesh] = useState(false);
 
-  // Runtime toggle for real-time feedback panel (config provides default)
-  const [showFeedback, setShowFeedback] = useState(ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK);
+  // PDF slide viewer
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [showSlides, setShowSlides] = useState(true);
+
+  // Fetch PDF URL on mount if presentation was uploaded
+  useEffect(() => {
+    if (hasPresentationPdf) {
+      getPresentationPdfUrl(sessionId).then(setPdfUrl);
+    }
+  }, [hasPresentationPdf, sessionId]);
+
+  // Runtime toggle for real-time feedback panel — default comes from the
+  // persona-step toggle (with config fallback). User can flip during session.
+  const [showFeedback, setShowFeedback] = useState(
+    realtimeFeedbackDefault ?? ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK,
+  );
 
   // Keep loop refs in sync with state so the rAF loop always sees fresh values
   // without needing to be recreated (which caused dual-loop races).
@@ -573,6 +597,8 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
       manifest.create({
         hasPresentationPdf: hasPresentationPdf ?? false,
         hasPersonaCustomization: hasPersonaCustomization ?? false,
+        bestPracticesOverride: bestPracticesOverride ?? null,
+        realtimeFeedbackDefault: realtimeFeedbackDefault ?? ANALYSIS_CONFIG.SHOW_REALTIME_FEEDBACK,
       });
 
       // Start both audio analysis and vocal variety in parallel
@@ -746,6 +772,7 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
                     isDistracted={gazeDisplayDistracted}
                     metrics={feedbackMetrics}
                     vocalVariety={vocalVariety.metrics}
+                    targets={targets}
                   />
                 )}
               </div>
@@ -785,6 +812,31 @@ export default function PracticeSession({ personaTitle, personaId, sessionId, ti
           isRecording={isRecording && !isPaused}
           isTranscribing={isTranscribing && isRecording && !isPaused}
         />
+      )}
+
+      {/* 5. Slide Viewer — shown when PDF was uploaded */}
+      {pdfUrl && (
+        <div className="mt-4 2xl:mt-6">
+          <button
+            onClick={() => setShowSlides(!showSlides)}
+            className="mb-2 flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors font-sans"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-transform ${showSlides ? 'rotate-90' : ''}`}>
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+            {showSlides ? 'Hide PDF' : 'View PDF'}
+          </button>
+          {showSlides && (
+            <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+              <iframe
+                src={pdfUrl}
+                className="w-full"
+                style={{ height: '500px' }}
+                title="Presentation Slides"
+              />
+            </div>
+          )}
+        </div>
       )}
 
     </div>

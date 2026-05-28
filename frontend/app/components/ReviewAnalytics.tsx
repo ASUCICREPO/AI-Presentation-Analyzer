@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { SessionAnalytics } from '../hooks/useSessionAnalytics';
-import { AIFeedbackResponse, QAAnalyticsResponse, getVideoPlaybackUrl } from '../services/api';
+import { AIFeedbackResponse, QAAnalyticsResponse, getVideoPlaybackUrl, getPresentationPdfUrl, fetchTranscript } from '../services/api';
 import {
   Download,
   TrendingUp,
@@ -44,12 +44,25 @@ interface ReviewAnalyticsProps {
   aiFeedback: AIFeedbackResponse | null;
   qaAnalytics: QAAnalyticsResponse | null;
   persona: Persona | null;
+  /** Per-session override of persona best-practice thresholds. */
+  bestPracticesOverride?: Partial<PersonaBestPractices> | null;
   onBackToStart: () => void;
 }
 
-function resolveBestPractices(persona: Persona | null): PersonaBestPractices {
-  if (!persona?.bestPractices) return DEFAULT_BEST_PRACTICES;
-  return { ...DEFAULT_BEST_PRACTICES, ...persona.bestPractices };
+function resolveBestPractices(
+  persona: Persona | null,
+  override?: Partial<PersonaBestPractices> | null,
+): PersonaBestPractices {
+  const personaBp = persona?.bestPractices
+    ? { ...DEFAULT_BEST_PRACTICES, ...persona.bestPractices }
+    : DEFAULT_BEST_PRACTICES;
+  if (!override) return personaBp;
+  return {
+    wpm: { ...personaBp.wpm, ...(override.wpm ?? {}) },
+    eyeContact: { ...personaBp.eyeContact, ...(override.eyeContact ?? {}) },
+    fillerWords: { ...personaBp.fillerWords, ...(override.fillerWords ?? {}) },
+    pauses: { ...personaBp.pauses, ...(override.pauses ?? {}) },
+  };
 }
 
 function resolveScoringWeights(persona: Persona | null): PersonaScoringWeights {
@@ -71,12 +84,12 @@ function buildBestPracticeChecks(bp: PersonaBestPractices) {
     },
     fillers: {
       label: bp.fillerWords.label ?? 'Filler Words',
-      range: `${bp.fillerWords.max} or fewer`,
+      range: `${bp.fillerWords.max} or fewer per window`,
       check: (v: number) => v <= bp.fillerWords.max,
     },
     pauses: {
       label: bp.pauses.label ?? 'Strategic Pauses',
-      range: `${bp.pauses.min}+ pauses`,
+      range: `${bp.pauses.min}+ per window`,
       check: (v: number) => v >= bp.pauses.min,
     },
   };
@@ -105,7 +118,7 @@ function ScoreRing({ score }: { score: number }) {
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-4xl font-bold text-gray-900">{score}</span>
+        <span className="text-3xl font-semibold text-gray-900">{Math.round(score)}</span>
         <span className="text-xs text-gray-500">Overall Score</span>
       </div>
     </div>
@@ -121,21 +134,25 @@ function MetricBar({ value, max, color }: { value: number; max: number; color: s
   );
 }
 
-export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, persona, onBackToStart }: ReviewAnalyticsProps) {
+export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, persona, bestPracticesOverride, onBackToStart }: ReviewAnalyticsProps) {
   const { windows } = sessionData;
   const [showWindows, setShowWindows] = useState(false);
   const [dismissedBanner, setDismissedBanner] = useState(false);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [isVideoDownloading, setIsVideoDownloading] = useState(false);
+  const [isTranscriptDownloading, setIsTranscriptDownloading] = useState(false);
+  const [isSlidesDownloading, setIsSlidesDownloading] = useState(false);
+  const [slidesUrl, setSlidesUrl] = useState<string | null>(null);
   const videoRef = useRef<CustomVideoPlayerHandle>(null);
 
   // Fetch video playback URL on mount
   useEffect(() => {
     getVideoPlaybackUrl(sessionData.sessionId).then(setVideoUrl);
+    getPresentationPdfUrl(sessionData.sessionId).then(setSlidesUrl);
   }, [sessionData.sessionId]);
 
-  const bp = resolveBestPractices(persona);
+  const bp = resolveBestPractices(persona, bestPracticesOverride);
   const weights = resolveScoringWeights(persona);
   const BEST_PRACTICES = buildBestPracticeChecks(bp);
 
@@ -145,8 +162,10 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
     const avgVolume = Math.round(windows.reduce((s, w) => s + w.volumeLevel.average, 0) / windows.length);
     const avgEyeContact = Math.round(windows.reduce((s, w) => s + w.eyeContactScore, 0) / windows.length);
     const totalFillers = windows.reduce((s, w) => s + w.fillerWords, 0);
+    const avgFillersPerWindow = windows.length > 0 ? Math.ceil(totalFillers / windows.length) : 0;
     const totalPauses = windows.reduce((s, w) => s + w.pauses, 0);
-    return { avgWpm, avgVolume, avgEyeContact, totalFillers, totalPauses };
+    const avgPausesPerWindow = windows.length > 0 ? Math.ceil(totalPauses / windows.length) : 0;
+    return { avgWpm, avgVolume, avgEyeContact, totalFillers, avgFillersPerWindow, totalPauses, avgPausesPerWindow };
   })();
 
   const overallScore = (() => {
@@ -155,10 +174,10 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
     const paceScore = BEST_PRACTICES.wpm.check(stats.avgWpm) ? 100
       : stats.avgWpm >= bp.wpm.min - wpmOuter && stats.avgWpm <= bp.wpm.max + wpmOuter ? 70 : 40;
     const eyeScore = Math.min(stats.avgEyeContact, 100);
-    const fillerScore = stats.totalFillers <= bp.fillerWords.max ? 100
-      : stats.totalFillers <= bp.fillerWords.max * 2 ? 70 : 40;
-    const pauseScore = stats.totalPauses >= bp.pauses.min ? 100
-      : stats.totalPauses >= Math.floor(bp.pauses.min / 2) ? 70 : 40;
+    const fillerScore = stats.avgFillersPerWindow <= bp.fillerWords.max ? 100
+      : stats.avgFillersPerWindow <= bp.fillerWords.max * 2 ? 70 : 40;
+    const pauseScore = stats.avgPausesPerWindow >= bp.pauses.min ? 100
+      : stats.avgPausesPerWindow >= Math.floor(bp.pauses.min / 2) ? 70 : 40;
     return Math.round(
       paceScore * weights.pace +
       eyeScore * weights.eyeContact +
@@ -245,6 +264,56 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
     }
   };
 
+  const handleDownloadTranscript = async () => {
+    if (isTranscriptDownloading) return;
+    setIsTranscriptDownloading(true);
+    try {
+      const data = await fetchTranscript(sessionData.sessionId);
+      if (!data || !data.transcripts || data.transcripts.length === 0) {
+        console.error('No transcript data available');
+        return;
+      }
+      const text = data.transcripts
+        .filter((t) => t.isFinal)
+        .map((t) => t.text)
+        .join(' ');
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `transcript_${sessionData.sessionId}.txt`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Transcript download failed:', err);
+    } finally {
+      setIsTranscriptDownloading(false);
+    }
+  };
+
+  const handleDownloadSlides = async () => {
+    if (isSlidesDownloading || !slidesUrl) return;
+    setIsSlidesDownloading(true);
+    try {
+      const res = await fetch(slidesUrl);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `presentation_${sessionData.sessionId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Slides download failed:', err);
+    } finally {
+      setIsSlidesDownloading(false);
+    }
+  };
+
   return (
     <div className="mx-auto w-full max-w-[1400px] px-4 py-6 sm:px-6">
       {/* No-AI Banner */}
@@ -301,6 +370,28 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
             </button>
           )}
           <button
+            onClick={handleDownloadTranscript}
+            disabled={isTranscriptDownloading}
+            className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            {isTranscriptDownloading
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Download className="h-4 w-4" />}
+            {isTranscriptDownloading ? 'Downloading...' : 'Download Transcript'}
+          </button>
+          {slidesUrl && (
+            <button
+              onClick={handleDownloadSlides}
+              disabled={isSlidesDownloading}
+              className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50"
+            >
+              {isSlidesDownloading
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Download className="h-4 w-4" />}
+              {isSlidesDownloading ? 'Downloading...' : 'Download Slides'}
+            </button>
+          )}
+          <button
             onClick={onBackToStart}
             className="flex items-center gap-2 rounded-lg bg-maroon px-4 py-2 text-white hover:bg-maroon/90 transition-colors"
           >
@@ -347,7 +438,7 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
                     <AlertTriangle className="h-3.5 w-3.5" /> Improve eye contact
                   </span>
                 )}
-                {BEST_PRACTICES.fillers.check(stats.totalFillers) && (
+                {BEST_PRACTICES.fillers.check(stats.avgFillersPerWindow) && (
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-800">
                     <CheckCircle2 className="h-3.5 w-3.5" /> Minimal fillers
                   </span>
@@ -509,8 +600,8 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
               <div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="flex items-center gap-1.5 font-medium text-gray-700"><MessageCircle className="h-4 w-4 text-orange-500" />Filler Words</span>
-                  <span className={`font-bold ${stats.totalFillers <= bp.fillerWords.max ? 'text-green-600' : stats.totalFillers <= bp.fillerWords.max * 2 ? 'text-yellow-600' : 'text-red-600'}`}>
-                    {stats.totalFillers} detected
+                  <span className={`font-bold ${stats.avgFillersPerWindow <= bp.fillerWords.max ? 'text-green-600' : stats.avgFillersPerWindow <= bp.fillerWords.max * 2 ? 'text-yellow-600' : 'text-red-600'}`}>
+                    {stats.avgFillersPerWindow}/window (avg)
                   </span>
                 </div>
                 {aiFeedback && (
@@ -675,8 +766,8 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
                 {[
                   { key: 'wpm' as const, value: stats.avgWpm, display: `${stats.avgWpm} wpm` },
                   { key: 'eyeContact' as const, value: stats.avgEyeContact, display: `${stats.avgEyeContact}%` },
-                  { key: 'fillers' as const, value: stats.totalFillers, display: `${stats.totalFillers}` },
-                  { key: 'pauses' as const, value: stats.totalPauses, display: `${stats.totalPauses}` },
+                  { key: 'fillers' as const, value: stats.avgFillersPerWindow, display: `${stats.avgFillersPerWindow}/window` },
+                  { key: 'pauses' as const, value: stats.avgPausesPerWindow, display: `${stats.avgPausesPerWindow}/window` },
                 ].map((row) => {
                   const bp = BEST_PRACTICES[row.key];
                   const passing = bp.check(row.value);
@@ -755,6 +846,24 @@ export default function ReviewAnalytics({ sessionData, aiFeedback, qaAnalytics, 
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Slide Feedback */}
+      {aiFeedback?.slideFeedback && aiFeedback.slideFeedback.length > 0 && (
+        <div className="mb-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+          <h2 className="mb-1 text-lg font-semibold text-gray-900">
+            Slide Feedback <InfoTooltip text="AI-generated feedback on your slide design, layout, and visual presentation based on the uploaded PDF." />
+          </h2>
+          <p className="mb-4 text-sm text-gray-500">Observations on your slide design and visual presentation</p>
+          <div className="space-y-3">
+            {aiFeedback.slideFeedback.map((item, i) => (
+              <div key={i} className="rounded-lg border border-gray-100 bg-gray-50 p-4">
+                <h3 className="text-sm font-semibold text-gray-900">{item.title}</h3>
+                <p className="mt-1 text-sm leading-relaxed text-gray-700">{item.description}</p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
