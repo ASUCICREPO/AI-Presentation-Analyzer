@@ -177,7 +177,7 @@ export default function TutorialModal({ isOpen, onClose, userName }: TutorialMod
                             <div className="rounded-xl border border-gray-200 p-4">
                                 <p className="mb-2 text-sm font-semibold text-gray-900">Supported File Types:</p>
                                 <div className="flex gap-2">
-                                    {['.pdf', '.pptx', '.docx', '.txt'].map(t => (
+                                    {['.pdf'].map(t => (
                                         <span key={t} className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs text-gray-600">{t}</span>
                                     ))}
                                 </div>

@@ -2,6 +2,8 @@
 
 An AI-powered presentation coaching tool that lets users record or upload their presentation, receive a live voice-based Q&A session with a configurable AI persona, and then review detailed post-session analytics — all built on a fully serverless AWS architecture.
 
+**Live App:** [https://master.dgah1op5xbdt6.amplifyapp.com](https://master.dgah1op5xbdt6.amplifyapp.com)
+
 ---
 
 ## Visual Demo
