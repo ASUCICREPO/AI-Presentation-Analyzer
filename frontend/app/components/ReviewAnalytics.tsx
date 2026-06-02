@@ -118,7 +118,6 @@ function ScoreRing({ score }: { score: number }) {
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-3xl font-semibold text-gray-900">{Math.round(score)}</span>
         <span className="text-xs text-gray-500">Overall Score</span>
       </div>
     </div>
